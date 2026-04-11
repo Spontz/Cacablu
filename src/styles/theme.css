@@ -1,0 +1,14 @@
+:root {
+  color-scheme: dark;
+  --app-bg: #121212;
+  --panel-bg: #1a1f24;
+  --panel-border: #2b333b;
+  --panel-muted: #8c99a5;
+  --panel-text: #f1f5f7;
+  --accent: #31c48d;
+  --accent-soft: rgba(49, 196, 141, 0.16);
+  --menu-bg: #171b20;
+  --menu-hover: #24303b;
+  --shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+  --font-ui: "Segoe UI", "Helvetica Neue", sans-serif;
+}
