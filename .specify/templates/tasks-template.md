@@ -10,7 +10,10 @@ description: "Task list template for feature implementation"
 
 **Validation**: Every story MUST include manual visual validation. Unit tests and
 compile/lint checks MUST be added when they protect logic or browser code
-changed by the feature.
+changed by the feature. If the feature is meant to work without a server, tasks
+MUST include explicit validation of the local/static execution path. If the
+feature depends on File System Access API support, tasks MUST validate that
+assumption explicitly.
 
 **Organization**: Tasks are grouped by user story to enable independent
 implementation and validation of each story.

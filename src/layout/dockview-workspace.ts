@@ -89,6 +89,11 @@ export function createDockviewWorkspace(options: WorkspaceOptions): DockviewWork
       });
 
       applyDefaultLayout();
+
+      const timelinePanel = dockview.getGroupPanel('timeline');
+      if (timelinePanel) {
+        dockview.setActivePanel(timelinePanel);
+      }
     },
 
     resetLayout(): void {

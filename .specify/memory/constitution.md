@@ -1,10 +1,10 @@
 <!--
 Sync Impact Report
-- Version change: 1.0.0 -> 1.1.0
+- Version change: 1.1.1 -> 1.2.0
 - Modified principles:
   - Template Principle 1 -> I. Browser-Only Static Runtime
   - Template Principle 2 -> II. Real-Time Interaction First
-  - Template Principle 3 -> III. Broad Modern Browser Compatibility
+  - Template Principle 3 -> III. File System Access Browser Compatibility
   - Template Principle 4 -> IV. Understandable Code as a Product Requirement
   - Template Principle 5 -> V. Explicit Local Engine Contract
 - Added sections:
@@ -13,9 +13,9 @@ Sync Impact Report
 - Removed sections:
   - None
 - Templates requiring updates:
-  - .specify/templates/plan-template.md: pending
-  - .specify/templates/spec-template.md: pending
-  - .specify/templates/tasks-template.md: pending
+  - .specify/templates/plan-template.md: updated
+  - .specify/templates/spec-template.md: updated
+  - .specify/templates/tasks-template.md: updated
   - .specify/templates/commands/*.md: pending (directory not present in this repository)
 - Follow-up TODOs:
   - None
@@ -45,16 +45,16 @@ responsiveness, isolate heavy work, or improve scheduling predictability.
 Rationale: If the interface does not remain responsive in real conditions, the
 tool fails at its primary purpose.
 
-### III. Broad Modern Browser Compatibility
-The application MUST target the widest practical set of modern browsers using
-HTML5, CSS, and TypeScript-compatible browser APIs. Features that depend on
-non-standard behavior or narrow browser support MUST be rejected unless there is
-a documented compatibility strategy. If a feature requires polyfills to run, it
-MUST be treated as not supported by modern target browsers until justified
-explicitly.
+### III. File System Access Browser Compatibility
+The application MUST target browsers that support the File System Access API.
+Features that rely on unsupported browser environments MUST be rejected unless
+they include a concrete fallback that preserves the core user workflow without
+server dependency. If a browser lacks the File System Access API, it is out of
+scope unless the feature is explicitly designed to degrade gracefully without
+losing primary functionality.
 
-Rationale: The project must remain deployable in many environments without
-forcing a specific browser choice.
+Rationale: The product relies on direct local file interactions, so the browser
+baseline must support that capability rather than the broadest possible market.
 
 ### IV. Understandable Code as a Product Requirement
 Code MUST be clean, navigable, and understandable by another developer without
@@ -86,6 +86,12 @@ will drift and become fragile.
   abstractions.
 - Static hosting is mandatory; normal operation MUST NOT depend on a server
   process, cloud service, or database.
+- The application SHOULD be able to run from local files or static hosting
+  without requiring a custom server whenever browser security constraints allow
+  it. If a server is unavoidable for a specific capability, that dependency MUST
+  be justified explicitly and kept outside the normal user workflow.
+- Browser compatibility is intentionally constrained to environments supporting
+  the File System Access API.
 - Performance-sensitive work MUST avoid blocking the main thread when a browser
   concurrency primitive can reasonably isolate it.
 - Dependencies introduced into the product toolchain or runtime MUST be open
@@ -96,7 +102,8 @@ will drift and become fragile.
 ## Validation and Delivery Workflow
 
 - Every feature spec MUST describe the user interaction being protected and any
-  browser compatibility or latency assumptions.
+  browser compatibility or latency assumptions, including File System Access
+  API requirements when relevant.
 - Every plan MUST pass a constitution check covering static deployability,
   real-time impact, browser compatibility, protocol clarity, and code
   maintainability.
@@ -106,6 +113,8 @@ will drift and become fragile.
   utility behavior.
 - JavaScript and TypeScript changes MUST pass the project's compile or lint
   checks before completion.
+- Build outputs and packaging SHOULD preserve a no-server execution path for the
+  delivered artifact whenever the browser platform permits it.
 
 ## Governance
 
@@ -126,9 +135,13 @@ Versioning policy:
 Compliance review expectations:
 - Plans MUST record how they preserve static deployment and browser-only
   execution.
+- Plans MUST state whether the feature depends on the File System Access API and
+  how unsupported browsers are handled.
+- Plans MUST explain any case where a server is needed and describe the minimal
+  scope of that dependency.
 - Task lists MUST include validation work, including manual visual verification.
 - Reviews MUST reject changes that undermine browser compatibility, real-time
   responsiveness, protocol clarity, maintainability, or the open source
   dependency policy without explicit justification.
 
-**Version**: 1.1.0 | **Ratified**: 2026-04-11 | **Last Amended**: 2026-04-11
+**Version**: 1.2.0 | **Ratified**: 2026-04-11 | **Last Amended**: 2026-04-14

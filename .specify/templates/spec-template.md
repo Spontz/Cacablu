@@ -11,6 +11,7 @@
 **Local Engine Dependency**: [Does this feature require the local visuals engine? If yes, how]
 **Static Deployment Impact**: [Why this still works as a static app with no backend]
 **Real-Time Sensitivity**: [What latency or responsiveness constraints matter]
+**File System Access Requirement**: [Does the feature require the File System Access API? If yes, how]
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -103,6 +104,8 @@
 - **FR-006**: System MUST define any browser-to-engine WebSocket messages used by
   this feature, including failure behavior.
 - **FR-007**: System MUST preserve static deployment with no backend dependency.
+- **FR-008**: System MUST require browser support for the File System Access API
+  or provide a documented fallback that preserves the core workflow.
 
 *Example of marking unclear requirements:*
 

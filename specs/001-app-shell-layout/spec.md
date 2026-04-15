@@ -7,7 +7,7 @@
 
 ## Runtime Context *(mandatory)*
 
-**Browser Surface**: The entire primary application window shown in the browser  
+**Browser Surface**: The entire primary application window shown in the browser, including the docked timeline panel and its transport controls  
 **Local Engine Dependency**: The shell must be ready to connect to the local visuals engine, but the initial skeleton must still load without an active engine connection  
 **Static Deployment Impact**: The shell must work when served as static files from a simple HTML server or opened locally in a browser without any backend  
 **Real-Time Sensitivity**: The shell must preserve responsiveness while handling future timeline, resource, and engine events
@@ -37,7 +37,34 @@ connection.
 
 ---
 
-### User Story 2 - Reorganize the Workspace (Priority: P2)
+### User Story 2 - Work with the Timeline Panel (Priority: P2)
+
+As a user, I want the timeline panel to show a dense studio-style sequence
+view with a ruler, layered bars, playhead, and transport controls so that I can
+review and control timing from the main workspace.
+
+**Why this priority**: The timeline is a primary working surface and should be
+usable from the first shell iteration.
+
+**Independent Test**: Open the app and confirm that the timeline panel renders
+a ruler, layered bars, a visible playhead, and a transport bar below the
+timeline.
+
+**Acceptance Scenarios**:
+
+1. **Given** the shell is visible, **When** the timeline panel loads, **Then**
+   the user sees a dense timeline view with layered bars and no empty helper
+   header above it.
+2. **Given** the timeline panel is visible, **When** the user uses the
+   transport controls below the timeline, **Then** the play/pause and time
+   navigation actions update the current time without requiring a separate
+   slider.
+3. **Given** the timeline panel is visible, **When** the user clicks on the
+   ruler, **Then** the playhead jumps to the clicked time.
+
+---
+
+### User Story 3 - Reorganize the Workspace (Priority: P3)
 
 As a user, I want to move and resize workspace panels so that I can adapt the
 interface to the way I work.
@@ -45,8 +72,8 @@ interface to the way I work.
 **Why this priority**: Flexible layout is a core capability for a creative tool
 that will host resources, timeline, preview, and inspector panels.
 
-**Independent Test**: Drag, dock, and resize panels in the workspace and confirm
-that the layout remains usable throughout the session.
+**Independent Test**: Drag, dock, and resize panels in the workspace and
+confirm that the layout remains usable throughout the session.
 
 **Acceptance Scenarios**:
 
@@ -58,7 +85,7 @@ that the layout remains usable throughout the session.
 
 ---
 
-### User Story 3 - Use the Main Menus (Priority: P3)
+### User Story 4 - Use the Main Menus (Priority: P4)
 
 As a user, I want a menu bar with basic workspace actions so that I can discover
 and trigger common actions from a predictable place.
@@ -116,6 +143,22 @@ panel visibility or layout reset.
   layout interaction and menu usage.
 - **FR-010**: The system MUST keep the shell code understandable, with clear
   module boundaries and comments where behavior is not obvious.
+- **FR-011**: The timeline panel MUST render a dense studio-style ruler, layered
+  bars, a visible playhead, and a transport bar beneath the timeline content.
+- **FR-012**: The timeline panel MUST allow scrubbing by clicking the ruler
+  rather than via a separate time slider.
+- **FR-013**: The timeline panel MUST provide transport buttons for go to
+  beginning, rewind, play/pause, forward, and go to end.
+- **FR-014**: The timeline panel MUST support zooming through `Shift` plus
+  mouse wheel, while the unmodified wheel scrolls vertically.
+- **FR-015**: The timeline panel MUST not display helper copy above the ruler or
+  a visible zoom slider in the default UI.
+- **FR-016**: The timeline panel MUST render clip bars with square corners and
+  labels that stay on a single line without wrapping.
+- **FR-017**: The timeline panel MUST keep clip bars at a uniform height and
+  use compact vertical spacing between tracks.
+- **FR-018**: The timeline panel MUST render transport buttons as centered
+  white icons on a dark blue raised background.
 
 ### Key Entities *(include if feature involves data)*
 
@@ -123,6 +166,10 @@ panel visibility or layout reset.
   their sizing within the main application shell.
 - **Panel Definition**: The metadata that describes an individual workspace
   panel, including its identifier, title, default role, and visibility rules.
+- **Timeline Panel**: The docked workspace panel that shows the ruler, layered
+  bars, playhead, and transport controls for time-based interaction.
+- **Timeline Transport**: The controls used to navigate time, including
+  beginning, rewind, play/pause, forward, and end actions.
 - **Menu Action**: A user-triggered command exposed through the menu bar that
   affects the shell or workspace state.
 - **Connection State**: The current browser-side view of whether the local
@@ -139,13 +186,23 @@ panel visibility or layout reset.
   reach a usable workspace in under 3 seconds on a normal development machine.
 - **SC-002**: A user can reposition and resize the default panels without layout
   corruption during a manual test session.
-- **SC-003**: The shell remains usable and visually coherent when no local
+- **SC-003**: The timeline panel renders a ruler, layered bars, playhead, and
+  transport bar without exposing helper text or a visible zoom slider.
+- **SC-004**: A user can click the ruler to scrub the playhead and use the
+  transport bar to move through time without a separate time slider.
+- **SC-005**: The shell remains usable and visually coherent when no local
   visuals engine is connected.
-- **SC-004**: A user can recover the default workspace layout in one menu action.
-- **SC-005**: Manual visual validation confirms that the core shell loads,
-  menus open, and workspace interactions behave as expected in at least one
-  supported browser.
-- **SC-006**: Project lint, typecheck, and build commands complete without new
+- **SC-006**: A user can recover the default workspace layout in one menu action.
+- **SC-007**: The timeline panel shows square-corner clip bars and single-line
+  labels without wrapping during manual visual validation.
+- **SC-008**: The timeline panel shows uniform-height clips and compact track
+  spacing during manual visual validation.
+- **SC-009**: The timeline transport buttons show centered white icons on a
+  dark blue raised background during manual visual validation.
+- **SC-010**: Manual visual validation confirms that the core shell loads,
+  menus open, timeline interactions behave as expected, and workspace
+  interactions remain usable in at least one supported browser.
+- **SC-011**: Project lint, typecheck, and build commands complete without new
   errors for the shell implementation.
 
 ## Assumptions

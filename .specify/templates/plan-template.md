@@ -33,10 +33,12 @@
 
 - Static runtime preserved: the feature runs in the browser without requiring a
   backend or non-browser app process for UI logic.
+- No-server path preserved: the delivered artifact should work from static
+  hosting or local file opening whenever browser security constraints allow it.
 - Real-time behavior protected: latency-sensitive flows, timeline updates, and
   user interactions avoid unnecessary main-thread blocking.
-- Modern browser compatibility addressed: HTML5/CSS/browser API usage is
-  compatible with target modern browsers or explicitly justified.
+- File System Access compatibility addressed: browser/API usage assumes support
+  for the File System Access API or clearly documents a graceful fallback.
 - Local engine contract defined: WebSocket messages, error handling, and degraded
   behavior are documented when the feature depends on the visuals engine.
 - Maintainability preserved: module boundaries, naming, comments, and complexity

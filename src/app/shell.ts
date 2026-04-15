@@ -4,7 +4,6 @@ import { createPanelRegistry } from '../panels/panel-registry';
 import { createAppState } from '../state/app-state';
 import { createConnectionController } from '../ws/connection';
 import { createDockviewWorkspace } from '../layout/dockview-workspace';
-import { detectRuntimeEnvironment } from './runtime-environment';
 
 export interface AppShell {
   mount(): void;
@@ -12,7 +11,6 @@ export interface AppShell {
 
 export function createAppShell(root: HTMLElement): AppShell {
   const state = createAppState();
-  const runtime = detectRuntimeEnvironment(window.location.protocol);
   const connection = createConnectionController(state);
   const panels = createPanelRegistry(state);
   const workspace = createDockviewWorkspace({
@@ -69,13 +67,7 @@ export function createAppShell(root: HTMLElement): AppShell {
       const workspaceElement = document.createElement('main');
       workspaceElement.className = 'app-shell__workspace';
 
-      shell.append(topBar);
-
-      if (runtime.limitationNotice) {
-        shell.append(createRuntimeNotice(runtime.limitationNotice));
-      }
-
-      shell.append(workspaceElement);
+      shell.append(topBar, workspaceElement);
       root.append(shell);
 
       workspace.mount(workspaceElement);
@@ -93,13 +85,6 @@ function createStatusBadge(state: ReturnType<typeof createAppState>): HTMLElemen
   badge.dataset.status = state.getSnapshot().connectionStatus;
   badge.textContent = state.getSnapshot().connectionLabel;
   return badge;
-}
-
-function createRuntimeNotice(message: string): HTMLElement {
-  const notice = document.createElement('aside');
-  notice.className = 'runtime-notice';
-  notice.textContent = message;
-  return notice;
 }
 
 function updateStatusBadge(root: ParentNode, label: string, status: string): void {

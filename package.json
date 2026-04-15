@@ -3,14 +3,21 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build",
+    "build": "tsc --noEmit && vite build && node scripts/inline-dist.mjs",
     "package": "npm run build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
-    "test": "vitest run"
+    "test": "vitest run",
+    "studio:dev": "npm run dev --workspace @cacablu/studio",
+    "studio:build": "npm run build --workspace @cacablu/studio",
+    "timeline:build": "npm run build --workspace @cacablu/timeline"
   },
   "dependencies": {
     "dockview-core": "^5.2.0"
