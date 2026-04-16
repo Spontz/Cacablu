@@ -31,4 +31,10 @@ export const DEFAULT_PANELS: PanelDefinition[] = [
     component: 'events-panel',
     description: 'Connection and engine events emitted by the shell.',
   },
+  {
+    id: 'db-explorer',
+    title: 'Database Explorer',
+    component: 'db-explorer-panel',
+    description: 'Browse tables and rows of the loaded SQLite database.',
+  },
 ];

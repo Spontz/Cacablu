@@ -6,11 +6,14 @@ import {
   createTrack,
   normalizeRange,
 } from '../../packages/timeline/src/index';
+import type { DbState } from '../state/db-state';
+import type { DbSessionRef } from '../db/db-session';
 import { createContentRenderer } from './base-panel';
 
 const CLIP_COLOR = '#5e86b8';
+const MARKER_STEP = 2;
 
-export function createTimelinePanel(): IContentRenderer {
+export function createTimelinePanel(dbState: DbState, sessionRef: DbSessionRef): IContentRenderer {
   const state = createTimelineState({
     duration: 40,
     currentTime: 5,
@@ -26,45 +29,46 @@ export function createTimelinePanel(): IContentRenderer {
   ];
 
   state.clips = [
-    createClip({
-      id: 'clip-01',
-      trackId: 'layer-01',
-      label: 'Block A',
-      start: 0.5,
-      end: 9.5,
-    }),
-    createClip({
-      id: 'clip-02',
-      trackId: 'layer-01',
-      label: 'Block B',
-      start: 10.25,
-      end: 18,
-    }),
-    createClip({
-      id: 'clip-03',
-      trackId: 'layer-02',
-      label: 'Region A',
-      start: 1,
-      end: 14,
-    }),
-    createClip({
-      id: 'clip-04',
-      trackId: 'layer-02',
-      label: 'Region B',
-      start: 14.5,
-      end: 34,
-    }),
-    createClip({
-      id: 'clip-05',
-      trackId: 'layer-03',
-      label: 'Event A',
-      start: 2.75,
-      end: 7.25,
-      kind: 'event',
-    }),
+    createClip({ id: 'clip-01', trackId: 'layer-01', label: 'Block A', start: 0.5, end: 9.5 }),
+    createClip({ id: 'clip-02', trackId: 'layer-01', label: 'Block B', start: 10.25, end: 18 }),
+    createClip({ id: 'clip-03', trackId: 'layer-02', label: 'Region A', start: 1, end: 14 }),
+    createClip({ id: 'clip-04', trackId: 'layer-02', label: 'Region B', start: 14.5, end: 34 }),
+    createClip({ id: 'clip-05', trackId: 'layer-03', label: 'Event A', start: 2.75, end: 7.25, kind: 'event' }),
   ];
 
   let lastTimestamp = 0;
+
+  function loadFromDb(): void {
+    const db = sessionRef.current?.data ?? null;
+
+    state.tracks = [];
+    state.clips = [];
+    state.transport.currentTime = 0;
+    state.transport.isPlaying = false;
+    lastTimestamp = 0;
+
+    if (!db) return;
+
+    const parsed = parseFloat(db.variables.get('endTime') ?? '');
+    state.transport.duration = isFinite(parsed) && parsed > 0 ? parsed : 30;
+
+    const layerNums = [...new Set(db.bars.map((b) => b.layer))].sort((a, b) => a - b);
+
+    state.tracks = layerNums.map((layer, index) =>
+      createTrack({ id: `layer-${layer}`, label: `Layer ${layer}`, kind: 'generic', order: index, height: 52 }),
+    );
+
+    state.clips = db.bars.map((bar) =>
+      createClip({
+        id: `bar-${bar.id}`,
+        trackId: `layer-${bar.layer}`,
+        label: bar.type || `Bar ${bar.id}`,
+        start: bar.startTime,
+        end: Math.max(bar.endTime, bar.startTime),
+        metadata: { dbId: bar.id },
+      }),
+    );
+  }
 
   function formatTime(value: number): string {
     return value.toFixed(2).replace(/\.00$/, '');
@@ -93,41 +97,50 @@ export function createTimelinePanel(): IContentRenderer {
     const render = (): void => {
       const playheadLeft = state.transport.currentTime * state.viewport.pixelsPerSecond * state.viewport.zoom;
       const timelineWidth = state.transport.duration * state.viewport.pixelsPerSecond * state.viewport.zoom;
+      const markerCount = Math.ceil(state.transport.duration / MARKER_STEP) + 1;
 
       element.innerHTML = `
         <div class="timeline-panel">
-          <div class="timeline-panel__viewport">
-            <div class="timeline-panel__ruler" style="width:${timelineWidth}px">
-              ${Array.from({ length: 21 }, (_, index) => {
-                const time = index * 2;
-                const left = time * state.viewport.pixelsPerSecond * state.viewport.zoom;
-                return `<span class="timeline-panel__marker" style="left:${left}px"><i>${time}s</i></span>`;
-              }).join('')}
-            </div>
-
-            <div class="timeline-panel__grid" style="width:${timelineWidth}px">
-              ${Array.from({ length: 21 }, (_, index) => {
-                const left = index * 2 * state.viewport.pixelsPerSecond * state.viewport.zoom;
-                return `<span class="timeline-panel__grid-line" style="left:${left}px"></span>`;
-              }).join('')}
-            </div>
-
-            <div class="timeline-panel__playhead" style="left:${playheadLeft}px">
-              <span>${formatTime(state.transport.currentTime)}s</span>
-            </div>
-
-            <div class="timeline-panel__tracks" style="width:${timelineWidth}px">
+          <div class="timeline-panel__body">
+            <div class="timeline-panel__sidebar">
+              <div class="timeline-panel__sidebar-header"></div>
               ${state.tracks
-                .map((track) => {
-                  const trackClips = state.clips
-                    .filter((clip) => clip.trackId === track.id)
-                    .sort((left, right) => left.start - right.start);
+                .map((track) => `
+                  <div class="timeline-panel__track-meta" style="height:${track.height}px">
+                    <strong>${track.label}</strong>
+                  </div>
+                `)
+                .join('')}
+            </div>
 
-                  return `
-                    <div class="timeline-panel__track">
-                      <div class="timeline-panel__track-meta">
-                        <strong>${track.label}</strong>
-                      </div>
+            <div class="timeline-panel__viewport">
+              <div class="timeline-panel__ruler" style="width:${timelineWidth}px">
+                ${Array.from({ length: markerCount }, (_, index) => {
+                  const time = index * MARKER_STEP;
+                  const left = time * state.viewport.pixelsPerSecond * state.viewport.zoom;
+                  return `<span class="timeline-panel__marker" style="left:${left}px"><i>${time}s</i></span>`;
+                }).join('')}
+              </div>
+
+              <div class="timeline-panel__grid" style="width:${timelineWidth}px">
+                ${Array.from({ length: markerCount }, (_, index) => {
+                  const left = index * MARKER_STEP * state.viewport.pixelsPerSecond * state.viewport.zoom;
+                  return `<span class="timeline-panel__grid-line" style="left:${left}px"></span>`;
+                }).join('')}
+              </div>
+
+              <div class="timeline-panel__playhead" style="left:${playheadLeft}px">
+                <span>${formatTime(state.transport.currentTime)}s</span>
+              </div>
+
+              <div class="timeline-panel__lanes" style="width:${timelineWidth}px">
+                ${state.tracks
+                  .map((track) => {
+                    const trackClips = state.clips
+                      .filter((clip) => clip.trackId === track.id)
+                      .sort((a, b) => a.start - b.start);
+
+                    return `
                       <div class="timeline-panel__lane" style="height:${track.height}px">
                         ${trackClips
                           .map((clip) => {
@@ -148,10 +161,10 @@ export function createTimelinePanel(): IContentRenderer {
                           })
                           .join('')}
                       </div>
-                    </div>
-                  `;
-                })
-                .join('')}
+                    `;
+                  })
+                  .join('')}
+              </div>
             </div>
           </div>
 
@@ -248,6 +261,13 @@ export function createTimelinePanel(): IContentRenderer {
       render();
       requestAnimationFrame(tick);
     };
+
+    dbState.subscribe((snapshot) => {
+      if (snapshot.status === 'open') {
+        loadFromDb();
+        render();
+      }
+    });
 
     render();
     requestAnimationFrame(tick);

@@ -20,14 +20,16 @@
     "timeline:build": "npm run build --workspace @cacablu/timeline"
   },
   "dependencies": {
-    "dockview-core": "^5.2.0"
+    "dockview-core": "^5.2.0",
+    "sql.js": "^1.14.1"
   },
   "devDependencies": {
     "@eslint/js": ">=9 <10",
+    "@types/sql.js": "^1.4.11",
     "eslint": ">=9 <10",
     "globals": ">=15 <16",
-    "typescript-eslint": ">=8 <9",
     "typescript": ">=5 <6",
+    "typescript-eslint": ">=8 <9",
     "vite": ">=7 <8",
     "vitest": ">=3 <4"
   }

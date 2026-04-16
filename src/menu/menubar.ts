@@ -7,6 +7,7 @@ interface MenuBarOptions {
 
 export interface MenuBar {
   element: HTMLElement;
+  updateActions(actions: MenuActionDefinition[]): void;
 }
 
 export function createMenuBar(options: MenuBarOptions): MenuBar {
@@ -15,6 +16,7 @@ export function createMenuBar(options: MenuBarOptions): MenuBar {
   element.setAttribute('aria-label', 'Main menu');
 
   const menuNames = ['File', 'View', 'Window', 'Help'] as const;
+  const buttonMap = new Map<string, HTMLButtonElement>();
 
   for (const menuName of menuNames) {
     const menuRoot = document.createElement('div');
@@ -35,17 +37,24 @@ export function createMenuBar(options: MenuBarOptions): MenuBar {
       actionButton.className = 'menu-bar__item';
       actionButton.type = 'button';
       actionButton.textContent = action.label;
+      actionButton.disabled = action.disabled ?? false;
       actionButton.addEventListener('click', () => {
         popup.dataset.open = 'false';
         options.runAction(action.id);
       });
       popup.append(actionButton);
+      buttonMap.set(action.id, actionButton);
     }
 
     trigger.addEventListener('click', () => {
       const isOpen = popup.dataset.open === 'true';
       closeAllMenus(element);
-      popup.dataset.open = isOpen ? 'false' : 'true';
+      if (!isOpen) {
+        const rect = trigger.getBoundingClientRect();
+        popup.style.top = `${rect.bottom + 6}px`;
+        popup.style.left = `${rect.left}px`;
+        popup.dataset.open = 'true';
+      }
     });
 
     menuRoot.append(trigger, popup);
@@ -60,7 +69,16 @@ export function createMenuBar(options: MenuBarOptions): MenuBar {
     closeAllMenus(element);
   });
 
-  return { element };
+  return {
+    element,
+
+    updateActions(actions: MenuActionDefinition[]): void {
+      for (const action of actions) {
+        const button = buttonMap.get(action.id);
+        if (button) button.disabled = action.disabled ?? false;
+      }
+    },
+  };
 }
 
 function closeAllMenus(root: HTMLElement): void {

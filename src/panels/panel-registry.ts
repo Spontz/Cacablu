@@ -1,7 +1,10 @@
 import type { IContentRenderer } from 'dockview-core';
 
 import type { AppState } from '../state/app-state';
+import type { DbState } from '../state/db-state';
+import type { DbSessionRef } from '../db/db-session';
 import { createContentRenderer } from './base-panel';
+import { createDbExplorerPanel } from './db-explorer-panel';
 import { createEventsPanel } from './events-panel';
 import { createInspectorPanel } from './inspector-panel';
 import { createPreviewPanel } from './preview-panel';
@@ -12,20 +15,26 @@ export interface PanelRegistry {
   create(name: string): IContentRenderer;
 }
 
-export function createPanelRegistry(state: AppState): PanelRegistry {
+export function createPanelRegistry(
+  state: AppState,
+  dbState: DbState,
+  sessionRef: DbSessionRef,
+): PanelRegistry {
   return {
     create(name: string): IContentRenderer {
       switch (name) {
         case 'resources-panel':
           return createResourcesPanel();
         case 'timeline-panel':
-          return createTimelinePanel();
+          return createTimelinePanel(dbState, sessionRef);
         case 'preview-panel':
           return createPreviewPanel(state);
         case 'inspector-panel':
           return createInspectorPanel(state);
         case 'events-panel':
           return createEventsPanel(state);
+        case 'db-explorer-panel':
+          return createDbExplorerPanel(dbState, sessionRef);
         default:
           return createFallbackPanel(name);
       }

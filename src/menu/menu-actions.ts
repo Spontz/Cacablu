@@ -2,9 +2,11 @@ import type { MenuActionDefinition } from '../app/types';
 
 export function createDefaultMenuActions(): MenuActionDefinition[] {
   return [
-    { id: 'noop-new-project', label: 'New Project', menu: 'File' },
-    { id: 'noop-open-project', label: 'Open Project', menu: 'File' },
+    { id: 'open-database', label: 'Abrir', menu: 'File' },
+    { id: 'save-database', label: 'Guardar', menu: 'File', disabled: true },
+    { id: 'save-database-as', label: 'Guardar como', menu: 'File', disabled: true },
     { id: 'reset-layout', label: 'Reset Layout', menu: 'View' },
+    { id: 'toggle-db-explorer', label: 'Database Explorer', menu: 'Window' },
     { id: 'toggle-resources', label: 'Focus Resources', menu: 'Window' },
     { id: 'toggle-timeline', label: 'Focus Timeline', menu: 'Window' },
     { id: 'toggle-preview', label: 'Focus Preview', menu: 'Window' },

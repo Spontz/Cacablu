@@ -14,6 +14,7 @@ export interface DockviewWorkspace {
   mount(container: HTMLElement): void;
   resetLayout(): void;
   focusPanel(panelId: string): void;
+  openFloating(id: string, component: string, title: string): void;
 }
 
 export function createDockviewWorkspace(options: WorkspaceOptions): DockviewWorkspace {
@@ -76,6 +77,7 @@ export function createDockviewWorkspace(options: WorkspaceOptions): DockviewWork
         direction: 'within',
       },
     });
+
   }
 
   return {
@@ -110,6 +112,25 @@ export function createDockviewWorkspace(options: WorkspaceOptions): DockviewWork
         dockview.setActivePanel(panel);
         panel.focus();
       }
+    },
+
+    openFloating(id: string, component: string, title: string): void {
+      if (!dockview) return;
+
+      const existing = dockview.getGroupPanel(id);
+      if (existing) {
+        dockview.setActivePanel(existing);
+        existing.focus();
+        return;
+      }
+
+      dockview.addPanel({
+        id,
+        component,
+        title,
+        renderer: 'always',
+        floating: { width: 640, height: 420, x: 80, y: 60 },
+      });
     },
   };
 }

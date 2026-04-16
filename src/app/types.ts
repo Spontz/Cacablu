@@ -13,6 +13,7 @@ export interface MenuActionDefinition {
   id: string;
   label: string;
   menu: 'File' | 'View' | 'Window' | 'Help';
+  disabled?: boolean;
 }
 
 export interface AppSnapshot {
