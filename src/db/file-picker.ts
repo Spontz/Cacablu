@@ -11,7 +11,7 @@ type FsaWindow = Window & {
 };
 
 const PICKER_TYPES: FilePickerAcceptType[] = [
-  { description: 'SQLite database', accept: { 'application/x-sqlite3': ['.sqlite', '.db'] } },
+  { description: 'Cacablu project', accept: { 'application/x-sqlite3': ['.sqlite', '.spz', '.db'] } },
 ];
 
 export function isFileSystemAccessSupported(): boolean {

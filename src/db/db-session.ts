@@ -32,7 +32,7 @@ export async function openDbSession(handle: FileSystemFileHandle): Promise<DbSes
   const bytes = new Uint8Array(buffer);
 
   if (!SQLITE_MAGIC.every((b, i) => bytes[i] === b)) {
-    throw new Error('The selected file is not a valid SQLite database.');
+    throw new Error('The selected file is not a valid .sqlite or .spz project database.');
   }
 
   const SQL = await getSqlJs();

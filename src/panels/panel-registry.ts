@@ -24,13 +24,13 @@ export function createPanelRegistry(
     create(name: string): IContentRenderer {
       switch (name) {
         case 'resources-panel':
-          return createResourcesPanel();
+          return createResourcesPanel(state, dbState, sessionRef);
         case 'timeline-panel':
           return createTimelinePanel(dbState, sessionRef);
         case 'preview-panel':
           return createPreviewPanel(state);
         case 'inspector-panel':
-          return createInspectorPanel(state);
+          return createInspectorPanel(state, dbState, sessionRef);
         case 'events-panel':
           return createEventsPanel(state);
         case 'db-explorer-panel':
