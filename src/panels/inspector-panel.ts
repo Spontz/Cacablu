@@ -6,6 +6,10 @@ import type { DbSessionRef } from '../db/db-session';
 import type { DbFile } from '../db/db-schema';
 import { createContentRenderer } from './base-panel';
 import { describeImagePreview } from './image-preview';
+import { describeModelPreview } from './model-preview';
+import type { PreviewableModelFormat } from './model-preview';
+import { createModelViewer } from './model-viewer';
+import type { ModelViewerSession } from './model-viewer';
 
 export function createInspectorPanel(
   state: AppState,
@@ -16,11 +20,19 @@ export function createInspectorPanel(
     element.className = 'panel panel--inspector';
 
     let previewUrl: string | null = null;
+    let modelViewer: ModelViewerSession | null = null;
+    let activeModelKey: string | null = null;
 
     function clearPreviewUrl(): void {
       if (!previewUrl) return;
       URL.revokeObjectURL(previewUrl);
       previewUrl = null;
+    }
+
+    function clearModelViewer(): void {
+      modelViewer?.dispose();
+      modelViewer = null;
+      activeModelKey = null;
     }
 
     function createNote(text: string): HTMLParagraphElement {
@@ -52,29 +64,33 @@ export function createInspectorPanel(
 
     function renderEmpty(message = 'Select an image file in Resources to preview it here.'): void {
       clearPreviewUrl();
+      clearModelViewer();
       element.replaceChildren(createNote(message));
     }
 
     function renderFolder(name: string): void {
       clearPreviewUrl();
+      clearModelViewer();
       element.replaceChildren(
         createMeta('Folder', name || '(unnamed folder)'),
-        createNote('No image preview is available for folders.'),
+        createNote('No preview is available for folders.'),
       );
     }
 
     function renderNonImageFile(file: DbFile): void {
       clearPreviewUrl();
+      clearModelViewer();
       element.replaceChildren(
         createMeta('File', file.name || '(unnamed file)'),
         createMeta('Type', file.type || file.format || 'Unknown'),
         createMeta('Size', `${file.bytes || file.data.byteLength} bytes`),
-        createNote('No image preview is available for this file.'),
+        createNote('No preview is available for this file.'),
       );
     }
 
     function renderUnavailable(fileName: string, reason: string): void {
       clearPreviewUrl();
+      clearModelViewer();
       element.replaceChildren(
         createMeta('File', fileName || '(unnamed file)'),
         createNote(reason),
@@ -83,6 +99,7 @@ export function createInspectorPanel(
 
     function renderImage(file: DbFile, mimeType: string): void {
       clearPreviewUrl();
+      clearModelViewer();
       const imageBytes = new ArrayBuffer(file.data.byteLength);
       new Uint8Array(imageBytes).set(file.data);
       previewUrl = URL.createObjectURL(new Blob([imageBytes], { type: mimeType }));
@@ -105,6 +122,43 @@ export function createInspectorPanel(
         createMeta('Size', `${file.bytes || file.data.byteLength} bytes`),
         frame,
       );
+    }
+
+    function renderModel(file: DbFile, format: PreviewableModelFormat): void {
+      const modelKey = `${dbState.getSnapshot().fileName ?? ''}:${file.id}:${file.bytes}:${file.data.byteLength}:${format}`;
+      if (modelViewer && activeModelKey === modelKey) return;
+
+      clearPreviewUrl();
+      clearModelViewer();
+      activeModelKey = modelKey;
+
+      const frame = document.createElement('div');
+      frame.className = 'inspector__model-frame';
+      frame.append(createNote('Loading 3D preview...'));
+      const verticesMeta = createMeta('Vertices', 'Loading...');
+      const verticesValue = verticesMeta.querySelector('.inspector__meta-value');
+
+      element.replaceChildren(
+        createMeta('File', file.name || '(unnamed file)'),
+        createMeta('Size', `${file.bytes || file.data.byteLength} bytes`),
+        verticesMeta,
+        frame,
+      );
+
+      modelViewer = createModelViewer({
+        container: frame,
+        fileName: file.name,
+        fileParent: file.parent,
+        format,
+        data: file.data,
+        files: sessionRef.current?.data.files ?? [],
+        onStats(stats) {
+          if (verticesValue) verticesValue.textContent = stats.vertices.toLocaleString();
+        },
+        onError(message) {
+          renderUnavailable(file.name, `3D preview unavailable: ${message}`);
+        },
+      });
     }
 
     function render(): void {
@@ -131,22 +185,36 @@ export function createInspectorPanel(
       }
 
       const descriptor = describeImagePreview(file);
-      if (!descriptor.isImageLike) {
+      if (descriptor.isImageLike) {
+        if (!descriptor.mimeType || descriptor.reason) {
+          renderUnavailable(file.name, descriptor.reason ?? 'Preview unavailable for this image.');
+          return;
+        }
+
+        renderImage(file, descriptor.mimeType);
+        return;
+      }
+
+      const modelDescriptor = describeModelPreview(file);
+      if (!modelDescriptor.isModelLike) {
         renderNonImageFile(file);
         return;
       }
 
-      if (!descriptor.mimeType || descriptor.reason) {
-        renderUnavailable(file.name, descriptor.reason ?? 'Preview unavailable for this image.');
+      if (modelDescriptor.previewMode !== 'previewable' || !modelDescriptor.format) {
+        renderUnavailable(file.name, modelDescriptor.reason ?? '3D preview unavailable for this model.');
         return;
       }
 
-      renderImage(file, descriptor.mimeType);
+      renderModel(file, modelDescriptor.format as PreviewableModelFormat);
     }
 
     const unsubscribeState = state.subscribe(render);
     const unsubscribeDb = dbState.subscribe((snapshot) => {
-      if (snapshot.status !== 'open') clearPreviewUrl();
+      if (snapshot.status !== 'open') {
+        clearPreviewUrl();
+        clearModelViewer();
+      }
       render();
     });
 
@@ -154,6 +222,7 @@ export function createInspectorPanel(
       unsubscribeState();
       unsubscribeDb();
       clearPreviewUrl();
+      clearModelViewer();
     };
   });
 }

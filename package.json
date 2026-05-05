@@ -21,11 +21,13 @@
   },
   "dependencies": {
     "dockview-core": "^5.2.0",
-    "sql.js": "^1.14.1"
+    "sql.js": "^1.14.1",
+    "three": "^0.184.0"
   },
   "devDependencies": {
     "@eslint/js": ">=9 <10",
     "@types/sql.js": "^1.4.11",
+    "@types/three": "^0.184.0",
     "eslint": ">=9 <10",
     "globals": ">=15 <16",
     "typescript": ">=5 <6",
