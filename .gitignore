@@ -5,4 +5,6 @@ coverage/
 **/dist/
 **/coverage/
 *.tsbuildinfo
+*.log
+.env*
 .claude/settings.local.json

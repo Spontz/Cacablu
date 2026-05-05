@@ -96,6 +96,7 @@ export function createAppShell(root: HTMLElement): AppShell {
     if (!handle) return;
 
     dbState.setOpening();
+    state.clearResourceSelection();
     try {
       session?.close();
       session = await openDbSession(handle);
@@ -104,6 +105,7 @@ export function createAppShell(root: HTMLElement): AppShell {
     } catch (err) {
       session = null;
       sessionRef.current = null;
+      state.clearResourceSelection();
       dbState.clear();
       window.alert(err instanceof Error ? err.message : 'Failed to open database.');
     }

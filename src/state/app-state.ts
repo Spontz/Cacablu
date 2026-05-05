@@ -1,4 +1,4 @@
-import type { AppSnapshot, ConnectionStatus } from '../app/types';
+import type { AppSnapshot, ConnectionStatus, ResourceSelection } from '../app/types';
 
 type Listener = (snapshot: AppSnapshot) => void;
 
@@ -7,6 +7,8 @@ export interface AppState {
   subscribe(listener: Listener): () => void;
   setActivePanel(panelId: string | null): void;
   setConnection(status: ConnectionStatus, label: string, error?: string | null): void;
+  setResourceSelection(selection: ResourceSelection): void;
+  clearResourceSelection(): void;
 }
 
 const INITIAL_SNAPSHOT: AppSnapshot = {
@@ -14,6 +16,7 @@ const INITIAL_SNAPSHOT: AppSnapshot = {
   connectionStatus: 'disconnected',
   connectionLabel: 'Engine disconnected',
   lastError: null,
+  resourceSelection: { kind: 'none' },
 };
 
 export function createAppState(): AppState {
@@ -54,6 +57,22 @@ export function createAppState(): AppState {
         connectionStatus: status,
         connectionLabel: label,
         lastError: error,
+      };
+      publish();
+    },
+
+    setResourceSelection(selection: ResourceSelection): void {
+      snapshot = {
+        ...snapshot,
+        resourceSelection: selection,
+      };
+      publish();
+    },
+
+    clearResourceSelection(): void {
+      snapshot = {
+        ...snapshot,
+        resourceSelection: { kind: 'none' },
       };
       publish();
     },
