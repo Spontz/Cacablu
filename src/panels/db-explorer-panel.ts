@@ -7,6 +7,7 @@ import { createContentRenderer } from './base-panel';
 
 const TABLE_NAMES = ['variables', 'bars', 'fbos', 'files', 'folders'] as const;
 type TableName = (typeof TABLE_NAMES)[number];
+type EditableValue = string | number | boolean | null;
 
 export function createDbExplorerPanel(
   dbState: DbState,
@@ -46,12 +47,16 @@ export function createDbExplorerPanel(
       for (const [k, v] of db.variables) {
         const tr = tbody.insertRow();
         tr.insertCell().textContent = k;
-        tr.insertCell().textContent = v;
+        const valueCell = tr.insertCell();
+        renderEditableCell(valueCell, v, (nextValue) => {
+          sessionRef.current?.updateCell('variables', k, 'value', String(nextValue ?? ''));
+          db.variables.set(k, String(nextValue ?? ''));
+        });
       }
       dataArea.append(table);
     }
 
-    function renderRows(rows: object[]): void {
+    function renderRows(tableName: Exclude<TableName, 'variables'>, rows: object[]): void {
       if (rows.length === 0) {
         const hint = document.createElement('p');
         hint.className = 'db-explorer__hint';
@@ -78,12 +83,75 @@ export function createDbExplorerPanel(
           if (val instanceof Uint8Array) {
             td.textContent = `[${val.byteLength} bytes]`;
             td.className = 'db-explorer__blob';
-          } else {
+          } else if (isReadOnlyColumn(col)) {
             td.textContent = String(val ?? '');
+          } else {
+            renderEditableCell(td, val, (nextValue) => {
+              const rowId = (row as Record<string, unknown>).id;
+              if (typeof rowId !== 'number') throw new Error('Cannot edit a row without a numeric id.');
+              sessionRef.current?.updateCell(tableName, rowId, col, nextValue);
+              (row as Record<string, unknown>)[col] = nextValue;
+            });
           }
         }
       }
       dataArea.append(table);
+    }
+
+    function renderEditableCell(
+      cell: HTMLTableCellElement,
+      value: unknown,
+      applyValue: (value: EditableValue) => void,
+    ): void {
+      const input = document.createElement('input');
+      input.className = 'db-explorer__cell-input';
+      input.value = String(value ?? '');
+      input.dataset.originalValue = input.value;
+      cell.classList.add('db-explorer__cell--editable');
+      cell.append(input);
+
+      const commit = (): void => {
+        const originalValue = input.dataset.originalValue ?? '';
+        if (input.value === originalValue) return;
+
+        const parsed = parseEditedValue(value, input.value);
+        if (!parsed.ok) {
+          input.value = originalValue;
+          flashInvalidCell(cell);
+          return;
+        }
+
+        try {
+          applyValue(parsed.value);
+          input.dataset.originalValue = input.value;
+          dbState.setDirty();
+        } catch {
+          input.value = originalValue;
+          flashInvalidCell(cell);
+        }
+      };
+
+      input.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          input.blur();
+        }
+
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          input.value = input.dataset.originalValue ?? '';
+          input.blur();
+        }
+      });
+
+      input.addEventListener('blur', commit);
+    }
+
+    function flashInvalidCell(cell: HTMLTableCellElement): void {
+      cell.classList.add('db-explorer__cell--invalid');
+      window.setTimeout(() => {
+        cell.classList.remove('db-explorer__cell--invalid');
+      }, 900);
     }
 
     function render(): void {
@@ -122,7 +190,7 @@ export function createDbExplorerPanel(
         return;
       }
 
-      renderRows(db[selectedTable] as object[]);
+      renderRows(selectedTable, db[selectedTable] as object[]);
     }
 
     render();
@@ -136,4 +204,32 @@ export function createDbExplorerPanel(
       render();
     });
   });
+}
+
+function isReadOnlyColumn(column: string): boolean {
+  return column === 'id' || column === 'data';
+}
+
+function parseEditedValue(
+  currentValue: unknown,
+  rawValue: string,
+): { ok: true; value: EditableValue } | { ok: false } {
+  if (typeof currentValue === 'number') {
+    const nextNumber = Number(rawValue);
+    if (!Number.isFinite(nextNumber)) return { ok: false };
+    return { ok: true, value: nextNumber };
+  }
+
+  if (typeof currentValue === 'boolean') {
+    const normalized = rawValue.trim().toLowerCase();
+    if (['1', 'true', 'yes'].includes(normalized)) return { ok: true, value: true };
+    if (['0', 'false', 'no'].includes(normalized)) return { ok: true, value: false };
+    return { ok: false };
+  }
+
+  if (currentValue === null) {
+    return { ok: true, value: rawValue.length > 0 ? rawValue : null };
+  }
+
+  return { ok: true, value: rawValue };
 }

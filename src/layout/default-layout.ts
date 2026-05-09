@@ -3,7 +3,7 @@ import type { PanelDefinition } from '../app/types';
 export const DEFAULT_PANELS: PanelDefinition[] = [
   {
     id: 'resources',
-    title: 'Resources',
+    title: 'Pool',
     component: 'resources-panel',
     description: 'Media, assets, and imported material.',
   },

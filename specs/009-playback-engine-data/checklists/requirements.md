@@ -1,7 +1,7 @@
-# Specification Quality Checklist: Database Explorer
+# Specification Quality Checklist: Playback Engine Data Export
 
 **Purpose**: Validate specification completeness and quality before proceeding to planning  
-**Created**: 2026-04-16  
+**Created**: 2026-05-09  
 **Feature**: [spec.md](../spec.md)
 
 ## Content Quality
@@ -31,6 +31,4 @@
 
 ## Notes
 
-- The panel reads from the in-memory ProjectDatabase; it does not re-query SQLite at runtime.
-- BLOB display strategy (byte count summary) is defined in FR-008 to avoid ambiguity.
-- Editing supported scalar field values is now in scope; binary data remains read-only.
+- Validation passed after initial review.

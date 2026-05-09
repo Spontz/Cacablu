@@ -64,12 +64,32 @@ As a user, I want to open the Database Explorer from the Window menu so that I c
 
 ---
 
+### User Story 4 - Edit Database Field Values (Priority: P1)
+
+As a user, I want to change displayed database field values directly in the Database Explorer so that I can temporarily correct or experiment with project data without leaving the app.
+
+**Why this priority**: Direct editing turns the explorer into a practical project repair and debugging tool, especially while validating exported engine data.
+
+**Independent Test**: Open a database file, open the Database Explorer, select a table with editable text or numeric values, change a field value, and confirm the new value is reflected in the active database view and subsequent app behavior that reads that value.
+
+**Acceptance Scenarios**:
+
+1. **Given** a database is loaded and a table row is visible, **When** the user edits a supported field value and commits the change, **Then** the displayed cell updates to the new value.
+2. **Given** the user edits a supported field value, **When** the new value is accepted, **Then** the active database session uses the updated value for subsequent reads inside the app.
+3. **Given** the user enters a value that cannot be represented by the field, **When** the edit is committed, **Then** the change is rejected and the previous value remains visible.
+4. **Given** the user edits a value but cancels before committing, **When** the edit is cancelled, **Then** the original value remains unchanged.
+
+---
+
 ### Edge Cases
 
 - What happens when the database is closed while the Database Explorer panel is open?
 - What happens when a table has a very large number of rows?
 - What happens when a column contains binary data (e.g. the `data` column in the FILES table)?
 - What happens when the panel is opened before any database is loaded?
+- What happens when the user edits a field whose value is used by another visible panel?
+- What happens when the user attempts to edit a binary column or identifier column?
+- What happens when the user enters an invalid number, empty value, or unsupported text for the selected field?
 
 ## Requirements *(mandatory)*
 
@@ -84,14 +104,19 @@ As a user, I want to open the Database Explorer from the Window menu so that I c
 - **FR-006**: The panel MUST clear the right side and show an appropriate placeholder when no table is selected.
 - **FR-007**: The panel MUST show a placeholder message on the left side when no database is loaded.
 - **FR-008**: Binary column values (BLOB data) MUST be shown as a human-readable summary (e.g. byte count) rather than raw binary content.
-- **FR-009**: The panel MUST remain usable as a read-only view; it must not allow editing of cell values.
+- **FR-009**: The panel MUST allow direct editing of supported non-binary cell values in the selected table.
 - **FR-010**: The panel MUST remain part of the static deployable application with no backend dependency.
+- **FR-011**: The panel MUST reject edits that cannot be represented by the selected field and keep the previous value unchanged.
+- **FR-012**: The panel MUST keep binary data columns read-only and continue showing them as human-readable summaries.
+- **FR-014**: The panel MUST apply accepted edits to the active database session so subsequent app views and exports use the updated values.
+- **FR-015**: The panel MUST provide a clear way to commit or cancel an in-progress cell edit.
 
 ### Key Entities *(include if feature involves data)*
 
 - **Table List**: The set of table names available in the loaded database, shown in the left side of the panel.
 - **Selected Table**: The table the user has clicked, whose contents are shown on the right side.
 - **Table View**: The right-side display of column headers and row data for the selected table.
+- **Editable Cell**: A displayed field value that can be changed directly by the user when the field is supported for editing.
 - **Active Database Session**: The in-memory database provided by the shell; the panel reads from this, it does not open files itself.
 
 ## Success Criteria *(mandatory)*
@@ -102,12 +127,13 @@ As a user, I want to open the Database Explorer from the Window menu so that I c
 - **SC-002**: A user can click any table in the left list and see its columns and rows appear on the right side.
 - **SC-003**: Manual validation confirms the panel shows a clear placeholder when no database is loaded.
 - **SC-004**: Manual validation confirms that BLOB columns display a byte count summary rather than raw data.
-- **SC-005**: Manual validation confirms the panel does not allow editing of any displayed values.
+- **SC-005**: Manual validation confirms a user can edit a supported field value and see that updated value used by the active app session.
 - **SC-006**: Project lint, typecheck, and build checks complete without new errors for this feature.
+- **SC-007**: Manual validation confirms invalid edits are rejected without corrupting the displayed row or active session.
 
 ## Assumptions
 
 - The panel reads data from the in-memory `ProjectDatabase` already loaded by the shell; it does not query SQLite directly.
 - The table list is fixed to the known schema tables: VARIABLES, BARS, FBOs, FILES, FOLDERS.
-- The panel is read-only in this version; editing is out of scope.
+- Editing is intended for supported scalar values such as text, numbers, and booleans; binary data remains read-only.
 - Row counts are expected to be small enough for full display without pagination in this first version.

@@ -2,6 +2,10 @@ import type { SqlDatabase } from './sql-loader';
 import type { DbBar, DbFbo, DbFile, DbFolder, ProjectDatabase } from './db-schema';
 
 type Row = (number | string | Uint8Array | null)[];
+type VariableColumnPair = {
+  keyColumn: string;
+  valueColumn: string;
+};
 
 function queryRows(db: SqlDatabase, sql: string): Row[] {
   try {
@@ -13,9 +17,7 @@ function queryRows(db: SqlDatabase, sql: string): Row[] {
 
 export function readDatabase(db: SqlDatabase): ProjectDatabase {
   const variables = new Map<string, string>();
-  for (const row of queryRows(db, 'SELECT variable, value FROM VARIABLES')) {
-    variables.set(row[0] as string, (row[1] as string) ?? '');
-  }
+  readVariableRows(db).forEach(([key, value]) => variables.set(key, value));
 
   const bars: DbBar[] = queryRows(
     db,
@@ -28,7 +30,7 @@ export function readDatabase(db: SqlDatabase): ProjectDatabase {
     endTime: r[4] as number,
     enabled: Boolean(r[5]),
     selected: Boolean(r[6]),
-    script: (r[7] as string) ?? '',
+    script: toText(r[7]),
     srcBlending: (r[8] as string) ?? '',
     dstBlending: (r[9] as string) ?? '',
     blendingEQ: (r[10] as string) ?? '',
@@ -74,4 +76,55 @@ export function readDatabase(db: SqlDatabase): ProjectDatabase {
   }));
 
   return { variables, bars, fbos, files, folders };
+}
+
+function readVariableRows(db: SqlDatabase): Array<[string, string]> {
+  const rows: Array<[string, string]> = [];
+
+  for (const columns of discoverVariableColumns(db)) {
+    const query = `SELECT ${quoteIdentifier(columns.keyColumn)}, ${quoteIdentifier(columns.valueColumn)} FROM "variables"`;
+
+    for (const row of queryRows(db, query)) {
+      rows.push([toText(row[0]), toText(row[1])]);
+    }
+  }
+
+  return rows.filter(([key]) => key.length > 0);
+}
+
+function discoverVariableColumns(db: SqlDatabase): VariableColumnPair[] {
+  const tableInfo = queryRows(db, 'PRAGMA table_info("variables")');
+  const columnNames = tableInfo
+    .map((row) => toText(row[1]))
+    .filter((columnName) => columnName.length > 0);
+
+  const keyColumn = findColumn(columnNames, ['variable', 'name', 'key', 'var', 'id']);
+  const valueColumn = findColumn(columnNames, ['value', 'val', 'data']);
+
+  if (keyColumn && valueColumn) {
+    return [{ keyColumn, valueColumn }];
+  }
+
+  return [
+    { keyColumn: 'variable', valueColumn: 'value' },
+    { keyColumn: 'id', valueColumn: 'value' },
+    { keyColumn: 'name', valueColumn: 'value' },
+  ];
+}
+
+function findColumn(columnNames: string[], candidates: string[]): string | undefined {
+  return candidates
+    .map((candidate) => columnNames.find((columnName) => columnName.toLowerCase() === candidate.toLowerCase()))
+    .find((columnName): columnName is string => Boolean(columnName));
+}
+
+function quoteIdentifier(identifier: string): string {
+  return `"${identifier.replace(/"/g, '""')}"`;
+}
+
+function toText(value: number | string | Uint8Array | null): string {
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number') return String(value);
+  return new TextDecoder().decode(value);
 }

@@ -8,10 +8,16 @@ import {
 } from '../../packages/timeline/src/index';
 import type { DbState } from '../state/db-state';
 import type { DbSessionRef } from '../db/db-session';
+import {
+  exportEngineDataPool,
+  isEngineDirectoryPickerSupported,
+  pickEngineDirectory,
+} from '../services/engine-data-export';
 import { createContentRenderer } from './base-panel';
 
 const CLIP_COLOR = '#5e86b8';
 const MARKER_STEP = 2;
+type PreparationStatus = 'idle' | 'selecting-folder' | 'writing-data' | 'ready' | 'error';
 
 export function createTimelinePanel(dbState: DbState, sessionRef: DbSessionRef): IContentRenderer {
   const state = createTimelineState({
@@ -37,6 +43,18 @@ export function createTimelinePanel(dbState: DbState, sessionRef: DbSessionRef):
   ];
 
   let lastTimestamp = 0;
+  let preparationStatus: PreparationStatus = 'idle';
+  let preparationMessage = '';
+
+  function isProjectReady(): boolean {
+    const status = dbState.getSnapshot().status;
+    return Boolean(sessionRef.current && (status === 'open' || status === 'saving'));
+  }
+
+  function setPreparation(status: PreparationStatus, message: string): void {
+    preparationStatus = status;
+    preparationMessage = message;
+  }
 
   function loadFromDb(): void {
     const db = sessionRef.current?.data ?? null;
@@ -46,6 +64,7 @@ export function createTimelinePanel(dbState: DbState, sessionRef: DbSessionRef):
     state.transport.currentTime = 0;
     state.transport.isPlaying = false;
     lastTimestamp = 0;
+    setPreparation('idle', '');
 
     if (!db) return;
 
@@ -68,6 +87,13 @@ export function createTimelinePanel(dbState: DbState, sessionRef: DbSessionRef):
         metadata: { dbId: bar.id },
       }),
     );
+  }
+
+  function resetTransport(): void {
+    state.transport.currentTime = 0;
+    state.transport.isPlaying = false;
+    lastTimestamp = 0;
+    setPreparation('idle', '');
   }
 
   function formatTime(value: number): string {
@@ -95,9 +121,16 @@ export function createTimelinePanel(dbState: DbState, sessionRef: DbSessionRef):
     element.className = 'panel panel--timeline';
 
     const render = (): void => {
+      const projectReady = isProjectReady();
+      const isPreparing = preparationStatus === 'selecting-folder' || preparationStatus === 'writing-data';
+      const playDisabled = !projectReady || isPreparing;
       const playheadLeft = state.transport.currentTime * state.viewport.pixelsPerSecond * state.viewport.zoom;
       const timelineWidth = state.transport.duration * state.viewport.pixelsPerSecond * state.viewport.zoom;
       const markerCount = Math.ceil(state.transport.duration / MARKER_STEP) + 1;
+      const statusText = !projectReady
+        ? 'Open a SQLite project to enable playback preparation.'
+        : preparationMessage;
+      const playTitle = state.transport.isPlaying ? 'Pause' : 'Play';
 
       element.innerHTML = `
         <div class="timeline-panel">
@@ -169,45 +202,87 @@ export function createTimelinePanel(dbState: DbState, sessionRef: DbSessionRef):
           </div>
 
           <footer class="timeline-panel__transport-bar">
-            <button data-action="start" title="Go to beginning" aria-label="Go to beginning">
+            <button data-action="start" title="Go to beginning" aria-label="Go to beginning" disabled>
               <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
                 <path d="M6 5h2v14H6zM18 5L8 12l10 7V5z" />
               </svg>
             </button>
-            <button data-action="rewind" title="Rewind" aria-label="Rewind">
+            <button data-action="rewind" title="Rewind" aria-label="Rewind" disabled>
               <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
                 <path d="M19 5 9 12l10 7V5zM11 5 1 12l10 7V5z" />
               </svg>
             </button>
-            <button data-action="play" class="timeline-panel__transport-main" title="${
-              state.transport.isPlaying ? 'Pause' : 'Play'
-            }" aria-label="${state.transport.isPlaying ? 'Pause' : 'Play'}">
+            <button data-action="play" class="timeline-panel__transport-main" title="${playTitle}" aria-label="${playTitle}" ${playDisabled ? 'disabled' : ''}>
               <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
                 ${state.transport.isPlaying
                   ? '<path d="M6 5h4v14H6zM14 5h4v14h-4z" />'
                   : '<path d="M7 5v14l11-7z" />'}
               </svg>
             </button>
-            <button data-action="forward" title="Forward" aria-label="Forward">
+            <button data-action="forward" title="Forward" aria-label="Forward" disabled>
               <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
                 <path d="M13 5 23 12 13 19V5zM5 5 15 12 5 19V5z" />
               </svg>
             </button>
-            <button data-action="end" title="Go to end" aria-label="Go to end">
+            <button data-action="end" title="Go to end" aria-label="Go to end" disabled>
               <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
                 <path d="M16 5h2v14h-2zM6 5v14l10-7z" />
               </svg>
             </button>
+            <span class="timeline-panel__transport-status" data-status="${preparationStatus}">${statusText}</span>
           </footer>
         </div>
       `;
     };
 
+    const preparePlayback = async (): Promise<void> => {
+      const session = sessionRef.current;
+      if (!session || !isProjectReady()) return;
+
+      state.transport.isPlaying = false;
+
+      if (!isEngineDirectoryPickerSupported()) {
+        setPreparation('error', 'Folder selection is not supported in this browser.');
+        render();
+        return;
+      }
+
+      setPreparation('selecting-folder', 'Choose the visualization engine folder.');
+      render();
+
+      try {
+        const result = await exportEngineDataPool({
+          db: session.data,
+          pickDirectory: async () => {
+            const directory = await pickEngineDirectory();
+            if (directory) {
+              setPreparation('writing-data', 'Writing engine resource pool...');
+              render();
+            }
+            return directory;
+          },
+        });
+
+        if (result.status === 'cancelled') {
+          setPreparation('idle', 'Engine folder selection cancelled.');
+          render();
+          return;
+        }
+
+        setPreparation(
+          'ready',
+          `Engine data prepared in ${result.directoryName} (${result.filesWritten} files, ${result.sectionsWritten} sections, ${result.resourcesCopied} resources, config).`,
+        );
+        render();
+      } catch (err) {
+        setPreparation('error', err instanceof Error ? err.message : 'Could not write engine resource pool.');
+        render();
+      }
+    };
+
     const handleAction = (action: string): void => {
       if (action === 'play') {
-        state.transport.isPlaying = !state.transport.isPlaying;
-        lastTimestamp = 0;
-        render();
+        void preparePlayback();
         return;
       }
 
@@ -265,8 +340,10 @@ export function createTimelinePanel(dbState: DbState, sessionRef: DbSessionRef):
     dbState.subscribe((snapshot) => {
       if (snapshot.status === 'open') {
         loadFromDb();
-        render();
+      } else if (!isProjectReady()) {
+        resetTransport();
       }
+      render();
     });
 
     render();

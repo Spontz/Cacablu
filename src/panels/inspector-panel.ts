@@ -62,7 +62,7 @@ export function createInspectorPanel(
       return sessionRef.current?.data.files.find((file) => file.id === id) ?? null;
     }
 
-    function renderEmpty(message = 'Select an image file in Resources to preview it here.'): void {
+    function renderEmpty(message = 'Select an image file in Pool to preview it here.'): void {
       clearPreviewUrl();
       clearModelViewer();
       element.replaceChildren(createNote(message));

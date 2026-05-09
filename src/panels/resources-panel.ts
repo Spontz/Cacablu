@@ -3,12 +3,8 @@ import type { IContentRenderer } from 'dockview-core';
 import type { AppState } from '../state/app-state';
 import type { DbState } from '../state/db-state';
 import type { DbSessionRef } from '../db/db-session';
-import type { DbFolder, DbFile } from '../db/db-schema';
+import { buildResourceTree, type ResourceTreeNode } from '../resources/resource-tree';
 import { createContentRenderer } from './base-panel';
-
-type FolderNode = { kind: 'folder'; id: number; name: string; children: TreeNode[] };
-type FileNode = { kind: 'file'; id: number; name: string; fileType: string };
-type TreeNode = FolderNode | FileNode;
 
 // Path data per icon — 16×16 viewBox, fill only
 // Each entry is an array of [d, opacity?] tuples (one per <path>)
@@ -92,31 +88,6 @@ function fileIconName(fileName: string): string {
   return 'unknown';
 }
 
-function buildTree(folders: DbFolder[], files: DbFile[]): TreeNode[] {
-  const folderNodes = new Map<number, FolderNode>();
-  for (const f of folders) {
-    folderNodes.set(f.id, { kind: 'folder', id: f.id, name: f.name, children: [] });
-  }
-
-  const roots: TreeNode[] = [];
-
-  for (const f of folders) {
-    const node = folderNodes.get(f.id)!;
-    const parent = f.parent ? folderNodes.get(f.parent) : undefined;
-    if (parent) parent.children.push(node);
-    else roots.push(node);
-  }
-
-  for (const f of files) {
-    const node: FileNode = { kind: 'file', id: f.id, name: f.name, fileType: f.type };
-    const parent = f.parent ? folderNodes.get(f.parent) : undefined;
-    if (parent) parent.children.push(node);
-    else roots.push(node);
-  }
-
-  return roots;
-}
-
 export function createResourcesPanel(
   state: AppState,
   dbState: DbState,
@@ -136,7 +107,7 @@ export function createResourcesPanel(
 
     element.append(placeholder, treeEl);
 
-    function renderNode(node: TreeNode, parent: HTMLElement): void {
+    function renderNode(node: ResourceTreeNode, parent: HTMLElement): void {
       const li = document.createElement('li');
       const selection = state.getSnapshot().resourceSelection;
 
@@ -173,7 +144,7 @@ export function createResourcesPanel(
         li.dataset.resourceKind = 'file';
         li.dataset.resourceId = String(node.id);
         li.dataset.resourceName = node.name;
-        li.dataset.resourceType = node.fileType;
+        li.dataset.resourceType = node.type;
         if (selection.kind === 'file' && selection.id === node.id) {
           li.classList.add('is-selected');
         }
@@ -197,7 +168,7 @@ export function createResourcesPanel(
 
       if (!db) return;
 
-      const roots = buildTree(db.folders, db.files);
+      const roots = buildResourceTree(db);
 
       if (roots.length === 0) {
         const hint = document.createElement('p');

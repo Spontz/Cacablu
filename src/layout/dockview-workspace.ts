@@ -37,7 +37,7 @@ export function createDockviewWorkspace(options: WorkspaceOptions): DockviewWork
     dockview.addPanel({
       id: 'resources',
       component: 'resources-panel',
-      title: 'Resources',
+      title: 'Pool',
       renderer: 'always',
       position: {
         referencePanel: 'preview',

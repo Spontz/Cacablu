@@ -7,7 +7,7 @@ export function createDefaultMenuActions(): MenuActionDefinition[] {
     { id: 'save-database-as', label: 'Guardar como', menu: 'File', disabled: true },
     { id: 'reset-layout', label: 'Reset Layout', menu: 'View' },
     { id: 'toggle-db-explorer', label: 'Database Explorer', menu: 'Window' },
-    { id: 'toggle-resources', label: 'Focus Resources', menu: 'Window' },
+    { id: 'toggle-resources', label: 'Focus Pool', menu: 'Window' },
     { id: 'toggle-timeline', label: 'Focus Timeline', menu: 'Window' },
     { id: 'toggle-preview', label: 'Focus Preview', menu: 'Window' },
     { id: 'toggle-inspector', label: 'Focus Inspector', menu: 'Window' },

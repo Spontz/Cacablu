@@ -4,6 +4,9 @@ import { readDatabase } from './db-reader';
 import { serializeDatabase } from './db-writer';
 import type { ProjectDatabase } from './db-schema';
 
+type EditableDbValue = string | number | boolean | null;
+type DbTableName = 'variables' | 'bars' | 'fbos' | 'files' | 'folders';
+
 // First 16 bytes of any valid SQLite file: "SQLite format 3\0"
 const SQLITE_MAGIC = new Uint8Array([
   0x53, 0x51, 0x4c, 0x69, 0x74, 0x65, 0x20, 0x66,
@@ -13,6 +16,7 @@ const SQLITE_MAGIC = new Uint8Array([
 export interface DbSession {
   readonly fileName: string;
   readonly data: ProjectDatabase;
+  updateCell(tableName: DbTableName, rowKey: string | number, columnName: string, value: EditableDbValue): void;
   save(): Promise<void>;
   saveAs(handle: FileSystemFileHandle): Promise<DbSession>;
   close(): void;
@@ -51,6 +55,14 @@ function makeSession(handle: FileSystemFileHandle, db: SqlDatabase, data: Projec
       return data;
     },
 
+    updateCell(tableName, rowKey, columnName, value): void {
+      const whereColumn = tableName === 'variables' ? 'variable' : 'id';
+      db.run(
+        `UPDATE ${quoteIdentifier(tableName)} SET ${quoteIdentifier(columnName)} = ? WHERE ${quoteIdentifier(whereColumn)} = ?`,
+        [toSqlValue(value), rowKey],
+      );
+    },
+
     async save(): Promise<void> {
       // .slice() copies the WASM-backed buffer into a plain ArrayBuffer
       const blob = new Blob([serializeDatabase(db).slice()]);
@@ -71,4 +83,13 @@ function makeSession(handle: FileSystemFileHandle, db: SqlDatabase, data: Projec
       db.close();
     },
   };
+}
+
+function quoteIdentifier(identifier: string): string {
+  return `"${identifier.replace(/"/g, '""')}"`;
+}
+
+function toSqlValue(value: EditableDbValue): string | number | null {
+  if (typeof value === 'boolean') return value ? 1 : 0;
+  return value;
 }
