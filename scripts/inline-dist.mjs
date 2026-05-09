@@ -30,10 +30,10 @@ if (styleMatch) {
 
 let nextHtml = html
   .replace(styleMatch?.[0] ?? '', '')
-  .replace(scriptMatch[0], `<script type="module">${scriptSource}</script>`);
+  .replace(scriptMatch[0], () => `<script type="module">${scriptSource}</script>`);
 
 if (styleBlock) {
-  nextHtml = nextHtml.replace('</head>', `${styleBlock}</head>`);
+  nextHtml = nextHtml.replace('</head>', () => `${styleBlock}</head>`);
 }
 
 await writeFile(htmlPath, nextHtml, 'utf8');
