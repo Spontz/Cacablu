@@ -3,6 +3,7 @@ import type { IContentRenderer } from 'dockview-core';
 import type { AppState } from '../state/app-state';
 import type { DbState } from '../state/db-state';
 import type { DbSessionRef } from '../db/db-session';
+import type { ConnectionController } from '../ws/connection';
 import { createContentRenderer } from './base-panel';
 import { createDbExplorerPanel } from './db-explorer-panel';
 import { createEventsPanel } from './events-panel';
@@ -19,6 +20,7 @@ export function createPanelRegistry(
   state: AppState,
   dbState: DbState,
   sessionRef: DbSessionRef,
+  connection: ConnectionController,
 ): PanelRegistry {
   return {
     create(name: string): IContentRenderer {
@@ -26,9 +28,9 @@ export function createPanelRegistry(
         case 'resources-panel':
           return createResourcesPanel(state, dbState, sessionRef);
         case 'timeline-panel':
-          return createTimelinePanel(dbState, sessionRef);
+          return createTimelinePanel(state, dbState, sessionRef, connection);
         case 'preview-panel':
-          return createPreviewPanel(state);
+          return createPreviewPanel(connection);
         case 'inspector-panel':
           return createInspectorPanel(state, dbState, sessionRef);
         case 'events-panel':

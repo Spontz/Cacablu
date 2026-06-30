@@ -16,7 +16,6 @@ export function createEventsPanel(state: AppState): IContentRenderer {
         list.innerHTML = '';
 
         const items = [
-          `Connection: ${snapshot.connectionLabel}`,
           `Active panel: ${snapshot.activePanelId ?? 'none'}`,
           `Last error: ${snapshot.lastError ?? 'none'}`,
         ];

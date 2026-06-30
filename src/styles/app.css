@@ -314,12 +314,42 @@ button {
 }
 
 .panel--preview {
-  display: grid;
-  place-content: center;
-  justify-items: center;
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  overflow: hidden;
   background:
     radial-gradient(circle at top, rgba(49, 196, 141, 0.14), transparent 32%),
     linear-gradient(135deg, #171d22, #0f1418);
+}
+
+.stream-preview {
+  position: relative;
+  min-height: 0;
+  height: 100%;
+  flex: 1 1 auto;
+  background: #05070a;
+}
+
+.stream-preview__video {
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  object-fit: contain;
+}
+
+.stream-preview__note,
+.stream-preview__fallback {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  margin: 0;
+  padding: 16px;
+  max-width: none;
+  text-align: center;
+  pointer-events: none;
 }
 
 .timeline-strip {
@@ -528,7 +558,7 @@ button {
 }
 
 .timeline-panel__track-meta {
-  padding: 0.45rem 1rem;
+  padding: 0 0.65rem;
   display: flex;
   flex-direction: column;
   justify-content: center;
@@ -537,7 +567,8 @@ button {
 }
 
 .timeline-panel__track-meta strong {
-  font-size: 0.9rem;
+  font-size: 0.68rem;
+  line-height: 1;
 }
 
 .timeline-panel__lane {
@@ -548,31 +579,32 @@ button {
 
 .timeline-panel__clip {
   position: absolute;
-  top: 0.15rem;
-  bottom: 0.15rem;
+  top: 2px;
+  bottom: 2px;
   display: flex;
   flex-direction: column;
   justify-content: center;
-  gap: 0.15rem;
-  padding: 0.42rem 0.62rem;
+  gap: 0;
+  padding: 0 0.42rem;
   border: 1px solid rgba(116, 137, 166, 0.42);
   border-radius: 0;
   background:
     linear-gradient(180deg, rgba(41, 56, 78, 0.96), rgba(24, 34, 48, 0.98)),
     #111827;
-  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.22);
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.22);
   overflow: hidden;
 }
 
 .timeline-panel__clip.is-active {
   box-shadow:
     0 0 0 1px rgba(97, 215, 255, 0.18),
-    0 12px 24px rgba(0, 0, 0, 0.26);
+    0 4px 10px rgba(0, 0, 0, 0.26);
 }
 
 .timeline-panel__clip-label {
-  font-size: 0.8rem;
+  font-size: 0.62rem;
   font-weight: 600;
+  line-height: 1;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;

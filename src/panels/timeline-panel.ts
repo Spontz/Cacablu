@@ -6,20 +6,22 @@ import {
   createTrack,
   normalizeRange,
 } from '../../packages/timeline/src/index';
+import type { AppState } from '../state/app-state';
 import type { DbState } from '../state/db-state';
 import type { DbSessionRef } from '../db/db-session';
-import {
-  exportEngineDataPool,
-  isEngineDirectoryPickerSupported,
-  pickEngineDirectory,
-} from '../services/engine-data-export';
+import type { ConnectionController } from '../ws/connection';
 import { createContentRenderer } from './base-panel';
 
 const CLIP_COLOR = '#5e86b8';
 const MARKER_STEP = 2;
-type PreparationStatus = 'idle' | 'selecting-folder' | 'writing-data' | 'ready' | 'error';
+const TRANSPORT_STEP_SECONDS = 1;
 
-export function createTimelinePanel(dbState: DbState, sessionRef: DbSessionRef): IContentRenderer {
+export function createTimelinePanel(
+  appState: AppState,
+  dbState: DbState,
+  sessionRef: DbSessionRef,
+  connection: ConnectionController,
+): IContentRenderer {
   const state = createTimelineState({
     duration: 40,
     currentTime: 5,
@@ -29,9 +31,9 @@ export function createTimelinePanel(dbState: DbState, sessionRef: DbSessionRef):
   });
 
   state.tracks = [
-    createTrack({ id: 'layer-01', label: 'Layer 01', kind: 'generic', order: 0, height: 56 }),
-    createTrack({ id: 'layer-02', label: 'Layer 02', kind: 'generic', order: 1, height: 52 }),
-    createTrack({ id: 'layer-03', label: 'Layer 03', kind: 'generic', order: 2, height: 46 }),
+    createTrack({ id: 'layer-01', label: 'Layer 01', kind: 'generic', order: 0, height: 18 }),
+    createTrack({ id: 'layer-02', label: 'Layer 02', kind: 'generic', order: 1, height: 18 }),
+    createTrack({ id: 'layer-03', label: 'Layer 03', kind: 'generic', order: 2, height: 18 }),
   ];
 
   state.clips = [
@@ -43,17 +45,16 @@ export function createTimelinePanel(dbState: DbState, sessionRef: DbSessionRef):
   ];
 
   let lastTimestamp = 0;
-  let preparationStatus: PreparationStatus = 'idle';
-  let preparationMessage = '';
+  let pendingPlayback: { playing: boolean; until: number } | null = null;
+  let lastRenderedPlaying = false;
+  let lastRenderedDuration = Number.NaN;
+  let lastRenderedConnected = false;
+  let runtimeAnchorTime = state.transport.currentTime;
+  let runtimeAnchorTimestamp = performance.now();
 
   function isProjectReady(): boolean {
     const status = dbState.getSnapshot().status;
     return Boolean(sessionRef.current && (status === 'open' || status === 'saving'));
-  }
-
-  function setPreparation(status: PreparationStatus, message: string): void {
-    preparationStatus = status;
-    preparationMessage = message;
   }
 
   function loadFromDb(): void {
@@ -64,7 +65,6 @@ export function createTimelinePanel(dbState: DbState, sessionRef: DbSessionRef):
     state.transport.currentTime = 0;
     state.transport.isPlaying = false;
     lastTimestamp = 0;
-    setPreparation('idle', '');
 
     if (!db) return;
 
@@ -74,7 +74,7 @@ export function createTimelinePanel(dbState: DbState, sessionRef: DbSessionRef):
     const layerNums = [...new Set(db.bars.map((b) => b.layer))].sort((a, b) => a - b);
 
     state.tracks = layerNums.map((layer, index) =>
-      createTrack({ id: `layer-${layer}`, label: `Layer ${layer}`, kind: 'generic', order: index, height: 52 }),
+      createTrack({ id: `layer-${layer}`, label: `Layer ${layer}`, kind: 'generic', order: index, height: 18 }),
     );
 
     state.clips = db.bars.map((bar) =>
@@ -93,7 +93,8 @@ export function createTimelinePanel(dbState: DbState, sessionRef: DbSessionRef):
     state.transport.currentTime = 0;
     state.transport.isPlaying = false;
     lastTimestamp = 0;
-    setPreparation('idle', '');
+    runtimeAnchorTime = 0;
+    runtimeAnchorTimestamp = performance.now();
   }
 
   function formatTime(value: number): string {
@@ -120,16 +121,41 @@ export function createTimelinePanel(dbState: DbState, sessionRef: DbSessionRef):
   return createContentRenderer((element) => {
     element.className = 'panel panel--timeline';
 
-    const render = (): void => {
-      const projectReady = isProjectReady();
-      const isPreparing = preparationStatus === 'selecting-folder' || preparationStatus === 'writing-data';
-      const playDisabled = !projectReady || isPreparing;
+    const updatePlayhead = (): void => {
+      const playhead = element.querySelector<HTMLElement>('.timeline-panel__playhead');
+      if (!playhead) {
+        return;
+      }
+
+      const playheadLeft = state.transport.currentTime * state.viewport.pixelsPerSecond * state.viewport.zoom;
+      playhead.style.left = `${playheadLeft}px`;
+
+      const label = playhead.querySelector('span');
+      if (label) {
+        label.textContent = `${formatTime(state.transport.currentTime)}s`;
+      }
+    };
+
+    const render = (force = false): void => {
+      const transportDisabled = !connection.isConnected();
+      const connected = !transportDisabled;
+      if (
+        !force &&
+        state.transport.isPlaying === lastRenderedPlaying &&
+        state.transport.duration === lastRenderedDuration &&
+        connected === lastRenderedConnected
+      ) {
+        updatePlayhead();
+        return;
+      }
+
+      lastRenderedPlaying = state.transport.isPlaying;
+      lastRenderedDuration = state.transport.duration;
+      lastRenderedConnected = connected;
+
       const playheadLeft = state.transport.currentTime * state.viewport.pixelsPerSecond * state.viewport.zoom;
       const timelineWidth = state.transport.duration * state.viewport.pixelsPerSecond * state.viewport.zoom;
       const markerCount = Math.ceil(state.transport.duration / MARKER_STEP) + 1;
-      const statusText = !projectReady
-        ? 'Open a SQLite project to enable playback preparation.'
-        : preparationMessage;
       const playTitle = state.transport.isPlaying ? 'Pause' : 'Play';
 
       element.innerHTML = `
@@ -202,120 +228,108 @@ export function createTimelinePanel(dbState: DbState, sessionRef: DbSessionRef):
           </div>
 
           <footer class="timeline-panel__transport-bar">
-            <button data-action="start" title="Go to beginning" aria-label="Go to beginning" disabled>
+            <button data-action="start" title="Go to beginning" aria-label="Go to beginning" ${transportDisabled ? 'disabled' : ''}>
               <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
                 <path d="M6 5h2v14H6zM18 5L8 12l10 7V5z" />
               </svg>
             </button>
-            <button data-action="rewind" title="Rewind" aria-label="Rewind" disabled>
+            <button data-action="rewind" title="Rewind" aria-label="Rewind" ${transportDisabled ? 'disabled' : ''}>
               <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
                 <path d="M19 5 9 12l10 7V5zM11 5 1 12l10 7V5z" />
               </svg>
             </button>
-            <button data-action="play" class="timeline-panel__transport-main" title="${playTitle}" aria-label="${playTitle}" ${playDisabled ? 'disabled' : ''}>
+            <button data-action="play" class="timeline-panel__transport-main" title="${playTitle}" aria-label="${playTitle}" ${transportDisabled ? 'disabled' : ''}>
               <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
                 ${state.transport.isPlaying
                   ? '<path d="M6 5h4v14H6zM14 5h4v14h-4z" />'
                   : '<path d="M7 5v14l11-7z" />'}
               </svg>
             </button>
-            <button data-action="forward" title="Forward" aria-label="Forward" disabled>
+            <button data-action="forward" title="Forward" aria-label="Forward" ${transportDisabled ? 'disabled' : ''}>
               <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
                 <path d="M13 5 23 12 13 19V5zM5 5 15 12 5 19V5z" />
               </svg>
             </button>
-            <button data-action="end" title="Go to end" aria-label="Go to end" disabled>
+            <button data-action="end" title="Go to end" aria-label="Go to end" ${transportDisabled ? 'disabled' : ''}>
               <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
                 <path d="M16 5h2v14h-2zM6 5v14l10-7z" />
               </svg>
             </button>
-            <span class="timeline-panel__transport-status" data-status="${preparationStatus}">${statusText}</span>
           </footer>
         </div>
       `;
+
+      updatePlayhead();
     };
 
-    const preparePlayback = async (): Promise<void> => {
-      const session = sessionRef.current;
-      if (!session || !isProjectReady()) return;
-
-      state.transport.isPlaying = false;
-
-      if (!isEngineDirectoryPickerSupported()) {
-        setPreparation('error', 'Folder selection is not supported in this browser.');
+    const handleAction = (action: string): void => {
+      if (!connection.isConnected()) {
         render();
         return;
       }
 
-      setPreparation('selecting-folder', 'Choose the visualization engine folder.');
-      render();
-
-      try {
-        const result = await exportEngineDataPool({
-          db: session.data,
-          pickDirectory: async () => {
-            const directory = await pickEngineDirectory();
-            if (directory) {
-              setPreparation('writing-data', 'Writing engine resource pool...');
-              render();
-            }
-            return directory;
-          },
-        });
-
-        if (result.status === 'cancelled') {
-          setPreparation('idle', 'Engine folder selection cancelled.');
-          render();
-          return;
-        }
-
-        setPreparation(
-          'ready',
-          `Engine data prepared in ${result.directoryName} (${result.filesWritten} files, ${result.sectionsWritten} sections, ${result.resourcesCopied} resources, config).`,
-        );
-        render();
-      } catch (err) {
-        setPreparation('error', err instanceof Error ? err.message : 'Could not write engine resource pool.');
-        render();
-      }
-    };
-
-    const handleAction = (action: string): void => {
       if (action === 'play') {
-        void preparePlayback();
+        const shouldPlay = !state.transport.isPlaying;
+        if (connection.send({ type: 'runtime.toggle' })) {
+          pendingPlayback = { playing: shouldPlay, until: Date.now() + 1000 };
+        }
         return;
       }
 
       if (action === 'start') {
+        runtimeAnchorTime = 0;
+        runtimeAnchorTimestamp = performance.now();
         state.transport.currentTime = 0;
-        state.transport.isPlaying = false;
-        lastTimestamp = 0;
-        render();
+        updatePlayhead();
+        connection.send({ type: 'runtime.seek', time: 0 });
         return;
       }
 
       if (action === 'rewind') {
-        state.transport.currentTime = Math.max(state.transport.currentTime - 1, 0);
-        render();
+        const time = Math.max(state.transport.currentTime - TRANSPORT_STEP_SECONDS, 0);
+        runtimeAnchorTime = time;
+        runtimeAnchorTimestamp = performance.now();
+        state.transport.currentTime = time;
+        updatePlayhead();
+        connection.send({ type: 'runtime.seek', time });
         return;
       }
 
       if (action === 'forward') {
-        state.transport.currentTime = Math.min(state.transport.currentTime + 1, state.transport.duration);
-        render();
+        const time = Math.min(state.transport.currentTime + TRANSPORT_STEP_SECONDS, state.transport.duration);
+        runtimeAnchorTime = time;
+        runtimeAnchorTimestamp = performance.now();
+        state.transport.currentTime = time;
+        updatePlayhead();
+        connection.send({ type: 'runtime.seek', time });
         return;
       }
 
       if (action === 'end') {
+        runtimeAnchorTime = state.transport.duration;
+        runtimeAnchorTimestamp = performance.now();
         state.transport.currentTime = state.transport.duration;
-        state.transport.isPlaying = false;
-        lastTimestamp = 0;
-        render();
-        return;
+        updatePlayhead();
+        connection.send({ type: 'runtime.seek', time: state.transport.duration });
       }
     };
 
     const tick = (timestamp: number): void => {
+      if (connection.isConnected()) {
+        if (state.transport.isPlaying) {
+          const elapsedSeconds = (performance.now() - runtimeAnchorTimestamp) / 1000;
+          state.transport.currentTime = Math.min(
+            Math.max(runtimeAnchorTime + elapsedSeconds * state.transport.playbackRate, 0),
+            state.transport.duration,
+          );
+          updatePlayhead();
+        }
+
+        lastTimestamp = 0;
+        requestAnimationFrame(tick);
+        return;
+      }
+
       if (!state.transport.isPlaying) {
         lastTimestamp = 0;
         requestAnimationFrame(tick);
@@ -340,9 +354,51 @@ export function createTimelinePanel(dbState: DbState, sessionRef: DbSessionRef):
     dbState.subscribe((snapshot) => {
       if (snapshot.status === 'open') {
         loadFromDb();
+        render(true);
+        return;
       } else if (!isProjectReady()) {
         resetTransport();
+        render(true);
+        return;
       }
+      render();
+    });
+
+    connection.subscribeRuntime((runtime) => {
+      const duration = runtime.endTime !== null && runtime.endTime > 0 ? runtime.endTime : state.transport.duration;
+
+      state.transport.currentTime = Math.min(Math.max(runtime.time, 0), Math.max(duration, 0));
+      runtimeAnchorTime = state.transport.currentTime;
+      runtimeAnchorTimestamp = performance.now();
+
+      if (runtime.playing !== null) {
+        if (
+          pendingPlayback &&
+          runtime.playing !== pendingPlayback.playing &&
+          Date.now() < pendingPlayback.until
+        ) {
+          return;
+        }
+
+        if (pendingPlayback && runtime.playing === pendingPlayback.playing) {
+          pendingPlayback = null;
+        }
+
+        state.transport.isPlaying = runtime.playing;
+        if (!runtime.playing) {
+          runtimeAnchorTime = state.transport.currentTime;
+          runtimeAnchorTimestamp = performance.now();
+        }
+      }
+
+      if (runtime.endTime !== null && runtime.endTime > 0) {
+        state.transport.duration = runtime.endTime;
+      }
+
+      render();
+    });
+
+    appState.subscribe(() => {
       render();
     });
 
@@ -383,7 +439,7 @@ export function createTimelinePanel(dbState: DbState, sessionRef: DbSessionRef):
           (state.viewport.pixelsPerSecond * state.viewport.zoom);
 
         state.viewport.zoom = nextZoom;
-        render();
+        render(true);
 
         requestAnimationFrame(() => {
           const refreshedViewport = element.querySelector<HTMLElement>('.timeline-panel__viewport');
@@ -418,6 +474,11 @@ export function createTimelinePanel(dbState: DbState, sessionRef: DbSessionRef):
       );
 
       state.transport.currentTime = nextTime;
+      runtimeAnchorTime = nextTime;
+      runtimeAnchorTimestamp = performance.now();
+      if (connection.isConnected()) {
+        connection.send({ type: 'runtime.seek', time: nextTime });
+      }
       render();
     });
   });

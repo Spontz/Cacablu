@@ -19,7 +19,7 @@ export function createAppShell(root: HTMLElement): AppShell {
   const dbState = createDbState();
   const sessionRef = createDbSessionRef();
   const connection = createConnectionController(state);
-  const panels = createPanelRegistry(state, dbState, sessionRef);
+  const panels = createPanelRegistry(state, dbState, sessionRef, connection);
   const workspace = createDockviewWorkspace({ state, panels });
 
   let session: DbSession | null = null;
