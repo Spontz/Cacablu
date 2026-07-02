@@ -24,6 +24,7 @@ export function createPreviewPanel(connection: ConnectionController): IContentRe
       let peer: RTCPeerConnection | null = null;
       let started = false;
       let previewDisabled = false;
+      let awaitingOffer = false;
       let readyForRemoteCandidates = false;
       let pendingCandidates: RTCIceCandidateInit[] = [];
       let pendingMove: { x: number; y: number } | null = null;
@@ -329,6 +330,7 @@ export function createPreviewPanel(connection: ConnectionController): IContentRe
           peer = null;
         }
         video.srcObject = null;
+        awaitingOffer = false;
         readyForRemoteCandidates = false;
         pendingCandidates = [];
       }
@@ -373,7 +375,10 @@ export function createPreviewPanel(connection: ConnectionController): IContentRe
           }
         });
 
-        connection.send({ type: 'webrtc.request' });
+        awaitingOffer = connection.send({ type: 'webrtc.request' });
+        if (!awaitingOffer) {
+          closePeer();
+        }
       }
 
       const unsubscribeSignals = connection.subscribeWebRtc((message) => {
@@ -398,6 +403,10 @@ export function createPreviewPanel(connection: ConnectionController): IContentRe
           }
 
           if (message.type === 'webrtc.offer') {
+            if (!awaitingOffer || peer.remoteDescription) {
+              return;
+            }
+            awaitingOffer = false;
             previewDisabled = false;
             await peer.setRemoteDescription({ type: 'offer', sdp: message.sdp });
             const answer = await peer.createAnswer();

@@ -28,7 +28,20 @@ export function createAppShell(root: HTMLElement): AppShell {
   const sessionRef = createDbSessionRef();
   const connection = createConnectionController(state);
   const panels = createPanelRegistry(state, dbState, sessionRef, connection);
-  const workspace = createDockviewWorkspace({ state, panels });
+  const workspace = createDockviewWorkspace({
+    state,
+    panels,
+    onPanelOpened: (panelId) => {
+      if (panelId === 'preview') {
+        enablePhoenixPreview();
+      }
+    },
+    onPanelClosed: (panelId) => {
+      if (panelId === 'preview') {
+        disablePhoenixPreview();
+      }
+    },
+  });
   const phoenixAssets = createPhoenixAssetClient();
   const phoenixSections = createPhoenixSectionClient();
 
@@ -63,12 +76,10 @@ export function createAppShell(root: HTMLElement): AppShell {
           workspace.openPanel('resources', { widthRatio: SIDE_PANEL_WIDTH_RATIO });
           break;
         case 'toggle-timeline':
-          if (session) {
-            workspace.openPanel('timeline');
-          }
+          workspace.openPanel('timeline');
           break;
         case 'toggle-preview':
-          requestPhoenixPreview();
+          workspace.openPanel('preview');
           break;
         case 'toggle-inspector':
           workspace.openPanel('inspector', { widthRatio: SIDE_PANEL_WIDTH_RATIO });
@@ -209,12 +220,11 @@ export function createAppShell(root: HTMLElement): AppShell {
       state.subscribe((snapshot) => {
         updateStatusBadge(shell, snapshot.connectionLabel, snapshot.connectionStatus);
         if (snapshot.connectionStatus === 'connected' && lastConnectionStatus !== 'connected') {
-          requestPhoenixPreview();
+          if (workspace.isPanelOpen('preview')) {
+            enablePhoenixPreview();
+          }
         }
         lastConnectionStatus = snapshot.connectionStatus;
-        if (snapshot.connectionStatus !== 'connected') {
-          workspace.closePanel('preview');
-        }
         if (snapshot.resourceSelection.kind === 'file' && snapshot.resourceSelection.id !== lastInspectorSelectionId) {
           lastInspectorSelectionId = snapshot.resourceSelection.id;
           workspace.openPanel('inspector', { widthRatio: SIDE_PANEL_WIDTH_RATIO });
@@ -235,30 +245,20 @@ export function createAppShell(root: HTMLElement): AppShell {
       connection.subscribeWebRtc((message) => {
         if (message.type === 'webrtc.offer') {
           workspace.openPanel('preview');
-          return;
-        }
-
-        if (message.type === 'webrtc.state') {
-          if (isWebRtcPreviewActive(message.state)) {
-            workspace.openPanel('preview');
-          } else {
-            workspace.closePanel('preview');
-          }
-          return;
-        }
-
-        if (message.type === 'error' && message.code === 'streaming-disabled') {
-          workspace.closePanel('preview');
         }
       });
-
-      window.setTimeout(requestPhoenixPreview, 0);
     },
   };
 
-  function requestPhoenixPreview(): void {
+  function enablePhoenixPreview(): void {
     if (connection.isConnected()) {
-      connection.send({ type: 'webrtc.request' });
+      connection.send({ type: 'webrtc.enable' });
+    }
+  }
+
+  function disablePhoenixPreview(): void {
+    if (connection.isConnected()) {
+      connection.send({ type: 'webrtc.disable' });
     }
   }
 
@@ -445,15 +445,6 @@ function updatePoolSyncIndicator(indicator: HTMLElement | null, progress: Projec
 
 function isAbortError(value: unknown): boolean {
   return value instanceof DOMException && value.name === 'AbortError';
-}
-
-function isWebRtcPreviewActive(state: string): boolean {
-  const normalized = state.trim().toLowerCase();
-  if (!normalized) return false;
-  if (['disabled', 'stopped', 'inactive', 'off', 'closed', 'failed', 'disconnected'].includes(normalized)) {
-    return false;
-  }
-  return ['enabled', 'running', 'active', 'streaming', 'connected', 'connecting'].includes(normalized);
 }
 
 function createStatusBadge(state: ReturnType<typeof createAppState>): HTMLElement {

@@ -9,6 +9,8 @@ import type { AppState } from '../state/app-state';
 interface WorkspaceOptions {
   state: AppState;
   panels: PanelRegistry;
+  onPanelOpened?: (panelId: string) => void;
+  onPanelClosed?: (panelId: string) => void;
 }
 
 export interface DockviewWorkspace {
@@ -16,6 +18,7 @@ export interface DockviewWorkspace {
   resetLayout(): void;
   openPanel(panelId: string, options?: OpenPanelOptions): void;
   closePanel(panelId: string): void;
+  isPanelOpen(panelId: string): boolean;
   openFloating(id: string, component: string, title: string): void;
 }
 
@@ -99,6 +102,12 @@ export function createDockviewWorkspace(options: WorkspaceOptions): DockviewWork
       dockview.onDidActivePanelChange((panel) => {
         options.state.setActivePanel(panel?.id ?? null);
       });
+      dockview.onDidAddPanel((panel) => {
+        options.onPanelOpened?.(panel.id);
+      });
+      dockview.onDidRemovePanel((panel) => {
+        options.onPanelClosed?.(panel.id);
+      });
 
       applyDefaultLayout();
     },
@@ -134,6 +143,10 @@ export function createDockviewWorkspace(options: WorkspaceOptions): DockviewWork
       if (panel) {
         dockview.removePanel(panel);
       }
+    },
+
+    isPanelOpen(panelId: string): boolean {
+      return Boolean(dockview?.getGroupPanel(panelId));
     },
 
     openFloating(id: string, component: string, title: string): void {

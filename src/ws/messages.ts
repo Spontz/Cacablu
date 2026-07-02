@@ -145,6 +145,12 @@ export type PhoenixTransportCommand =
       sdp: string;
     }
   | {
+      type: 'webrtc.enable';
+    }
+  | {
+      type: 'webrtc.disable';
+    }
+  | {
       type: 'webrtc.request';
     }
   | {
