@@ -39,22 +39,23 @@ connection.
 
 ### User Story 2 - Work with the Timeline Panel (Priority: P2)
 
-As a user, I want the timeline panel to show a dense studio-style sequence
-view with a ruler, layered bars, playhead, and transport controls so that I can
-review and control timing from the main workspace.
+As a user, I want the timeline panel to provide a dense studio-style sequence
+view with a ruler, playhead, and transport controls, and to remain empty until
+a project supplies bars, so that I can review and control timing from the main
+workspace without seeing sample content.
 
 **Why this priority**: The timeline is a primary working surface and should be
 usable from the first shell iteration.
 
 **Independent Test**: Open the app and confirm that the timeline panel renders
-a ruler, layered bars, a visible playhead, and a transport bar below the
-timeline.
+a ruler, a visible playhead, and a transport bar below the timeline without
+sample bars before a project is loaded.
 
 **Acceptance Scenarios**:
 
-1. **Given** the shell is visible, **When** the timeline panel loads, **Then**
-   the user sees a dense timeline view with layered bars and no empty helper
-   header above it.
+1. **Given** the shell is visible and no project is loaded, **When** the
+   timeline panel loads, **Then** the user sees an empty dense timeline view
+   with no sample bars, no sample layers, and no empty helper header above it.
 2. **Given** the timeline panel is visible, **When** the user uses the
    transport controls below the timeline, **Then** the play/pause and time
    navigation actions update the current time without requiring a separate
@@ -143,14 +144,16 @@ panel visibility or layout reset.
   layout interaction and menu usage.
 - **FR-010**: The system MUST keep the shell code understandable, with clear
   module boundaries and comments where behavior is not obvious.
-- **FR-011**: The timeline panel MUST render a dense studio-style ruler, layered
-  bars, a visible playhead, and a transport bar beneath the timeline content.
+- **FR-011**: The timeline panel MUST render a dense studio-style ruler, a
+  visible playhead, and a transport bar beneath the timeline content; bars are
+  shown only when project data supplies them.
 - **FR-012**: The timeline panel MUST allow scrubbing by clicking the ruler
   rather than via a separate time slider.
 - **FR-013**: The timeline panel MUST provide transport buttons for go to
   beginning, rewind, play/pause, forward, and go to end.
 - **FR-014**: The timeline panel MUST support zooming through `Shift` plus
-  mouse wheel, while the unmodified wheel scrolls vertically.
+  mouse wheel without fixed product-level minimum or maximum zoom limits, while
+  the unmodified wheel scrolls vertically.
 - **FR-015**: The timeline panel MUST not display helper copy above the ruler or
   a visible zoom slider in the default UI.
 - **FR-016**: The timeline panel MUST render clip bars with square corners and
@@ -159,6 +162,8 @@ panel visibility or layout reset.
   use compact vertical spacing between tracks.
 - **FR-018**: The timeline panel MUST render transport buttons as centered
   white icons on a dark blue raised background.
+- **FR-019**: The timeline panel MUST NOT render visible layer-name labels or a
+  layer-name sidebar beside the lanes.
 
 ### Key Entities *(include if feature involves data)*
 
@@ -186,8 +191,9 @@ panel visibility or layout reset.
   reach a usable workspace in under 3 seconds on a normal development machine.
 - **SC-002**: A user can reposition and resize the default panels without layout
   corruption during a manual test session.
-- **SC-003**: The timeline panel renders a ruler, layered bars, playhead, and
-  transport bar without exposing helper text or a visible zoom slider.
+- **SC-003**: The timeline panel renders a ruler, playhead, and transport bar
+  without exposing helper text, sample bars before project load, or a visible
+  zoom slider.
 - **SC-004**: A user can click the ruler to scrub the playhead and use the
   transport bar to move through time without a separate time slider.
 - **SC-005**: The shell remains usable and visually coherent when no local

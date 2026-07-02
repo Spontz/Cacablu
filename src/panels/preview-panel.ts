@@ -23,6 +23,7 @@ export function createPreviewPanel(connection: ConnectionController): IContentRe
 
       let peer: RTCPeerConnection | null = null;
       let started = false;
+      let previewDisabled = false;
       let readyForRemoteCandidates = false;
       let pendingCandidates: RTCIceCandidateInit[] = [];
       let pendingMove: { x: number; y: number } | null = null;
@@ -339,12 +340,15 @@ export function createPreviewPanel(connection: ConnectionController): IContentRe
 
         started = true;
         readyForRemoteCandidates = false;
-        status.textContent = 'Starting WebRTC preview...';
+        if (!previewDisabled) {
+          status.textContent = 'Starting WebRTC preview...';
+        }
         peer = new RTCPeerConnection();
 
         peer.addEventListener('track', (event) => {
           const [stream] = event.streams;
           if (stream) {
+            previewDisabled = false;
             video.srcObject = stream;
             status.textContent = '';
           }
@@ -374,11 +378,27 @@ export function createPreviewPanel(connection: ConnectionController): IContentRe
 
       const unsubscribeSignals = connection.subscribeWebRtc((message) => {
         void (async () => {
+          if (message.type === 'error') {
+            if (message.code === 'streaming-disabled') {
+              closePeer();
+              previewDisabled = true;
+              status.textContent = 'Enable WebRTC preview in Phoenix';
+              return;
+            }
+
+            if (message.code === 'offer-failed') {
+              closePeer();
+              status.textContent = 'Phoenix could not start WebRTC preview.';
+              return;
+            }
+          }
+
           if (!peer) {
             return;
           }
 
           if (message.type === 'webrtc.offer') {
+            previewDisabled = false;
             await peer.setRemoteDescription({ type: 'offer', sdp: message.sdp });
             const answer = await peer.createAnswer();
             await peer.setLocalDescription(answer);
@@ -420,7 +440,10 @@ export function createPreviewPanel(connection: ConnectionController): IContentRe
             status.textContent = 'Preview unavailable';
           });
         } else if (started) {
+          previewDisabled = false;
           closePeer();
+        } else if (previewDisabled) {
+          previewDisabled = false;
         }
       }, 750);
 

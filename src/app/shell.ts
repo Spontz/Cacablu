@@ -9,32 +9,39 @@ import { createDockviewWorkspace } from '../layout/dockview-workspace';
 import { isFileSystemAccessSupported, pickSqliteFile, pickSaveAsFile } from '../db/file-picker';
 import { openDbSession, createDbSessionRef } from '../db/db-session';
 import type { DbSession } from '../db/db-session';
+import { createPhoenixAssetClient } from '../phoenix/asset-client';
+import { createPhoenixSectionClient } from '../phoenix/section-client';
+import {
+  syncPublishedPoolFilesToPhoenix,
+  type ProjectPoolSyncProgress,
+} from '../services/project-pool-sync';
+import { ProjectSectionSyncError, syncProjectBarsToPhoenix, type ProjectSectionSyncProgress } from '../services/project-section-sync';
 
 export interface AppShell {
   mount(): void;
 }
 
 export function createAppShell(root: HTMLElement): AppShell {
+  const SIDE_PANEL_WIDTH_RATIO = 0.15;
   const state = createAppState();
   const dbState = createDbState();
   const sessionRef = createDbSessionRef();
   const connection = createConnectionController(state);
   const panels = createPanelRegistry(state, dbState, sessionRef, connection);
   const workspace = createDockviewWorkspace({ state, panels });
+  const phoenixAssets = createPhoenixAssetClient();
+  const phoenixSections = createPhoenixSectionClient();
 
   let session: DbSession | null = null;
+  let poolSyncModal: PoolSyncModal | null = null;
+  let lastInspectorSelectionId: number | null = null;
+  let lastConnectionStatus = state.getSnapshot().connectionStatus;
+  let lastEventCount = state.getSnapshot().events.length;
 
   const fsSupported = isFileSystemAccessSupported();
 
-  const initialActions = createDefaultMenuActions().map((action) => {
-    if (!fsSupported && ['open-database', 'save-database', 'save-database-as'].includes(action.id)) {
-      return { ...action, disabled: true };
-    }
-    return action;
-  });
-
   const menuBar = createMenuBar({
-    actions: initialActions,
+    actions: buildMenuActions(dbState.getSnapshot()),
     runAction: (actionId) => {
       switch (actionId) {
         case 'open-database':
@@ -53,19 +60,21 @@ export function createAppShell(root: HTMLElement): AppShell {
           workspace.openFloating('db-explorer', 'db-explorer-panel', 'Database Explorer');
           break;
         case 'toggle-resources':
-          workspace.focusPanel('resources');
+          workspace.openPanel('resources', { widthRatio: SIDE_PANEL_WIDTH_RATIO });
           break;
         case 'toggle-timeline':
-          workspace.focusPanel('timeline');
+          if (session) {
+            workspace.openPanel('timeline');
+          }
           break;
         case 'toggle-preview':
-          workspace.focusPanel('preview');
+          requestPhoenixPreview();
           break;
         case 'toggle-inspector':
-          workspace.focusPanel('inspector');
+          workspace.openPanel('inspector', { widthRatio: SIDE_PANEL_WIDTH_RATIO });
           break;
         case 'toggle-events':
-          workspace.focusPanel('events');
+          workspace.openPanel('events');
           break;
         case 'connection-status':
           connection.cycleDemoState();
@@ -95,19 +104,38 @@ export function createAppShell(root: HTMLElement): AppShell {
 
     if (!handle) return;
 
+    await openProjectHandle(handle);
+  }
+
+  async function openProjectHandle(handle: FileSystemFileHandle): Promise<void> {
     dbState.setOpening();
     state.clearResourceSelection();
+    workspace.closePanel('resources');
+    workspace.closePanel('inspector');
+    workspace.closePanel('timeline');
+    workspace.closePanel('events');
+    let nextSession: DbSession | null = null;
     try {
       session?.close();
-      session = await openDbSession(handle);
+      session = null;
+      sessionRef.current = null;
+      nextSession = await openDbSession(handle);
+      await syncOpenedProjectPool(nextSession);
+      session = nextSession;
       sessionRef.current = session;
       dbState.setOpen(session.fileName);
+      workspace.closePanel('inspector');
+      workspace.openPanel('timeline');
+      workspace.openPanel('resources', { widthRatio: SIDE_PANEL_WIDTH_RATIO });
     } catch (err) {
+      nextSession?.close();
       session = null;
       sessionRef.current = null;
       state.clearResourceSelection();
       dbState.clear();
-      window.alert(err instanceof Error ? err.message : 'Failed to open database.');
+      if (!isAbortError(err)) {
+        window.alert(err instanceof Error ? err.message : 'Failed to open database.');
+      }
     }
   }
 
@@ -172,28 +200,260 @@ export function createAppShell(root: HTMLElement): AppShell {
 
       shell.append(topBar, workspaceElement);
       root.append(shell);
+      poolSyncModal = createPoolSyncModal(shell);
+      root.append(poolSyncModal.element);
 
       workspace.mount(workspaceElement);
       connection.syncStatusLabel();
 
       state.subscribe((snapshot) => {
         updateStatusBadge(shell, snapshot.connectionLabel, snapshot.connectionStatus);
+        if (snapshot.connectionStatus === 'connected' && lastConnectionStatus !== 'connected') {
+          requestPhoenixPreview();
+        }
+        lastConnectionStatus = snapshot.connectionStatus;
+        if (snapshot.connectionStatus !== 'connected') {
+          workspace.closePanel('preview');
+        }
+        if (snapshot.resourceSelection.kind === 'file' && snapshot.resourceSelection.id !== lastInspectorSelectionId) {
+          lastInspectorSelectionId = snapshot.resourceSelection.id;
+          workspace.openPanel('inspector', { widthRatio: SIDE_PANEL_WIDTH_RATIO });
+        } else if (snapshot.resourceSelection.kind !== 'file') {
+          lastInspectorSelectionId = null;
+        }
+        if (snapshot.events.length > lastEventCount) {
+          workspace.openPanel('events');
+        }
+        lastEventCount = snapshot.events.length;
       });
 
       dbState.subscribe((snapshot) => {
         updateDbBadge(shell, snapshot);
         syncMenuDisabled(snapshot);
       });
+
+      connection.subscribeWebRtc((message) => {
+        if (message.type === 'webrtc.offer') {
+          workspace.openPanel('preview');
+          return;
+        }
+
+        if (message.type === 'webrtc.state') {
+          if (isWebRtcPreviewActive(message.state)) {
+            workspace.openPanel('preview');
+          } else {
+            workspace.closePanel('preview');
+          }
+          return;
+        }
+
+        if (message.type === 'error' && message.code === 'streaming-disabled') {
+          workspace.closePanel('preview');
+        }
+      });
+
+      window.setTimeout(requestPhoenixPreview, 0);
     },
   };
 
-  function syncMenuDisabled(snapshot: DbSnapshot): void {
-    const hasFile = snapshot.status === 'open' || snapshot.status === 'saving';
-    menuBar.updateActions([
-      { id: 'save-database', label: 'Guardar', menu: 'File', disabled: !hasFile },
-      { id: 'save-database-as', label: 'Guardar como', menu: 'File', disabled: !hasFile },
-    ]);
+  function requestPhoenixPreview(): void {
+    if (connection.isConnected()) {
+      connection.send({ type: 'webrtc.request' });
+    }
   }
+
+  function syncMenuDisabled(snapshot: DbSnapshot): void {
+    menuBar.updateActions(buildMenuActions(snapshot));
+  }
+
+  function buildMenuActions(snapshot: DbSnapshot) {
+    const hasFile = snapshot.status === 'open' || snapshot.status === 'saving';
+    return createDefaultMenuActions().map((action) => {
+      const fileActionDisabled = !fsSupported && ['open-database', 'save-database', 'save-database-as'].includes(action.id);
+      if (action.id === 'save-database' || action.id === 'save-database-as') {
+        return { ...action, disabled: fileActionDisabled || !hasFile };
+      }
+      if (fileActionDisabled) return { ...action, disabled: true };
+      return action;
+    });
+  }
+
+  async function syncOpenedProjectPool(openedSession: DbSession): Promise<void> {
+    const abortController = new AbortController();
+    poolSyncModal?.show(abortController);
+    try {
+      await syncPublishedPoolFilesToPhoenix(openedSession.data, phoenixAssets, (progress) => {
+        poolSyncModal?.update(progress);
+      }, { signal: abortController.signal });
+      try {
+        const sectionSync = await syncProjectBarsToPhoenix(openedSession.data, phoenixSections, (progress) => {
+          poolSyncModal?.update(progress);
+        }, { signal: abortController.signal });
+        recordSectionIssues(sectionSync.issues);
+      } catch (err) {
+        if (isAbortError(err)) throw err;
+        if (err instanceof ProjectSectionSyncError) {
+          recordSectionIssues(err.issues);
+        } else if (err instanceof Error) {
+          state.addEvent({
+            severity: 'error',
+            source: 'Phoenix section sync',
+            description: err.message,
+          });
+          workspace.openPanel('events');
+        }
+      }
+    } catch (err) {
+      if (isAbortError(err)) throw err;
+      if (err instanceof Error) {
+        state.addEvent({
+          severity: 'error',
+          source: 'Phoenix project sync',
+          description: err.message,
+        });
+        workspace.openPanel('events');
+      }
+      poolSyncModal?.update({
+        phase: 'error',
+        current: 0,
+        total: 0,
+        copied: 0,
+        skipped: 0,
+        failed: 0,
+        message: err instanceof Error ? `Phoenix pool sync failed: ${err.message}` : 'Phoenix pool sync failed.',
+      });
+      throw err;
+    } finally {
+      poolSyncModal?.hide();
+    }
+  }
+
+  function recordSectionIssues(issues: ProjectSectionSyncError['issues']): void {
+    if (issues.length === 0) return;
+    state.addEvents(issues.map((issue) => ({
+      severity: 'error',
+      source: 'Phoenix section sync',
+      subjectId: String(issue.barId),
+      description: issue.description,
+    })));
+    workspace.openPanel('events');
+  }
+}
+
+interface PoolSyncModal {
+  element: HTMLElement;
+  show(controller: AbortController): void;
+  update(progress: ProjectPoolSyncProgress | ProjectSectionSyncProgress): void;
+  hide(): void;
+}
+
+function createPoolSyncModal(shell: HTMLElement): PoolSyncModal {
+  const overlay = document.createElement('div');
+  overlay.className = 'pool-sync-modal';
+  overlay.hidden = true;
+  overlay.setAttribute('role', 'dialog');
+  overlay.setAttribute('aria-modal', 'true');
+  overlay.setAttribute('aria-labelledby', 'pool-sync-modal-title');
+
+  const dialog = document.createElement('div');
+  dialog.className = 'pool-sync-modal__dialog';
+
+  const title = document.createElement('h2');
+  title.id = 'pool-sync-modal-title';
+  title.className = 'pool-sync-modal__title';
+  title.textContent = 'Syncing Phoenix project';
+
+  const indicator = document.createElement('div');
+  indicator.className = 'pool-sync-indicator';
+  indicator.dataset.phase = 'idle';
+
+  const label = document.createElement('div');
+  label.className = 'pool-sync-indicator__label';
+
+  const progress = document.createElement('progress');
+  progress.className = 'pool-sync-indicator__progress';
+  progress.max = 1;
+  progress.value = 0;
+
+  indicator.append(label, progress);
+  const actions = document.createElement('div');
+  actions.className = 'pool-sync-modal__actions';
+
+  const cancel = document.createElement('button');
+  cancel.type = 'button';
+  cancel.className = 'pool-sync-modal__cancel';
+  cancel.textContent = 'Cancel';
+  actions.append(cancel);
+
+  dialog.append(title, indicator, actions);
+  overlay.append(dialog);
+
+  let activeController: AbortController | null = null;
+  cancel.addEventListener('click', () => {
+    activeController?.abort(new DOMException('Pool sync cancelled.', 'AbortError'));
+    cancel.disabled = true;
+    label.textContent = 'Cancelling sync...';
+  });
+
+  function setShellBlocked(blocked: boolean): void {
+    (shell as HTMLElement & { inert?: boolean }).inert = blocked;
+    shell.setAttribute('aria-hidden', blocked ? 'true' : 'false');
+  }
+
+  return {
+    element: overlay,
+    show(controller): void {
+      activeController = controller;
+      cancel.disabled = false;
+      overlay.hidden = false;
+      indicator.dataset.phase = 'scanning';
+      label.textContent = 'Preparing Phoenix pool sync...';
+      progress.max = 1;
+      progress.value = 0;
+      setShellBlocked(true);
+      cancel.focus();
+    },
+    update(nextProgress): void {
+      updatePoolSyncIndicator(indicator, nextProgress);
+    },
+    hide(): void {
+      activeController = null;
+      overlay.hidden = true;
+      setShellBlocked(false);
+    },
+  };
+}
+
+function updatePoolSyncIndicator(indicator: HTMLElement | null, progress: ProjectPoolSyncProgress | ProjectSectionSyncProgress): void {
+  if (!indicator) return;
+
+  const label = indicator.querySelector<HTMLElement>('.pool-sync-indicator__label');
+  const progressBar = indicator.querySelector<HTMLProgressElement>('.pool-sync-indicator__progress');
+  const total = Math.max(progress.total, 1);
+
+  indicator.hidden = false;
+  indicator.dataset.phase = progress.phase;
+  if (label) {
+    const count = progress.total > 0 ? ` (${progress.current}/${progress.total})` : '';
+    label.textContent = `${progress.message}${count}`;
+  }
+  if (progressBar) {
+    progressBar.max = total;
+    progressBar.value = progress.phase === 'scanning' ? 0 : Math.min(progress.current, total);
+  }
+}
+
+function isAbortError(value: unknown): boolean {
+  return value instanceof DOMException && value.name === 'AbortError';
+}
+
+function isWebRtcPreviewActive(state: string): boolean {
+  const normalized = state.trim().toLowerCase();
+  if (!normalized) return false;
+  if (['disabled', 'stopped', 'inactive', 'off', 'closed', 'failed', 'disconnected'].includes(normalized)) {
+    return false;
+  }
+  return ['enabled', 'running', 'active', 'streaming', 'connected', 'connecting'].includes(normalized);
 }
 
 function createStatusBadge(state: ReturnType<typeof createAppState>): HTMLElement {
@@ -207,6 +467,7 @@ function createStatusBadge(state: ReturnType<typeof createAppState>): HTMLElemen
 function updateStatusBadge(root: ParentNode, label: string, status: string): void {
   const badge = root.querySelector<HTMLElement>('.connection-badge');
   if (!badge) return;
+  if (badge.dataset.status === status && badge.textContent === label) return;
   badge.dataset.status = status;
   badge.textContent = label;
 }

@@ -13,7 +13,7 @@ import type { ConnectionController } from '../ws/connection';
 import { createContentRenderer } from './base-panel';
 
 const CLIP_COLOR = '#5e86b8';
-const MARKER_STEP = 2;
+const MIN_MARKER_LABEL_SPACING = 88;
 const TRANSPORT_STEP_SECONDS = 1;
 
 export function createTimelinePanel(
@@ -23,26 +23,12 @@ export function createTimelinePanel(
   connection: ConnectionController,
 ): IContentRenderer {
   const state = createTimelineState({
-    duration: 40,
-    currentTime: 5,
-    loop: { start: 4, end: 18 },
+    duration: 0,
+    currentTime: 0,
+    loop: null,
     pixelsPerSecond: 88,
     zoom: 1,
   });
-
-  state.tracks = [
-    createTrack({ id: 'layer-01', label: 'Layer 01', kind: 'generic', order: 0, height: 18 }),
-    createTrack({ id: 'layer-02', label: 'Layer 02', kind: 'generic', order: 1, height: 18 }),
-    createTrack({ id: 'layer-03', label: 'Layer 03', kind: 'generic', order: 2, height: 18 }),
-  ];
-
-  state.clips = [
-    createClip({ id: 'clip-01', trackId: 'layer-01', label: 'Block A', start: 0.5, end: 9.5 }),
-    createClip({ id: 'clip-02', trackId: 'layer-01', label: 'Block B', start: 10.25, end: 18 }),
-    createClip({ id: 'clip-03', trackId: 'layer-02', label: 'Region A', start: 1, end: 14 }),
-    createClip({ id: 'clip-04', trackId: 'layer-02', label: 'Region B', start: 14.5, end: 34 }),
-    createClip({ id: 'clip-05', trackId: 'layer-03', label: 'Event A', start: 2.75, end: 7.25, kind: 'event' }),
-  ];
 
   let lastTimestamp = 0;
   let pendingPlayback: { playing: boolean; until: number } | null = null;
@@ -89,16 +75,34 @@ export function createTimelinePanel(
     );
   }
 
-  function resetTransport(): void {
+  function resetToEmptyProject(): void {
+    state.tracks = [];
+    state.clips = [];
+    state.transport.duration = 0;
     state.transport.currentTime = 0;
     state.transport.isPlaying = false;
+    state.transport.loop = null;
     lastTimestamp = 0;
     runtimeAnchorTime = 0;
     runtimeAnchorTimestamp = performance.now();
   }
 
   function formatTime(value: number): string {
-    return value.toFixed(2).replace(/\.00$/, '');
+    return Number(value.toFixed(2)).toString();
+  }
+
+  function getMarkerStep(pixelsPerSecond: number): number {
+    const minStepSeconds = MIN_MARKER_LABEL_SPACING / Math.max(pixelsPerSecond, 0.001);
+    const magnitude = 10 ** Math.floor(Math.log10(minStepSeconds));
+
+    for (const multiplier of [1, 2, 5, 10]) {
+      const candidate = multiplier * magnitude;
+      if (candidate >= minStepSeconds) {
+        return candidate;
+      }
+    }
+
+    return 10 * magnitude;
   }
 
   function normalizeTime(time: number): number {
@@ -153,37 +157,28 @@ export function createTimelinePanel(
       lastRenderedDuration = state.transport.duration;
       lastRenderedConnected = connected;
 
-      const playheadLeft = state.transport.currentTime * state.viewport.pixelsPerSecond * state.viewport.zoom;
-      const timelineWidth = state.transport.duration * state.viewport.pixelsPerSecond * state.viewport.zoom;
-      const markerCount = Math.ceil(state.transport.duration / MARKER_STEP) + 1;
+      const effectivePixelsPerSecond = state.viewport.pixelsPerSecond * state.viewport.zoom;
+      const playheadLeft = state.transport.currentTime * effectivePixelsPerSecond;
+      const timelineWidth = state.transport.duration * effectivePixelsPerSecond;
+      const markerStep = getMarkerStep(effectivePixelsPerSecond);
+      const markerCount = Math.floor(state.transport.duration / markerStep) + 1;
       const playTitle = state.transport.isPlaying ? 'Pause' : 'Play';
 
       element.innerHTML = `
         <div class="timeline-panel">
           <div class="timeline-panel__body">
-            <div class="timeline-panel__sidebar">
-              <div class="timeline-panel__sidebar-header"></div>
-              ${state.tracks
-                .map((track) => `
-                  <div class="timeline-panel__track-meta" style="height:${track.height}px">
-                    <strong>${track.label}</strong>
-                  </div>
-                `)
-                .join('')}
-            </div>
-
             <div class="timeline-panel__viewport">
               <div class="timeline-panel__ruler" style="width:${timelineWidth}px">
                 ${Array.from({ length: markerCount }, (_, index) => {
-                  const time = index * MARKER_STEP;
-                  const left = time * state.viewport.pixelsPerSecond * state.viewport.zoom;
-                  return `<span class="timeline-panel__marker" style="left:${left}px"><i>${time}s</i></span>`;
+                  const time = index * markerStep;
+                  const left = time * effectivePixelsPerSecond;
+                  return `<span class="timeline-panel__marker" style="left:${left}px"><i>${formatTime(time)}s</i></span>`;
                 }).join('')}
               </div>
 
               <div class="timeline-panel__grid" style="width:${timelineWidth}px">
                 ${Array.from({ length: markerCount }, (_, index) => {
-                  const left = index * MARKER_STEP * state.viewport.pixelsPerSecond * state.viewport.zoom;
+                  const left = index * markerStep * effectivePixelsPerSecond;
                   return `<span class="timeline-panel__grid-line" style="left:${left}px"></span>`;
                 }).join('')}
               </div>
@@ -357,7 +352,7 @@ export function createTimelinePanel(
         render(true);
         return;
       } else if (!isProjectReady()) {
-        resetTransport();
+        resetToEmptyProject();
         render(true);
         return;
       }
@@ -428,10 +423,10 @@ export function createTimelinePanel(
 
         event.preventDefault();
 
-        const direction = event.deltaY > 0 ? -1 : 1;
-        const nextZoom = Math.min(Math.max(state.viewport.zoom + direction * 0.08, 0.5), 2.5);
+        const zoomFactor = event.deltaY > 0 ? 1 / 1.12 : 1.12;
+        const nextZoom = state.viewport.zoom * zoomFactor;
 
-        if (nextZoom === state.viewport.zoom) {
+        if (!Number.isFinite(nextZoom) || nextZoom <= 0 || nextZoom === state.viewport.zoom) {
           return;
         }
 

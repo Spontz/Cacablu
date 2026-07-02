@@ -29,9 +29,12 @@ are visible, and click on the ruler to move the playhead to the clicked time.
 
 **Acceptance Scenarios**:
 
-1. **Given** the timeline panel is visible, **When** the panel loads, **Then**
-   the user sees a dense studio-style timeline with layered bars and no extra
-   helper header above the ruler.
+1. **Given** the timeline panel is visible and no project is loaded, **When**
+   the panel loads, **Then** the timeline is empty and does not show sample
+   layers or sample bars.
+2. **Given** the timeline panel is visible with a project loaded, **When** the
+   panel renders bars, **Then** the user sees a dense studio-style timeline with
+   bars and no extra helper header above the ruler.
 2. **Given** the timeline panel is visible, **When** the user clicks on the
    ruler, **Then** the current time updates to the clicked position.
 
@@ -74,7 +77,8 @@ dragging, and keyboard or clipboard actions to change the arrangement of clips.
 
 1. **Given** the timeline panel is visible, **When** the user holds Shift and
    uses the mouse wheel, **Then** the timeline zoom changes while preserving
-   the current focus area.
+   the current focus area and without hitting an artificial zoom-in or zoom-out
+   UI limit.
 2. **Given** the timeline panel is visible, **When** the user scrolls the mouse
    wheel without modifiers, **Then** the panel scrolls vertically instead of
    zooming.
@@ -160,6 +164,13 @@ verify that the panel can represent them without breaking the existing view.
   compact lane layout with reduced vertical spacing between tracks.
 - **FR-018**: The transport bar buttons MUST use centered white icons on a
   dark blue raised background.
+- **FR-019**: When no project is loaded, the timeline MUST render empty and
+  MUST NOT show sample layers, sample bars, or seeded demo clips.
+- **FR-020**: The timeline MUST NOT render a visible layer-name sidebar or
+  layer-name labels beside the lanes.
+- **FR-021**: Shift + wheel zoom MUST NOT impose product-level minimum or
+  maximum zoom limits; implementation may only guard against invalid numeric
+  values such as zero, negatives, or non-finite zoom.
 
 ### Key Entities *(include if feature involves data)*
 
@@ -200,6 +211,10 @@ verify that the panel can represent them without breaking the existing view.
   raised background during manual visual validation.
 - **SC-010**: Project lint, typecheck, and build commands complete without new
   errors for the timeline implementation.
+- **SC-011**: Opening Cacablu without a project shows zero timeline clips and
+  zero visible layer labels.
+- **SC-012**: Repeated Shift + wheel zoom-in and zoom-out continues changing
+  the timeline scale beyond the earlier fixed limits in manual validation.
 
 ## Assumptions
 

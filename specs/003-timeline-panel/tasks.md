@@ -80,6 +80,7 @@ scrolling, and verify the modeled edit actions remain available.
 - [ ] T015 [P] [US3] Preserve Shift + wheel zoom and unmodified wheel scroll behavior in `src/panels/timeline-panel.ts`
 - [ ] T016 [US3] Keep the selection, box-select, move, trim, resize, split, duplicate, copy, paste, and snap semantics represented in `packages/timeline/src/model.ts`
 - [ ] T017 [US3] Validate compact timeline density and interaction affordances in `specs/003-timeline-panel/quickstart.md`
+- [x] T017a [US3] Remove fixed Shift + wheel zoom-in and zoom-out limits from `src/panels/timeline-panel.ts`
 
 **Checkpoint**: Story 3 interaction model is independent of keyframes
 
@@ -107,6 +108,8 @@ retains it without breaking the clip layout.
 - [ ] T021 [P] Re-run `npm.cmd run typecheck`, `npm.cmd run lint`, and `npm.cmd run build` after the timeline and typography changes
 - [ ] T022 [P] Verify the generated `dist/index.html` opens from `file://` and the JetBrains font baseline is visible in both the shell and `apps/studio`
 - [ ] T023 [P] Confirm the transport icons remain centered and readable across supported browser sizes in `src/styles/app.css`
+- [x] T024 Remove seeded sample layers and clips so Cacablu opens with an empty timeline before a project is loaded
+- [x] T025 Remove the visible layer-name sidebar from the timeline layout
 
 ---
 

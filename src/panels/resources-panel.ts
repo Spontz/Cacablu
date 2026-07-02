@@ -3,8 +3,15 @@ import type { IContentRenderer } from 'dockview-core';
 import type { AppState } from '../state/app-state';
 import type { DbState } from '../state/db-state';
 import type { DbSessionRef } from '../db/db-session';
+import type { ConnectionController } from '../ws/connection';
+import { createPhoenixAssetClient } from '../phoenix/asset-client';
+import { deleteAllowedAssetDirectory, deleteAllowedAssetFile, writeAllowedAssetFile } from '../phoenix/asset-operations';
 import { buildResourceTree, type ResourceTreeNode } from '../resources/resource-tree';
 import { createContentRenderer } from './base-panel';
+
+const ASSET_FILE_DRAG_TYPE = 'application/x-cacablu-asset-file';
+const ASSET_FILE_TEXT_PREFIX = 'cacablu-asset-file:';
+type AssetOperationState = 'blocked' | 'idle' | 'applying' | 'disconnected' | 'discrepant' | 'error';
 
 // Path data per icon — 16×16 viewBox, fill only
 // Each entry is an array of [d, opacity?] tuples (one per <path>)
@@ -74,6 +81,36 @@ function createIconEl(name: string): SVGSVGElement {
   return svg;
 }
 
+function createDisclosureEl(expanded: boolean, visible: boolean): HTMLSpanElement {
+  const disclosure = document.createElement('span');
+  disclosure.className = 'resources__disclosure';
+  disclosure.dataset.expanded = expanded ? 'true' : 'false';
+  disclosure.setAttribute('aria-hidden', 'true');
+  if (!visible) disclosure.classList.add('is-empty');
+  return disclosure;
+}
+
+function createDeleteButton(label: string): HTMLButtonElement {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'resources__delete';
+  button.setAttribute('aria-label', label);
+  button.title = label;
+  button.draggable = false;
+  return button;
+}
+
+function createEnabledCheckbox(fileName: string, checked: boolean): HTMLInputElement {
+  const checkbox = document.createElement('input');
+  checkbox.type = 'checkbox';
+  checkbox.className = 'resources__enabled';
+  checkbox.checked = checked;
+  checkbox.setAttribute('aria-label', `Enable ${fileName} for Phoenix transfer`);
+  checkbox.title = 'Transfer to Phoenix when enabled';
+  checkbox.draggable = false;
+  return checkbox;
+}
+
 function fileIconName(fileName: string): string {
   const ext = fileName.split('.').pop()?.toLowerCase() ?? '';
   if (['png','jpg','jpeg','gif','webp','svg','bmp','tga','tiff','hdr','exr'].includes(ext)) return 'image';
@@ -88,15 +125,31 @@ function fileIconName(fileName: string): string {
   return 'unknown';
 }
 
+function inferFormat(fileName: string): string {
+  return fileName.includes('.') ? fileName.split('.').pop()?.toLowerCase() ?? '' : '';
+}
+
+function inferMimeType(fileName: string): string {
+  const format = inferFormat(fileName);
+  if (['png','jpg','jpeg','gif','webp','svg','bmp'].includes(format)) return `image/${format === 'jpg' ? 'jpeg' : format}`;
+  if (['mp4','webm','mov','avi','mkv'].includes(format)) return `video/${format}`;
+  if (['mp3','ogg','wav','flac','aac','opus'].includes(format)) return `audio/${format}`;
+  if (['txt','md','glsl','vert','frag','geom','comp','hlsl','wgsl','json','xml','csv','yaml','yml','toml'].includes(format)) return 'text/plain';
+  return 'application/octet-stream';
+}
+
 export function createResourcesPanel(
   state: AppState,
   dbState: DbState,
   sessionRef: DbSessionRef,
+  connection: ConnectionController,
 ): IContentRenderer {
   return createContentRenderer((element) => {
     element.className = 'panel panel--resources';
 
     const expandedIds = new Set<number>();
+    const phoenixAssets = createPhoenixAssetClient();
+    let draggingAssetFile: AssetFileDragPayload | null = null;
 
     const placeholder = document.createElement('p');
     placeholder.className = 'resources__placeholder';
@@ -119,17 +172,20 @@ export function createResourcesPanel(
         row.className = 'resources__folder-row';
         row.dataset.resourceKind = 'folder';
         row.dataset.resourceId = String(node.id);
+        row.dataset.poolPath = `pool/${node.path}`;
         if (selection.kind === 'folder' && selection.id === node.id) {
           row.classList.add('is-selected');
         }
 
         const expanded = expandedIds.has(node.id);
         row.append(
+          createDisclosureEl(expanded, node.children.length > 0),
           createIconEl(expanded ? 'folder-open' : 'folder-closed'),
           Object.assign(document.createElement('span'), {
             className: 'resources__label',
             textContent: node.name,
           }),
+          createDeleteButton(`Delete folder ${node.name}`),
         );
         li.append(row);
 
@@ -145,6 +201,9 @@ export function createResourcesPanel(
         li.dataset.resourceId = String(node.id);
         li.dataset.resourceName = node.name;
         li.dataset.resourceType = node.type;
+        li.dataset.poolPath = `pool/${node.path}`;
+        li.dataset.enabled = node.enabled ? 'true' : 'false';
+        li.draggable = true;
         if (selection.kind === 'file' && selection.id === node.id) {
           li.classList.add('is-selected');
         }
@@ -153,7 +212,12 @@ export function createResourcesPanel(
         label.className = 'resources__label';
         label.textContent = node.name;
 
-        li.append(createIconEl(fileIconName(node.name)), label);
+        li.append(
+          createEnabledCheckbox(node.name, node.enabled),
+          createIconEl(fileIconName(node.name)),
+          label,
+          createDeleteButton(`Delete asset ${node.name}`),
+        );
       }
 
       parent.append(li);
@@ -184,10 +248,18 @@ export function createResourcesPanel(
       treeEl.append(ul);
     }
 
+    function setSyncStatus(nextState: AssetOperationState, message: string): void {
+      if (nextState === 'error') {
+        console.warn(message);
+      }
+    }
+
     render();
 
     const unsubscribeDb = dbState.subscribe((snapshot) => {
-      if (snapshot.status !== 'open') expandedIds.clear();
+      if (snapshot.status !== 'open') {
+        expandedIds.clear();
+      }
       render();
     });
 
@@ -195,8 +267,101 @@ export function createResourcesPanel(
       render();
     });
 
+    const unsubscribeAssets = connection.subscribeAssets((message) => {
+      if (message.type === 'error' && message.requestId) {
+        setSyncStatus('error', message.message);
+      }
+    });
+
+    treeEl.addEventListener('dragover', (event) => {
+      const target = getEventElement(event);
+      const dropTarget = target ? getDropTarget(target) : null;
+      if (!dropTarget) return;
+      event.preventDefault();
+      if (event.dataTransfer) {
+        event.dataTransfer.dropEffect = draggingAssetFile || hasAssetFileDrag(event.dataTransfer) ? 'move' : 'copy';
+      }
+    });
+
+    treeEl.addEventListener('dragenter', (event) => {
+      const target = getEventElement(event);
+      if (!target) return;
+      const dropTarget = getDropTarget(target);
+      if (!dropTarget) return;
+      dropTarget.element.classList.add('is-drop-target');
+    });
+
+    treeEl.addEventListener('dragleave', (event) => {
+      const target = getEventElement(event);
+      if (!target) return;
+      const dropTarget = getDropTarget(target);
+      const related = event.relatedTarget instanceof Node ? event.relatedTarget : null;
+      if (dropTarget && (!related || !dropTarget.element.contains(related))) {
+        dropTarget.element.classList.remove('is-drop-target');
+      }
+    });
+
+    treeEl.addEventListener('drop', (event) => {
+      const target = getEventElement(event);
+      if (!target) return;
+      const dropTarget = getDropTarget(target);
+      if (!dropTarget || !event.dataTransfer) return;
+      event.preventDefault();
+      dropTarget.element.classList.remove('is-drop-target');
+      const assetMove = draggingAssetFile ?? getAssetFileDrag(event.dataTransfer);
+      if (assetMove) {
+        void moveAssetFile(dropTarget, assetMove);
+        return;
+      }
+      if (event.dataTransfer.files.length) {
+        void importDroppedFiles(dropTarget, [...event.dataTransfer.files]);
+      }
+    });
+
+    treeEl.addEventListener('dragstart', (event) => {
+      const target = getEventElement(event);
+      if (target?.closest('.resources__enabled, .resources__delete')) return;
+      const file = target?.closest<HTMLElement>('[data-resource-kind="file"]');
+      if (!file?.dataset.resourceId || !file.dataset.resourceName || !file.dataset.poolPath || !event.dataTransfer) return;
+
+      const payload: AssetFileDragPayload = {
+        id: Number(file.dataset.resourceId),
+        name: file.dataset.resourceName,
+        sourcePath: file.dataset.poolPath,
+      };
+      const serialized = JSON.stringify(payload);
+      draggingAssetFile = payload;
+      event.dataTransfer.effectAllowed = 'move';
+      event.dataTransfer.setData(ASSET_FILE_DRAG_TYPE, serialized);
+      event.dataTransfer.setData('text/plain', `${ASSET_FILE_TEXT_PREFIX}${serialized}`);
+      file.classList.add('is-dragging');
+    });
+
+    treeEl.addEventListener('dragend', () => {
+      draggingAssetFile = null;
+      treeEl.querySelectorAll('.is-dragging, .is-drop-target').forEach((node) => {
+        node.classList.remove('is-dragging', 'is-drop-target');
+      });
+    });
+
     treeEl.addEventListener('click', (event) => {
       const target = event.target as HTMLElement;
+      if (target.closest<HTMLInputElement>('.resources__enabled')) {
+        event.stopPropagation();
+        return;
+      }
+
+      const deleteButton = target.closest<HTMLButtonElement>('.resources__delete');
+      if (deleteButton) {
+        const item = deleteButton.closest<HTMLElement>('[data-resource-kind="file"], [data-resource-kind="folder"]');
+        if (item) {
+          event.preventDefault();
+          event.stopPropagation();
+          void deleteAssetItem(item);
+        }
+        return;
+      }
+
       const file = target.closest<HTMLElement>('[data-resource-kind="file"]');
       if (file?.dataset.resourceId) {
         state.setResourceSelection({
@@ -222,9 +387,285 @@ export function createResourcesPanel(
       render();
     });
 
+    treeEl.addEventListener('change', (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLInputElement) || !target.classList.contains('resources__enabled')) return;
+      const file = target.closest<HTMLElement>('[data-resource-kind="file"]');
+      if (!file?.dataset.resourceId || !file.dataset.poolPath) return;
+      event.stopPropagation();
+      void setAssetEnabled(Number(file.dataset.resourceId), file.dataset.resourceName ?? '', file.dataset.poolPath, target.checked);
+    });
+
     return () => {
       unsubscribeDb();
       unsubscribeState();
+      unsubscribeAssets();
     };
+
+    function getDropTarget(target: HTMLElement): DropTarget | null {
+      const assetFolder = target.closest<HTMLElement>('[data-resource-kind="folder"]');
+      if (assetFolder?.dataset.resourceId && assetFolder.dataset.poolPath) {
+        return {
+          kind: 'pool',
+          element: assetFolder,
+          parentId: Number(assetFolder.dataset.resourceId),
+          targetPath: assetFolder.dataset.poolPath,
+        };
+      }
+
+      return null;
+    }
+
+    async function importDroppedFiles(target: DropTarget, files: File[]): Promise<void> {
+      const session = sessionRef.current;
+      if (!session) {
+        setSyncStatus('blocked', 'Load a project before importing assets.');
+        return;
+      }
+
+      const regularFiles = files.filter((file) => file.size >= 0);
+      if (regularFiles.length === 0) return;
+
+      try {
+        setSyncStatus('applying', `Importing ${regularFiles.length} file${regularFiles.length === 1 ? '' : 's'}...`);
+        for (const file of regularFiles) {
+          const bytes = new Uint8Array(await file.arrayBuffer());
+          const relativePath = `${target.targetPath}/${file.name}`;
+
+          session.upsertResourceFile({
+            name: file.name,
+            parent: target.parentId ?? 0,
+            bytes: bytes.byteLength,
+            type: file.type || inferMimeType(file.name),
+            data: bytes,
+            format: inferFormat(file.name),
+            enabled: true,
+          });
+
+          if (connection.isConnected()) {
+            await writeAllowedAssetFile(phoenixAssets, relativePath, bytes);
+          }
+        }
+
+        dbState.setDirty();
+        render();
+      } catch (err) {
+        setSyncStatus('error', err instanceof Error ? err.message : 'Could not import dropped files.');
+      }
+    }
+
+    async function moveAssetFile(target: DropTarget, payload: AssetFileDragPayload): Promise<void> {
+      const session = sessionRef.current;
+      if (!session) {
+        setSyncStatus('blocked', 'Load a project before moving assets.');
+        return;
+      }
+      if (target.parentId === undefined) {
+        setSyncStatus('error', 'Assets can only be moved between Assets folders.');
+        return;
+      }
+
+      const sourceFile = session.data.files.find((file) => file.id === payload.id);
+      if (!sourceFile) {
+        setSyncStatus('error', 'The dragged asset no longer exists in the project.');
+        return;
+      }
+      if (sourceFile.parent === target.parentId) {
+        return;
+      }
+      const destinationConflict = session.data.files.some((file) => (
+        file.id !== payload.id
+        && file.parent === target.parentId
+        && file.name === payload.name
+      ));
+      if (destinationConflict) {
+        setSyncStatus('error', `A file named ${payload.name} already exists in the destination folder.`);
+        return;
+      }
+
+      const destinationPath = `${target.targetPath}/${payload.name}`;
+      const bytes = new Uint8Array(sourceFile.data);
+
+      try {
+        setSyncStatus('applying', `Moving ${payload.name}...`);
+        session.moveResourceFile(payload.id, target.parentId);
+        dbState.setDirty();
+
+        if (connection.isConnected() && sourceFile.enabled) {
+          try {
+            await writeAllowedAssetFile(phoenixAssets, destinationPath, bytes);
+          } catch (err) {
+            setSyncStatus('error', err instanceof Error ? err.message : 'Could not write Phoenix destination asset.');
+          }
+        }
+
+        if (connection.isConnected() && sourceFile.enabled) {
+          try {
+            await deleteAllowedAssetFile(phoenixAssets, payload.sourcePath);
+          } catch (err) {
+            setSyncStatus('error', err instanceof Error ? err.message : 'Could not delete Phoenix source asset.');
+          }
+        }
+
+        render();
+      } catch (err) {
+        setSyncStatus('error', err instanceof Error ? err.message : 'Could not move asset.');
+      }
+    }
+
+    async function setAssetEnabled(fileId: number, name: string, poolPath: string, enabled: boolean): Promise<void> {
+      const session = sessionRef.current;
+      if (!session) {
+        setSyncStatus('blocked', 'Load a project before changing asset state.');
+        return;
+      }
+
+      try {
+        setSyncStatus('applying', `${enabled ? 'Enabling' : 'Disabling'} ${name}...`);
+        const file = session.setResourceFileEnabled(fileId, enabled);
+        dbState.setDirty();
+
+        try {
+          if (enabled) {
+            await writeAllowedAssetFile(phoenixAssets, poolPath, new Uint8Array(file.data));
+          } else {
+            await deleteAllowedAssetFile(phoenixAssets, poolPath);
+          }
+        } catch (err) {
+          setSyncStatus('discrepant', `Updated in Cacablu, but Phoenix did not apply it: ${err instanceof Error ? err.message : 'Could not update Phoenix asset state.'}`);
+          render();
+          return;
+        }
+
+        render();
+      } catch (err) {
+        setSyncStatus('error', err instanceof Error ? err.message : 'Could not change asset state.');
+        render();
+      }
+    }
+
+    async function deleteAssetItem(item: HTMLElement): Promise<void> {
+      const id = Number(item.dataset.resourceId);
+      const name = item.dataset.resourceName
+        ?? item.querySelector<HTMLElement>('.resources__label')?.textContent
+        ?? 'item';
+      const path = item.dataset.poolPath;
+      if (!Number.isFinite(id) || !path) return;
+
+      if (item.dataset.resourceKind === 'file') {
+        const confirmed = window.confirm(`Delete asset "${name}" from the project database and Phoenix?`);
+        if (!confirmed) return;
+        await deleteAssetFile(id, name, path);
+        return;
+      }
+
+      if (item.dataset.resourceKind === 'folder') {
+        const confirmed = window.confirm(`Delete folder "${name}" and all its contents from the project database and Phoenix?`);
+        if (!confirmed) return;
+        await deleteAssetFolder(id, name, path);
+      }
+    }
+
+    async function deleteAssetFile(fileId: number, name: string, poolPath: string): Promise<void> {
+      const session = sessionRef.current;
+      if (!session) {
+        setSyncStatus('blocked', 'Load a project before deleting assets.');
+        return;
+      }
+
+      try {
+        setSyncStatus('applying', `Deleting ${name}...`);
+        session.deleteResourceFile(fileId);
+        dbState.setDirty();
+        state.clearResourceSelection();
+
+        if (connection.isConnected()) {
+          try {
+            await deleteAllowedAssetFile(phoenixAssets, poolPath);
+          } catch (err) {
+            setSyncStatus('error', err instanceof Error ? err.message : 'Could not delete Phoenix asset.');
+          }
+        }
+
+        render();
+      } catch (err) {
+        setSyncStatus('error', err instanceof Error ? err.message : 'Could not delete asset.');
+      }
+    }
+
+    async function deleteAssetFolder(folderId: number, name: string, poolPath: string): Promise<void> {
+      const session = sessionRef.current;
+      if (!session) {
+        setSyncStatus('blocked', 'Load a project before deleting asset folders.');
+        return;
+      }
+
+      try {
+        setSyncStatus('applying', `Deleting ${name}...`);
+        session.deleteResourceFolder(folderId);
+        expandedIds.delete(folderId);
+        dbState.setDirty();
+        state.clearResourceSelection();
+
+        if (connection.isConnected()) {
+          try {
+            await deleteAllowedAssetDirectory(phoenixAssets, poolPath, true);
+          } catch (err) {
+            setSyncStatus('error', err instanceof Error ? err.message : 'Could not delete Phoenix asset folder.');
+          }
+        }
+
+        render();
+      } catch (err) {
+        setSyncStatus('error', err instanceof Error ? err.message : 'Could not delete asset folder.');
+      }
+    }
   });
+}
+
+interface DropTarget {
+  kind: 'pool' | 'resources';
+  element: HTMLElement;
+  targetPath: string;
+  parentId?: number;
+}
+
+interface AssetFileDragPayload {
+  id: number;
+  name: string;
+  sourcePath: string;
+}
+
+function getEventElement(event: Event): HTMLElement | null {
+  return event.target instanceof HTMLElement ? event.target : null;
+}
+
+function hasAssetFileDrag(dataTransfer: DataTransfer | null): boolean {
+  return Boolean(dataTransfer && Array.from(dataTransfer.types).includes(ASSET_FILE_DRAG_TYPE));
+}
+
+function getAssetFileDrag(dataTransfer: DataTransfer): AssetFileDragPayload | null {
+  const custom = dataTransfer.getData(ASSET_FILE_DRAG_TYPE);
+  const plain = dataTransfer.getData('text/plain');
+  const raw = custom || (plain.startsWith(ASSET_FILE_TEXT_PREFIX) ? plain.slice(ASSET_FILE_TEXT_PREFIX.length) : '');
+  if (!raw) return null;
+
+  try {
+    const payload = JSON.parse(raw) as Partial<AssetFileDragPayload>;
+    if (
+      typeof payload.id !== 'number'
+      || !Number.isFinite(payload.id)
+      || typeof payload.name !== 'string'
+      || typeof payload.sourcePath !== 'string'
+    ) {
+      return null;
+    }
+    return {
+      id: payload.id,
+      name: payload.name,
+      sourcePath: payload.sourcePath,
+    };
+  } catch {
+    return null;
+  }
 }

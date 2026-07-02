@@ -50,7 +50,7 @@ export type PhoenixIncomingMessage =
     }
   | {
       type: 'webrtc.answer';
-      sessionId: number;
+      sessionId?: number;
       sdp: string;
     }
   | {
@@ -70,9 +70,23 @@ export type PhoenixIncomingMessage =
       state: string;
     }
   | {
+      type: 'asset.changed';
+      requestId: string | null;
+      operation: string;
+      path: string;
+      entry: unknown;
+    }
+  | {
+      type: 'section.changed';
+      requestId: string | null;
+      operation: string;
+      count: number;
+    }
+  | {
       type: 'error';
       code: string;
       message: string;
+      requestId?: string | null;
     };
 
 export type PhoenixTransportCommand =
@@ -176,14 +190,38 @@ export function normalizePhoenixMessage(input: unknown): PhoenixIncomingMessage 
       type: 'error',
       code: typeof candidate.code === 'string' ? candidate.code : 'unknown',
       message: typeof candidate.message === 'string' ? candidate.message : 'Unknown Phoenix error',
+      requestId: typeof candidate.requestId === 'string' ? candidate.requestId : null,
     };
   }
 
+  if (candidate.type === 'asset.changed') {
+    return typeof candidate.operation === 'string' && typeof candidate.path === 'string'
+      ? {
+          type: 'asset.changed',
+          requestId: typeof candidate.requestId === 'string' ? candidate.requestId : null,
+          operation: candidate.operation,
+          path: candidate.path,
+          entry: candidate.entry ?? null,
+        }
+      : null;
+  }
+
+  if (candidate.type === 'section.changed') {
+    return typeof candidate.operation === 'string'
+      ? {
+          type: 'section.changed',
+          requestId: typeof candidate.requestId === 'string' ? candidate.requestId : null,
+          operation: candidate.operation,
+          count: typeof candidate.count === 'number' ? candidate.count : 0,
+        }
+      : null;
+  }
+
   if (candidate.type === 'webrtc.answer') {
-    return typeof candidate.sdp === 'string' && typeof candidate.sessionId === 'number'
+    return typeof candidate.sdp === 'string'
       ? {
           type: 'webrtc.answer',
-          sessionId: candidate.sessionId,
+          sessionId: typeof candidate.sessionId === 'number' ? candidate.sessionId : undefined,
           sdp: candidate.sdp,
         }
       : null;

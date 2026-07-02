@@ -1,4 +1,4 @@
-import type { AppSnapshot, ConnectionStatus, ResourceSelection } from '../app/types';
+import type { AppEvent, AppSnapshot, ConnectionStatus, ResourceSelection } from '../app/types';
 
 type Listener = (snapshot: AppSnapshot) => void;
 
@@ -9,6 +9,10 @@ export interface AppState {
   setConnection(status: ConnectionStatus, label: string, error?: string | null): void;
   setResourceSelection(selection: ResourceSelection): void;
   clearResourceSelection(): void;
+  addEvent(event: Omit<AppEvent, 'id' | 'timestamp'> & { id?: string; timestamp?: number }): void;
+  addEvents(events: Array<Omit<AppEvent, 'id' | 'timestamp'> & { id?: string; timestamp?: number }>): void;
+  markEventsRead(): void;
+  clearEvents(): void;
 }
 
 const INITIAL_SNAPSHOT: AppSnapshot = {
@@ -17,6 +21,8 @@ const INITIAL_SNAPSHOT: AppSnapshot = {
   connectionLabel: 'Engine disconnected',
   lastError: null,
   resourceSelection: { kind: 'none' },
+  events: [],
+  unreadEventCount: 0,
 };
 
 export function createAppState(): AppState {
@@ -52,6 +58,14 @@ export function createAppState(): AppState {
     },
 
     setConnection(status: ConnectionStatus, label: string, error = null): void {
+      if (
+        snapshot.connectionStatus === status
+        && snapshot.connectionLabel === label
+        && snapshot.lastError === error
+      ) {
+        return;
+      }
+
       snapshot = {
         ...snapshot,
         connectionStatus: status,
@@ -73,6 +87,45 @@ export function createAppState(): AppState {
       snapshot = {
         ...snapshot,
         resourceSelection: { kind: 'none' },
+      };
+      publish();
+    },
+
+    addEvent(event): void {
+      this.addEvents([event]);
+    },
+
+    addEvents(events): void {
+      if (events.length === 0) return;
+      const now = Date.now();
+      const nextEvents = events.map((event, index) => ({
+        ...event,
+        id: event.id ?? `event-${now.toString(36)}-${index}`,
+        timestamp: event.timestamp ?? now,
+      }));
+      snapshot = {
+        ...snapshot,
+        events: [...nextEvents, ...snapshot.events].slice(0, 200),
+        unreadEventCount: snapshot.unreadEventCount + nextEvents.length,
+      };
+      publish();
+    },
+
+    markEventsRead(): void {
+      if (snapshot.unreadEventCount === 0) return;
+      snapshot = {
+        ...snapshot,
+        unreadEventCount: 0,
+      };
+      publish();
+    },
+
+    clearEvents(): void {
+      if (snapshot.events.length === 0 && snapshot.unreadEventCount === 0) return;
+      snapshot = {
+        ...snapshot,
+        events: [],
+        unreadEventCount: 0,
       };
       publish();
     },

@@ -23,6 +23,19 @@ describe('createAppState', () => {
     });
   });
 
+  it('does not notify subscribers when connection status is unchanged', () => {
+    const state = createAppState();
+    let updates = 0;
+    state.subscribe(() => {
+      updates += 1;
+    });
+
+    state.setConnection('connected', 'Phoenix connected');
+    state.setConnection('connected', 'Phoenix connected');
+
+    expect(updates).toBe(2);
+  });
+
   it('starts with no resource selection', () => {
     const state = createAppState();
 
@@ -63,5 +76,31 @@ describe('createAppState', () => {
       name: 'Images',
     });
     expect(second.getSnapshot().resourceSelection).toEqual({ kind: 'none' });
+  });
+
+  it('records application events', () => {
+    const state = createAppState();
+
+    state.addEvents([
+      {
+        severity: 'error',
+        source: 'Phoenix section sync',
+        subjectId: '17',
+        description: 'Bar 17 was not sent.',
+      },
+    ]);
+
+    expect(state.getSnapshot().events).toHaveLength(1);
+    expect(state.getSnapshot().events[0]).toMatchObject({
+      severity: 'error',
+      source: 'Phoenix section sync',
+      subjectId: '17',
+      description: 'Bar 17 was not sent.',
+    });
+    expect(state.getSnapshot().unreadEventCount).toBe(1);
+
+    state.markEventsRead();
+
+    expect(state.getSnapshot().unreadEventCount).toBe(0);
   });
 });

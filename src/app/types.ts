@@ -7,6 +7,17 @@ export type ResourceSelection =
   | { kind: 'folder'; id: number; name: string }
   | { kind: 'file'; id: number; name: string; fileType: string };
 
+export type AppEventSeverity = 'info' | 'warning' | 'error';
+
+export interface AppEvent {
+  id: string;
+  timestamp: number;
+  severity: AppEventSeverity;
+  description: string;
+  source?: string;
+  subjectId?: string;
+}
+
 export interface PanelDefinition {
   id: string;
   title: string;
@@ -27,4 +38,6 @@ export interface AppSnapshot {
   connectionLabel: string;
   lastError: string | null;
   resourceSelection: ResourceSelection;
+  events: AppEvent[];
+  unreadEventCount: number;
 }

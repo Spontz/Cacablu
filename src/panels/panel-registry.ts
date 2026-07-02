@@ -26,7 +26,7 @@ export function createPanelRegistry(
     create(name: string): IContentRenderer {
       switch (name) {
         case 'resources-panel':
-          return createResourcesPanel(state, dbState, sessionRef);
+          return createResourcesPanel(state, dbState, sessionRef, connection);
         case 'timeline-panel':
           return createTimelinePanel(state, dbState, sessionRef, connection);
         case 'preview-panel':

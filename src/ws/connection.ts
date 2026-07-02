@@ -11,8 +11,10 @@ const PHOENIX_WS_URL = 'ws://127.0.0.1:29100/ws';
 const RECONNECT_DELAY_MS = 1500;
 
 type RuntimeListener = (state: PhoenixRuntimeState) => void;
-type WebRtcSignal = Extract<PhoenixIncomingMessage, { type: 'webrtc.offer' | 'webrtc.answer' | 'webrtc.ice-candidate' | 'webrtc.state' }>;
+type WebRtcSignal = Extract<PhoenixIncomingMessage, { type: 'webrtc.offer' | 'webrtc.answer' | 'webrtc.ice-candidate' | 'webrtc.state' | 'error' }>;
 type WebRtcListener = (message: WebRtcSignal) => void;
+type AssetSignal = Extract<PhoenixIncomingMessage, { type: 'asset.changed' | 'section.changed' | 'error' }>;
+type AssetListener = (message: AssetSignal) => void;
 
 export interface ConnectionController {
   syncStatusLabel(): void;
@@ -20,6 +22,7 @@ export interface ConnectionController {
   getRuntimeState(): PhoenixRuntimeState | null;
   isConnected(): boolean;
   send(command: PhoenixTransportCommand): boolean;
+  subscribeAssets(listener: AssetListener): () => void;
   subscribeRuntime(listener: RuntimeListener): () => void;
   subscribeWebRtc(listener: WebRtcListener): () => void;
 }
@@ -30,6 +33,7 @@ export function createConnectionController(state: AppState): ConnectionControlle
   let reconnectTimer: number | null = null;
   const runtimeListeners = new Set<RuntimeListener>();
   const webRtcListeners = new Set<WebRtcListener>();
+  const assetListeners = new Set<AssetListener>();
 
   function publishRuntime(nextState: PhoenixRuntimeState): void {
     runtimeState = nextState;
@@ -40,6 +44,12 @@ export function createConnectionController(state: AppState): ConnectionControlle
 
   function publishWebRtc(message: WebRtcSignal): void {
     for (const listener of webRtcListeners) {
+      listener(message);
+    }
+  }
+
+  function publishAsset(message: AssetSignal): void {
+    for (const listener of assetListeners) {
       listener(message);
     }
   }
@@ -87,13 +97,13 @@ export function createConnectionController(state: AppState): ConnectionControlle
       try {
         parsed = JSON.parse(String(event.data));
       } catch {
-        state.setConnection('error', 'Phoenix message error', 'Received malformed JSON from Phoenix.');
+        console.warn('Ignoring malformed Phoenix WebSocket message.');
         return;
       }
 
       const message = normalizePhoenixMessage(parsed);
       if (!message) {
-        state.setConnection('error', 'Phoenix message error', 'Received unsupported Phoenix message.');
+        console.warn('Ignoring unsupported Phoenix WebSocket message.', parsed);
         return;
       }
 
@@ -110,7 +120,13 @@ export function createConnectionController(state: AppState): ConnectionControlle
         return;
       }
 
-      state.setConnection('error', 'Phoenix runtime error', message.message);
+      if (message.type === 'asset.changed' || message.type === 'section.changed') {
+        publishAsset(message);
+        return;
+      }
+
+      publishAsset(message);
+      publishWebRtc(message);
     });
 
     socket.addEventListener('close', () => {
@@ -152,6 +168,14 @@ export function createConnectionController(state: AppState): ConnectionControlle
 
       socket.send(createPhoenixCommand(command));
       return true;
+    },
+
+    subscribeAssets(listener: AssetListener): () => void {
+      assetListeners.add(listener);
+
+      return () => {
+        assetListeners.delete(listener);
+      };
     },
 
     subscribeRuntime(listener: RuntimeListener): () => void {
