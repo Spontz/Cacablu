@@ -26,6 +26,12 @@ export const DEFAULT_PANELS: PanelDefinition[] = [
     description: 'Focused details and controls for the current selection.',
   },
   {
+    id: 'section-editor',
+    title: 'Section Editor',
+    component: 'section-editor-panel',
+    description: 'Edit the script and blend options for the selected timeline bar.',
+  },
+  {
     id: 'events',
     title: 'Events',
     component: 'events-panel',

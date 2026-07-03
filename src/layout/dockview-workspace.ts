@@ -72,6 +72,8 @@ export function createDockviewWorkspace(options: WorkspaceOptions): DockviewWork
         return mainReference ? { referencePanel: mainReference, direction: 'left' } : null;
       case 'inspector':
         return mainReference ? { referencePanel: mainReference, direction: 'right' } : null;
+      case 'section-editor':
+        return mainReference ? { referencePanel: mainReference, direction: 'right' } : null;
       case 'preview':
         return timeline ? { referencePanel: timeline, direction: 'above' } : null;
       case 'timeline':

@@ -23,6 +23,7 @@ export interface AppShell {
 
 export function createAppShell(root: HTMLElement): AppShell {
   const SIDE_PANEL_WIDTH_RATIO = 0.15;
+  const SECTION_EDITOR_WIDTH_RATIO = 0.32;
   const state = createAppState();
   const dbState = createDbState();
   const sessionRef = createDbSessionRef();
@@ -40,6 +41,9 @@ export function createAppShell(root: HTMLElement): AppShell {
       if (panelId === 'preview') {
         disablePhoenixPreview();
       }
+      if (panelId === 'section-editor') {
+        lastSectionEditorSelectionId = null;
+      }
     },
   });
   const phoenixAssets = createPhoenixAssetClient();
@@ -48,8 +52,10 @@ export function createAppShell(root: HTMLElement): AppShell {
   let session: DbSession | null = null;
   let poolSyncModal: PoolSyncModal | null = null;
   let lastInspectorSelectionId: number | null = null;
+  let lastSectionEditorSelectionId: number | null = null;
   let lastConnectionStatus = state.getSnapshot().connectionStatus;
   let lastEventCount = state.getSnapshot().events.length;
+  let lastDisplayTimelineIds = state.getSnapshot().displayTimelineIds;
 
   const fsSupported = isFileSystemAccessSupported();
 
@@ -69,6 +75,9 @@ export function createAppShell(root: HTMLElement): AppShell {
         case 'reset-layout':
           workspace.resetLayout();
           break;
+        case 'toggle-display-timeline-ids':
+          state.toggleDisplayTimelineIds();
+          break;
         case 'toggle-db-explorer':
           workspace.openFloating('db-explorer', 'db-explorer-panel', 'Database Explorer');
           break;
@@ -83,6 +92,9 @@ export function createAppShell(root: HTMLElement): AppShell {
           break;
         case 'toggle-inspector':
           workspace.openPanel('inspector', { widthRatio: SIDE_PANEL_WIDTH_RATIO });
+          break;
+        case 'toggle-section-editor':
+          workspace.openPanel('section-editor', { widthRatio: SECTION_EDITOR_WIDTH_RATIO });
           break;
         case 'toggle-events':
           workspace.openPanel('events');
@@ -123,6 +135,7 @@ export function createAppShell(root: HTMLElement): AppShell {
     state.clearResourceSelection();
     workspace.closePanel('resources');
     workspace.closePanel('inspector');
+    workspace.closePanel('section-editor');
     workspace.closePanel('timeline');
     workspace.closePanel('events');
     let nextSession: DbSession | null = null;
@@ -231,10 +244,23 @@ export function createAppShell(root: HTMLElement): AppShell {
         } else if (snapshot.resourceSelection.kind !== 'file') {
           lastInspectorSelectionId = null;
         }
+        if (
+          snapshot.resourceSelection.kind === 'bar' &&
+          (snapshot.resourceSelection.id !== lastSectionEditorSelectionId || !workspace.isPanelOpen('section-editor'))
+        ) {
+          lastSectionEditorSelectionId = snapshot.resourceSelection.id;
+          workspace.openPanel('section-editor', { widthRatio: SECTION_EDITOR_WIDTH_RATIO });
+        } else if (snapshot.resourceSelection.kind !== 'bar') {
+          lastSectionEditorSelectionId = null;
+        }
         if (snapshot.events.length > lastEventCount) {
           workspace.openPanel('events');
         }
         lastEventCount = snapshot.events.length;
+        if (snapshot.displayTimelineIds !== lastDisplayTimelineIds) {
+          lastDisplayTimelineIds = snapshot.displayTimelineIds;
+          syncMenuDisabled(dbState.getSnapshot());
+        }
       });
 
       dbState.subscribe((snapshot) => {
@@ -273,6 +299,12 @@ export function createAppShell(root: HTMLElement): AppShell {
       if (action.id === 'save-database' || action.id === 'save-database-as') {
         return { ...action, disabled: fileActionDisabled || !hasFile };
       }
+      if (action.id === 'toggle-display-timeline-ids') {
+        return {
+          ...action,
+          label: state.getSnapshot().displayTimelineIds ? 'Ocultar IDs' : 'Display IDs',
+        };
+      }
       if (fileActionDisabled) return { ...action, disabled: true };
       return action;
     });
@@ -295,34 +327,46 @@ export function createAppShell(root: HTMLElement): AppShell {
         if (err instanceof ProjectSectionSyncError) {
           recordSectionIssues(err.issues);
         } else if (err instanceof Error) {
+          const isPhoenixOffline = err.message.includes('Could not connect to Phoenix');
           state.addEvent({
-            severity: 'error',
+            severity: isPhoenixOffline ? 'warning' : 'error',
             source: 'Phoenix section sync',
-            description: err.message,
+            description: isPhoenixOffline 
+              ? 'Phoenix is offline. Project loaded without syncing sections.' 
+              : err.message,
           });
-          workspace.openPanel('events');
+          if (!isPhoenixOffline) {
+            workspace.openPanel('events');
+          }
         }
       }
     } catch (err) {
       if (isAbortError(err)) throw err;
       if (err instanceof Error) {
+        const isPhoenixOffline = err.message.includes('Could not connect to Phoenix');
         state.addEvent({
-          severity: 'error',
+          severity: isPhoenixOffline ? 'warning' : 'error',
           source: 'Phoenix project sync',
-          description: err.message,
+          description: isPhoenixOffline 
+            ? 'Phoenix is offline. Project loaded without syncing pool files.' 
+            : err.message,
         });
-        workspace.openPanel('events');
+        if (!isPhoenixOffline) {
+          workspace.openPanel('events');
+        }
+        if (!isPhoenixOffline) {
+          poolSyncModal?.update({
+            phase: 'error',
+            current: 0,
+            total: 0,
+            copied: 0,
+            skipped: 0,
+            failed: 0,
+            message: `Phoenix pool sync failed: ${err.message}`,
+          });
+          throw err;
+        }
       }
-      poolSyncModal?.update({
-        phase: 'error',
-        current: 0,
-        total: 0,
-        copied: 0,
-        skipped: 0,
-        failed: 0,
-        message: err instanceof Error ? `Phoenix pool sync failed: ${err.message}` : 'Phoenix pool sync failed.',
-      });
-      throw err;
     } finally {
       poolSyncModal?.hide();
     }
@@ -438,8 +482,10 @@ function updatePoolSyncIndicator(indicator: HTMLElement | null, progress: Projec
     label.textContent = `${progress.message}${count}`;
   }
   if (progressBar) {
-    progressBar.max = total;
-    progressBar.value = progress.phase === 'scanning' ? 0 : Math.min(progress.current, total);
+    if (progress.total > 0) {
+      progressBar.max = total;
+      progressBar.value = Math.min(progress.current, total);
+    }
   }
 }
 

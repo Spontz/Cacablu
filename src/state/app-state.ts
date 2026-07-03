@@ -9,6 +9,8 @@ export interface AppState {
   setConnection(status: ConnectionStatus, label: string, error?: string | null): void;
   setResourceSelection(selection: ResourceSelection): void;
   clearResourceSelection(): void;
+  setDisplayTimelineIds(display: boolean): void;
+  toggleDisplayTimelineIds(): void;
   addEvent(event: Omit<AppEvent, 'id' | 'timestamp'> & { id?: string; timestamp?: number }): void;
   addEvents(events: Array<Omit<AppEvent, 'id' | 'timestamp'> & { id?: string; timestamp?: number }>): void;
   markEventsRead(): void;
@@ -23,6 +25,7 @@ const INITIAL_SNAPSHOT: AppSnapshot = {
   resourceSelection: { kind: 'none' },
   events: [],
   unreadEventCount: 0,
+  displayTimelineIds: false,
 };
 
 export function createAppState(): AppState {
@@ -89,6 +92,19 @@ export function createAppState(): AppState {
         resourceSelection: { kind: 'none' },
       };
       publish();
+    },
+
+    setDisplayTimelineIds(display): void {
+      if (snapshot.displayTimelineIds === display) return;
+      snapshot = {
+        ...snapshot,
+        displayTimelineIds: display,
+      };
+      publish();
+    },
+
+    toggleDisplayTimelineIds(): void {
+      this.setDisplayTimelineIds(!snapshot.displayTimelineIds);
     },
 
     addEvent(event): void {

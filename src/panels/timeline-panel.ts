@@ -32,9 +32,11 @@ export function createTimelinePanel(
 
   let lastTimestamp = 0;
   let pendingPlayback: { playing: boolean; until: number } | null = null;
-  let lastRenderedPlaying = false;
   let lastRenderedDuration = Number.NaN;
   let lastRenderedConnected = false;
+  let lastRenderedSelectedBarId: number | null = null;
+  let lastRenderedErrorSignature = '';
+  let lastRenderedDisplayTimelineIds = false;
   let runtimeAnchorTime = state.transport.currentTime;
   let runtimeAnchorTimestamp = performance.now();
 
@@ -122,6 +124,21 @@ export function createTimelinePanel(
     return range.start + (relative < 0 ? relative + span : relative);
   }
 
+  function getErroredSectionBarIds(): Set<number> {
+    const ids = new Set<number>();
+    for (const event of appState.getSnapshot().events) {
+      if (event.severity !== 'error' || event.source !== 'Phoenix section sync' || !event.subjectId) {
+        continue;
+      }
+
+      const id = Number(event.subjectId);
+      if (Number.isInteger(id)) {
+        ids.add(id);
+      }
+    }
+    return ids;
+  }
+
   return createContentRenderer((element) => {
     element.className = 'panel panel--timeline';
 
@@ -140,22 +157,54 @@ export function createTimelinePanel(
       }
     };
 
+    const updatePlaybackVisualState = (): void => {
+      const panel = element.querySelector<HTMLElement>('.timeline-panel');
+      panel?.classList.toggle('is-playing', state.transport.isPlaying);
+
+      const playButton = element.querySelector<HTMLButtonElement>('[data-action="play"]');
+      if (!playButton) {
+        return;
+      }
+
+      const playTitle = state.transport.isPlaying ? 'Pause' : 'Play';
+      playButton.title = playTitle;
+      playButton.setAttribute('aria-label', playTitle);
+
+      const icon = playButton.querySelector('svg');
+      if (icon) {
+        icon.innerHTML = state.transport.isPlaying
+          ? '<path d="M6 5h4v14H6zM14 5h4v14h-4z" />'
+          : '<path d="M7 5v14l11-7z" />';
+      }
+    };
+
     const render = (force = false): void => {
       const transportDisabled = !connection.isConnected();
       const connected = !transportDisabled;
+      const snapshot = appState.getSnapshot();
+      const selection = snapshot.resourceSelection;
+      const selectedBarId = selection.kind === 'bar' ? selection.id : null;
+      const displayTimelineIds = snapshot.displayTimelineIds;
+      const erroredBarIds = getErroredSectionBarIds();
+      const errorSignature = [...erroredBarIds].sort((a, b) => a - b).join(',');
       if (
         !force &&
-        state.transport.isPlaying === lastRenderedPlaying &&
         state.transport.duration === lastRenderedDuration &&
-        connected === lastRenderedConnected
+        connected === lastRenderedConnected &&
+        selectedBarId === lastRenderedSelectedBarId &&
+        errorSignature === lastRenderedErrorSignature &&
+        displayTimelineIds === lastRenderedDisplayTimelineIds
       ) {
+        updatePlaybackVisualState();
         updatePlayhead();
         return;
       }
 
-      lastRenderedPlaying = state.transport.isPlaying;
       lastRenderedDuration = state.transport.duration;
       lastRenderedConnected = connected;
+      lastRenderedSelectedBarId = selectedBarId;
+      lastRenderedErrorSignature = errorSignature;
+      lastRenderedDisplayTimelineIds = displayTimelineIds;
 
       const effectivePixelsPerSecond = state.viewport.pixelsPerSecond * state.viewport.zoom;
       const playheadLeft = state.transport.currentTime * effectivePixelsPerSecond;
@@ -165,7 +214,7 @@ export function createTimelinePanel(
       const playTitle = state.transport.isPlaying ? 'Pause' : 'Play';
 
       element.innerHTML = `
-        <div class="timeline-panel">
+        <div class="timeline-panel ${state.transport.isPlaying ? 'is-playing' : ''}">
           <div class="timeline-panel__body">
             <div class="timeline-panel__viewport">
               <div class="timeline-panel__ruler" style="width:${timelineWidth}px">
@@ -206,10 +255,14 @@ export function createTimelinePanel(
                             const isActive =
                               state.transport.currentTime >= clip.start &&
                               state.transport.currentTime <= clip.end;
+                            const dbId = typeof clip.metadata?.dbId === 'number' ? clip.metadata.dbId : null;
+                            const isSelected = dbId !== null && dbId === selectedBarId;
+                            const hasError = dbId !== null && erroredBarIds.has(dbId);
+                            const label = displayTimelineIds && dbId !== null ? `${dbId} ${clip.label}` : clip.label;
 
                             return `
-                              <article class="timeline-panel__clip ${isActive ? 'is-active' : ''}" style="left:${left}px;width:${width}px;border-color:${clip.color ?? CLIP_COLOR}">
-                                <span class="timeline-panel__clip-label">${clip.label}</span>
+                              <article class="timeline-panel__clip ${isActive ? 'is-active' : ''} ${isSelected ? 'is-selected' : ''} ${hasError ? 'has-error' : ''}" data-bar-id="${dbId ?? ''}" tabindex="0" style="left:${left}px;width:${width}px;border-color:${clip.color ?? CLIP_COLOR}">
+                                <span class="timeline-panel__clip-label">${label}</span>
                               </article>
                             `;
                           })
@@ -407,6 +460,25 @@ export function createTimelinePanel(
       }
 
       handleAction(target.dataset.action ?? '');
+    });
+
+    element.addEventListener('click', (event) => {
+      if ((event.target as HTMLElement | null)?.closest('[data-action]')) {
+        return;
+      }
+
+      const clip = (event.target as HTMLElement | null)?.closest<HTMLElement>('[data-bar-id]');
+      if (clip?.dataset.barId) {
+        const barId = Number(clip.dataset.barId);
+        if (Number.isInteger(barId)) {
+          appState.setResourceSelection({ kind: 'bar', id: barId });
+        }
+        return;
+      }
+
+      if ((event.target as HTMLElement | null)?.closest('.timeline-panel__viewport')) {
+        appState.clearResourceSelection();
+      }
     });
 
     element.addEventListener(

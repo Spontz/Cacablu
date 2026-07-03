@@ -1,0 +1,185 @@
+# Feature Specification: Timeline Management
+
+**Feature Branch**: `012-timeline-management`  
+**Created**: 2026-07-02  
+**Status**: Draft  
+**Input**: User description: "Continuar con una nueva spec sobre timeline management. La timeline debe permitir gestionar bars desde Cacablu y sincronizarlas con Phoenix."
+
+## Runtime Context *(mandatory)*
+
+**Browser Surface**: The Cacablu Timeline panel, Inspector panel, Events panel, top-level project shell, and project database save/open workflow.  
+**Local Engine Dependency**: Phoenix is optional for local editing. When connected in slave mode, committed timeline edits are synchronized to Phoenix through the existing section sync API.  
+**Static Deployment Impact**: Cacablu remains a static browser app with no backend; it uses the loaded SQLite project session, browser UI events, `fetch`, and `WebSocket`.  
+**Real-Time Sensitivity**: Drag, resize, zoom, and selection must remain responsive. Phoenix synchronization must be debounced and must not block pointer interactions.  
+**File System Access Requirement**: Requires File System Access API for opening and saving project SQLite files. The Timeline panel itself can open empty without a project.
+
+## User Scenarios & Testing *(mandatory)*
+
+### User Story 1 - Load And Display Project Bars (Priority: P1)
+
+As a user, I want the Timeline to be empty before a project is loaded and then show the bars from the opened project so that the visible timeline represents the project database.
+
+**Why this priority**: This is the baseline for timeline management; editing is unsafe if the displayed bars are not the actual project bars.
+
+**Independent Test**: Open Cacablu with no project, open Timeline, then load a known SQLite project and verify clips match project bars by id, type, layer, start, and end.
+
+**Acceptance Scenarios**:
+
+1. **Given** no project is loaded, **When** the user opens Timeline, **Then** Cacablu shows an empty timeline with no default bars or default layers.
+2. **Given** a project is loaded, **When** Timeline renders, **Then** Cacablu shows one clip per database bar.
+3. **Given** the project has bars on multiple layers, **When** Timeline renders, **Then** Cacablu creates only the layers required by those bars.
+
+---
+
+### User Story 2 - Select And Edit Timeline Bar Sections (Priority: P1)
+
+As a user, I want to select a bar on the Timeline and edit its section script and blend settings so that I can change the Phoenix section represented by that bar.
+
+**Why this priority**: Selection is required before safe editing, deletion, and section editor integration.
+
+**Independent Test**: Load a project, select a timeline bar, verify Section Editor opens on the right with that bar's script and blend settings; click empty timeline space and verify selection clears.
+
+**Acceptance Scenarios**:
+
+1. **Given** a project is loaded, **When** the user single-clicks a timeline bar, **Then** Cacablu records the selected bar id and opens or updates Section Editor on the right side, even when the same bar was already selected.
+2. **Given** a timeline bar is selected, **When** the user clicks empty timeline space, **Then** Cacablu clears the selected bar.
+3. **Given** a selected bar is deleted, **When** deletion completes, **Then** Cacablu clears selection and Section Editor no longer shows stale bar data.
+4. **Given** a timeline bar is selected, **When** the user edits script or blend fields and applies them, **Then** Cacablu persists those values to the loaded project session.
+5. **Given** Section Editor is open for a selected bar, **When** it renders, **Then** it shows Bar Type, Script Template, Save Template, code editor, Blend Source, Blend Destination, Blend Equation, and Apply controls.
+6. **Given** Timeline is visible, **When** the user toggles View > Display IDs, **Then** each bar label shows its id before the name separated by one space, and the menu changes to Ocultar IDs until toggled off.
+
+---
+
+### User Story 3 - Edit Bars From Timeline (Priority: P1)
+
+As a user, I want to create, move, resize, change layer, and delete bars from the Timeline so that Cacablu can become the primary timeline editor.
+
+**Why this priority**: Timeline management is primarily an editing workflow, not only display.
+
+**Independent Test**: Load a project copy, perform create/move/resize/layer/delete operations, save, reopen, and confirm the SQLite database contains the edited bars.
+
+**Acceptance Scenarios**:
+
+1. **Given** a project is loaded, **When** the user creates a bar on the timeline, **Then** Cacablu creates a database bar with a stable id and visible clip.
+2. **Given** a bar exists, **When** the user drags it horizontally, **Then** Cacablu updates its start and end times.
+3. **Given** a bar exists, **When** the user drags it to another layer, **Then** Cacablu updates its layer.
+4. **Given** a bar exists, **When** the user resizes its start or end edge, **Then** Cacablu updates the corresponding time while preserving positive duration.
+5. **Given** a bar is selected, **When** the user deletes it, **Then** Cacablu removes it from the project database and the timeline.
+
+---
+
+### User Story 4 - Sync Edited Bars To Phoenix (Priority: P2)
+
+As a user, I want timeline edits to be sent to Phoenix when the engine is connected so that the preview follows the edited project timeline.
+
+**Why this priority**: Phoenix must reflect editor changes, but local editing should remain useful without Phoenix.
+
+**Independent Test**: Connect Phoenix, edit a bar, and verify Cacablu sends debounced section sync. Disconnect Phoenix, edit another bar, and verify local edit persists with a non-blocking event.
+
+**Acceptance Scenarios**:
+
+1. **Given** Phoenix is connected, **When** the user commits a timeline edit, **Then** Cacablu schedules a debounced project bar section sync.
+2. **Given** multiple edits happen quickly, **When** the debounce window closes, **Then** Cacablu sends the latest complete bar snapshot once.
+3. **Given** Phoenix is disconnected, **When** the user commits a timeline edit, **Then** Cacablu keeps the local edit and records an Event instead of rolling back.
+4. **Given** Phoenix rejects section sync, **When** Cacablu receives the response, **Then** Cacablu records Events with affected bar ids when available.
+5. **Given** Phoenix section sync reports errors for known bars, **When** Timeline renders, **Then** the affected timeline bars are shown in red until those Events are cleared.
+6. **Given** Cacablu is preparing or checking section sync, **When** it can count real local work, **Then** the sync modal advances its progress text and bar using actual processed counts, not synthetic animation.
+
+---
+
+### User Story 5 - Preserve Transport Usability (Priority: P3)
+
+As a user, I want transport controls to remain visible and understandable whether or not Phoenix is connected so that Timeline stays useful as an editor panel.
+
+**Why this priority**: Transport is important, but bar editing can proceed without runtime playback.
+
+**Independent Test**: Open Timeline with Phoenix disconnected and verify the panel remains open, editing remains possible, and Phoenix-only transport actions are disabled or no-op.
+
+**Acceptance Scenarios**:
+
+1. **Given** Phoenix is connected, **When** the user uses transport controls, **Then** Cacablu sends the matching runtime command and follows Phoenix runtime state.
+2. **Given** Phoenix is disconnected, **When** the Timeline panel is open, **Then** Cacablu keeps the panel open and communicates disconnected transport state without blocking editing.
+3. **Given** the timeline starts playing, **When** the playhead advances, **Then** the current-time line glow trail grows gradually.
+4. **Given** playback stops, **When** the playhead is no longer advancing, **Then** the trail fades away gradually and only a subtle glow remains on the line.
+
+### Edge Cases
+
+- What happens when a drag would move a bar before time zero?
+- What happens when a resize would create zero or negative duration?
+- What happens when Phoenix disconnects during debounced section sync?
+- What happens when a selected bar is deleted by another operation before Inspector renders?
+- What happens when a project has zero bars?
+- What happens when a bar has unsupported type or malformed script and Phoenix rejects it?
+- What happens when a save fails after timeline edits have been applied in memory?
+- What happens when Section Editor is opened without a project or without a selected bar?
+- What happens when a stored blend equation uses a legacy OpenGL-style value?
+
+## Requirements *(mandatory)*
+
+### Functional Requirements
+
+- **FR-001**: The Timeline panel MUST open even when no project is loaded.
+- **FR-002**: With no loaded project, Timeline MUST show no default bars and no default layers.
+- **FR-003**: When a project is loaded, Timeline MUST render clips from database bars only.
+- **FR-004**: Each rendered clip MUST preserve the bar id, type, layer, start time, and end time.
+- **FR-005**: Users MUST be able to select a bar from Timeline.
+- **FR-006**: Timeline selection MUST be reflected in shared app selection state.
+- **FR-007**: Section Editor MUST open on the right when a timeline bar is single-clicked, including repeated clicks on the same selected bar.
+- **FR-008**: Users MUST be able to clear timeline bar selection by selecting empty timeline space.
+- **FR-009**: Users MUST be able to create a bar from Timeline.
+- **FR-010**: Users MUST be able to move a bar in time.
+- **FR-011**: Users MUST be able to move a bar to another layer.
+- **FR-012**: Users MUST be able to resize a bar start or end.
+- **FR-013**: Users MUST be able to delete a selected bar.
+- **FR-014**: Timeline edits MUST persist to the loaded project session.
+- **FR-015**: Timeline edits MUST be represented in the saved SQLite file after Save.
+- **FR-016**: The system MUST reject or clamp edits that would produce negative times.
+- **FR-017**: The system MUST reject or clamp edits that would produce zero or negative duration.
+- **FR-018**: Committed timeline edits MUST schedule Phoenix section synchronization when Phoenix is connected.
+- **FR-019**: Section synchronization after timeline edits MUST be debounced.
+- **FR-020**: Cacablu MUST keep local timeline edits if Phoenix is disconnected or rejects sync.
+- **FR-021**: Cacablu MUST record sync failures in Events.
+- **FR-022**: Cacablu MUST include affected bar ids in Events when they are known.
+- **FR-022a**: Timeline bars with known Phoenix section sync errors MUST be visually marked in red while their error Events remain present.
+- **FR-023**: Timeline transport controls MUST remain visible when Timeline is open.
+- **FR-024**: Transport actions that require Phoenix MUST be disabled or no-op with clear disconnected state when Phoenix is disconnected.
+- **FR-025**: The feature MUST preserve Cacablu's static browser-only deployment model.
+- **FR-026**: The feature MUST use existing Phoenix editor API section sync rather than the legacy raw TCP protocol.
+- **FR-027**: Section Editor MUST provide a Bar Type selector, Script Template selector, Save Template button, code editing field, Blend Source selector, Blend Destination selector, Blend Equation selector, and Apply button.
+- **FR-028**: Section Editor Apply MUST update the selected bar script, source blend, destination blend, and blend equation in the loaded project session.
+- **FR-029**: Blend Equation MUST present the user-facing values `Add`, `Subtract`, and `Reverse subtract`, while storing Phoenix-compatible values.
+- **FR-030**: The sync modal MUST only show count progress when backed by real processed units, including section manifest checking; one-shot Phoenix requests MUST not display stale `0/N` counters or reset the bar to zero.
+- **FR-031**: The Events panel MUST use compact text sizing suitable for dense diagnostic messages.
+- **FR-032**: The playhead MUST grow its glow trail gradually when playback starts and fade the trail away gradually when playback stops.
+- **FR-033**: View MUST provide `Display IDs`; when enabled, timeline bar labels MUST show `<id> <name>` and the menu item MUST become `Ocultar IDs`.
+
+### Key Entities *(include if feature involves data)*
+
+- **Timeline Bar**: The editable visual representation of a project database bar, including id, type, layer, start time, end time, enabled state, blend metadata, and script.
+- **Timeline Selection**: The current selected timeline bar id or empty selection state shared with Inspector.
+- **Section Editor**: The right-side panel for editing a selected bar's type/template, script, blend source, blend destination, and blend equation.
+- **Timeline Edit Transaction**: A create, move, resize, layer change, property edit, or delete operation applied to the project database.
+- **Section Sync Request**: A debounced request that serializes all current project bars and asks Phoenix to align runtime sections.
+- **Timeline Sync Event**: A non-blocking Event row that reports disconnected, validation, or Phoenix section sync failures.
+
+## Success Criteria *(mandatory)*
+
+### Measurable Outcomes
+
+- **SC-001**: Opening Timeline without a project shows zero bars and zero default layers.
+- **SC-002**: Loading a known project renders 100% of database bars with matching ids, timing, and layers.
+- **SC-003**: Create, move, resize, layer change, and delete operations persist after save and reopen in manual validation.
+- **SC-004**: Invalid negative-time and non-positive-duration edits are not persisted.
+- **SC-005**: With Phoenix connected, committed timeline edits trigger one debounced section sync per edit burst.
+- **SC-006**: With Phoenix disconnected, committed timeline edits remain local and produce an Event.
+- **SC-007**: Phoenix section sync failures are visible in Events and identify affected bar ids when available.
+- **SC-008**: `npm test`, `npm run typecheck`, and `npm run build` complete without new errors after implementation.
+- **SC-009**: Section Editor opens from a single click and applies script/blend changes to the active project session.
+- **SC-010**: Timeline bars with section sync errors are visibly red and return to normal after the associated Events are cleared.
+
+## Assumptions
+
+- The current SQLite schema can represent the required bar edits.
+- The existing project section sync service remains the correct pathway for sending bars to Phoenix.
+- The first implementation does not need multi-select editing.
+- Exact gesture choices for creation can be toolbar, context menu, double click, or a combination decided during implementation.

@@ -5,7 +5,8 @@ export type EngineMessageType = 'status' | 'resource' | 'timeline' | 'event';
 export type ResourceSelection =
   | { kind: 'none' }
   | { kind: 'folder'; id: number; name: string }
-  | { kind: 'file'; id: number; name: string; fileType: string };
+  | { kind: 'file'; id: number; name: string; fileType: string }
+  | { kind: 'bar'; id: number };
 
 export type AppEventSeverity = 'info' | 'warning' | 'error';
 
@@ -40,4 +41,5 @@ export interface AppSnapshot {
   resourceSelection: ResourceSelection;
   events: AppEvent[];
   unreadEventCount: number;
+  displayTimelineIds: boolean;
 }

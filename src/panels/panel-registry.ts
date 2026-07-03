@@ -10,6 +10,7 @@ import { createEventsPanel } from './events-panel';
 import { createInspectorPanel } from './inspector-panel';
 import { createPreviewPanel } from './preview-panel';
 import { createResourcesPanel } from './resources-panel';
+import { createSectionEditorPanel } from './section-editor-panel';
 import { createTimelinePanel } from './timeline-panel';
 
 export interface PanelRegistry {
@@ -33,6 +34,8 @@ export function createPanelRegistry(
           return createPreviewPanel(connection);
         case 'inspector-panel':
           return createInspectorPanel(state, dbState, sessionRef);
+        case 'section-editor-panel':
+          return createSectionEditorPanel(state, dbState, sessionRef);
         case 'events-panel':
           return createEventsPanel(state);
         case 'db-explorer-panel':

@@ -59,27 +59,12 @@ export async function syncProjectBarsToPhoenix(
     throw new ProjectSectionSyncError(issues);
   }
 
-  const expected = sections.map((section) => {
-    const content = new TextEncoder().encode(buildSectionContentFromPayload(section));
-    return {
-      id: section.id,
-      type: section.type,
-      startTime: section.startTime,
-      endTime: section.endTime,
-      enabled: section.enabled,
-      layer: section.layer,
-      srcBlending: section.srcBlending,
-      dstBlending: section.dstBlending,
-      blendingEQ: section.blendingEQ,
-      contentHash: hashBytes(content),
-      size: content.byteLength,
-    };
-  });
+  const expected = await buildExpectedSectionManifestEntries(sections, onProgress, options.signal);
 
   onProgress({
     phase: 'sections',
     current: 0,
-    total: sections.length,
+    total: 0,
     copied: 0,
     skipped: 0,
     failed: 0,
@@ -87,7 +72,7 @@ export async function syncProjectBarsToPhoenix(
   });
 
   const manifest = await client.fetchManifest(options.signal);
-  if (sectionManifestMatches(manifest.entries, expected)) {
+  if (await sectionManifestMatches(manifest.entries, expected, onProgress, options.signal)) {
     onProgress({
       phase: 'complete',
       current: sections.length,
@@ -103,9 +88,9 @@ export async function syncProjectBarsToPhoenix(
   throwIfAborted(options.signal);
   onProgress({
     phase: 'sections',
-    current: 0,
+    current: sections.length,
     total: sections.length,
-    copied: 0,
+    copied: sections.length,
     skipped: 0,
     failed: 0,
     message: 'Replacing Phoenix sections...',
@@ -130,6 +115,49 @@ export async function syncProjectBarsToPhoenix(
       : `Phoenix sections sync complete: ${sections.length} sent.`,
   });
   return { total: sections.length + issues.length, valid: sections.length, invalid: issues.length, replaced: true, skipped: 0, issues: allIssues };
+}
+
+async function buildExpectedSectionManifestEntries(
+  sections: PhoenixSectionPayload[],
+  onProgress: ProgressListener,
+  signal?: AbortSignal,
+): Promise<PhoenixSectionManifestEntry[]> {
+  const expected: PhoenixSectionManifestEntry[] = [];
+
+  for (const [index, section] of sections.entries()) {
+    throwIfAborted(signal);
+    const current = index + 1;
+    onProgress({
+      phase: 'sections',
+      current,
+      total: sections.length,
+      copied: current,
+      skipped: 0,
+      failed: 0,
+      message: `Preparing Phoenix section ${section.id}...`,
+    });
+
+    const content = new TextEncoder().encode(buildSectionContentFromPayload(section));
+    expected.push({
+      id: section.id,
+      type: section.type,
+      startTime: section.startTime,
+      endTime: section.endTime,
+      enabled: section.enabled,
+      layer: section.layer,
+      srcBlending: section.srcBlending,
+      dstBlending: section.dstBlending,
+      blendingEQ: section.blendingEQ,
+      contentHash: hashBytes(content),
+      size: content.byteLength,
+    });
+
+    if (index % 8 === 7) {
+      await yieldToBrowser();
+    }
+  }
+
+  return expected;
 }
 
 export function collectPhoenixSections(db: Pick<ProjectDatabase, 'bars'>): ProjectSectionCollection {
@@ -204,11 +232,28 @@ export function isSupportedPhoenixSectionType(type: string): boolean {
   return SUPPORTED_PHOENIX_SECTION_TYPES.has(type.trim());
 }
 
-function sectionManifestMatches(actual: PhoenixSectionManifestEntry[], expected: PhoenixSectionManifestEntry[]): boolean {
+async function sectionManifestMatches(
+  actual: PhoenixSectionManifestEntry[],
+  expected: PhoenixSectionManifestEntry[],
+  onProgress: ProgressListener,
+  signal?: AbortSignal,
+): Promise<boolean> {
   if (actual.length !== expected.length) return false;
 
   const actualById = new Map(actual.map((entry) => [entry.id, entry]));
-  for (const entry of expected) {
+  for (const [index, entry] of expected.entries()) {
+    throwIfAborted(signal);
+    const current = index + 1;
+    onProgress({
+      phase: 'sections',
+      current,
+      total: expected.length,
+      copied: current,
+      skipped: 0,
+      failed: 0,
+      message: `Checking Phoenix section ${entry.id}...`,
+    });
+
     const other = actualById.get(entry.id);
     if (!other) return false;
     if (
@@ -224,6 +269,10 @@ function sectionManifestMatches(actual: PhoenixSectionManifestEntry[], expected:
       other.size !== entry.size
     ) {
       return false;
+    }
+
+    if (index % 8 === 7) {
+      await yieldToBrowser();
     }
   }
   return true;
@@ -263,6 +312,12 @@ function formatNumber(value: number): string {
 function throwIfAborted(signal?: AbortSignal): void {
   if (!signal?.aborted) return;
   throw signal.reason instanceof Error ? signal.reason : new DOMException('Section sync cancelled.', 'AbortError');
+}
+
+function yieldToBrowser(): Promise<void> {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, 0);
+  });
 }
 
 function textToBase64(value: string): string {
