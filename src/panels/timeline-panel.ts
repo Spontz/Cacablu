@@ -176,7 +176,11 @@ export function createTimelinePanel(
   }
 
   function formatTime(value: number): string {
-    return Number.isFinite(value) ? value.toFixed(3) : '0.000';
+    return Number.isFinite(value) ? trimMilliseconds(value) : '0';
+  }
+
+  function trimMilliseconds(value: number): string {
+    return Number.parseFloat(value.toFixed(3)).toString();
   }
 
   function getMarkerStep(pixelsPerSecond: number): number {
@@ -685,14 +689,15 @@ export function createTimelinePanel(
       if (!playhead) {
         return;
       }
-      if (!connection.isConnected()) {
-        playhead.hidden = true;
-        return;
-      }
       playhead.hidden = false;
 
+      const viewport = element.querySelector<HTMLElement>('.timeline-panel__viewport');
       const playheadLeft = state.transport.currentTime * state.viewport.pixelsPerSecond * state.viewport.zoom;
       playhead.style.left = `${playheadLeft}px`;
+      if (viewport) {
+        playhead.style.top = `${viewport.scrollTop}px`;
+        playhead.style.height = `${viewport.clientHeight}px`;
+      }
 
       const label = playhead.querySelector('span');
       if (label) {
@@ -775,14 +780,15 @@ export function createTimelinePanel(
       lastRenderedDisplayTimelineIds = displayTimelineIds;
 
       const effectivePixelsPerSecond = state.viewport.pixelsPerSecond * state.viewport.zoom;
-      const playheadLeft = state.transport.currentTime * effectivePixelsPerSecond;
-      const timelineWidth = state.transport.duration * effectivePixelsPerSecond;
-      const markerStep = getMarkerStep(effectivePixelsPerSecond);
-      const markerCount = Math.floor(state.transport.duration / markerStep) + 1;
       const playTitle = state.transport.isPlaying ? 'Pause' : 'Play';
       const previousViewport = element.querySelector<HTMLElement>('.timeline-panel__viewport');
       const previousScrollLeft = previousViewport?.scrollLeft ?? 0;
       const previousScrollTop = previousViewport?.scrollTop ?? 0;
+      const viewportWidth = previousViewport?.clientWidth ?? element.clientWidth;
+      const playheadLeft = state.transport.currentTime * effectivePixelsPerSecond;
+      const timelineWidth = Math.max(state.transport.duration * effectivePixelsPerSecond, viewportWidth);
+      const markerStep = getMarkerStep(effectivePixelsPerSecond);
+      const markerCount = Math.floor(state.transport.duration / markerStep) + 1;
 
       element.innerHTML = `
         <div class="timeline-panel ${state.transport.isPlaying ? 'is-playing' : ''}">
@@ -803,11 +809,9 @@ export function createTimelinePanel(
                 }).join('')}
               </div>
 
-              ${connected
-                ? `<div class="timeline-panel__playhead" style="left:${playheadLeft}px">
-                    <span>${formatTime(state.transport.currentTime)}s</span>
-                  </div>`
-                : ''}
+              <div class="timeline-panel__playhead" style="left:${playheadLeft}px">
+                <span>${formatTime(state.transport.currentTime)}s</span>
+              </div>
               ${boxSelectionState?.hasMoved
                 ? `<div class="timeline-panel__selection-box" style="${getBoxSelectionStyle()}"></div>`
                 : ''}
@@ -1450,6 +1454,13 @@ export function createTimelinePanel(
     };
     window.addEventListener('cacablu:timeline-bars-changed', handleBarsChanged);
 
+    const handleTimelineScroll = (event: Event): void => {
+      if ((event.target as HTMLElement | null)?.classList.contains('timeline-panel__viewport')) {
+        updatePlayhead();
+      }
+    };
+    element.addEventListener('scroll', handleTimelineScroll, true);
+
     element.addEventListener('click', (event) => {
       const target = (event.target as HTMLElement | null)?.closest<HTMLElement>('[data-action]');
       if (!target) {
@@ -1568,6 +1579,7 @@ export function createTimelinePanel(
       pendingMovedBarIds.clear();
       window.removeEventListener('cacablu:edit-delete', handleDeleteAction);
       window.removeEventListener('cacablu:timeline-bars-changed', handleBarsChanged);
+      element.removeEventListener('scroll', handleTimelineScroll, true);
       renderTimeline = null;
     };
   });

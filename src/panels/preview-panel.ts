@@ -15,6 +15,7 @@ export function createPreviewPanel(connection: ConnectionController): IContentRe
       video.autoplay = true;
       video.muted = true;
       video.playsInline = true;
+      video.volume = 1;
       video.tabIndex = 0;
 
       const status = document.createElement('p');
@@ -22,6 +23,7 @@ export function createPreviewPanel(connection: ConnectionController): IContentRe
       status.textContent = 'Preview unavailable';
 
       let peer: RTCPeerConnection | null = null;
+      let remoteStream = new MediaStream();
       let started = false;
       let previewDisabled = false;
       let awaitingOffer = false;
@@ -287,6 +289,17 @@ export function createPreviewPanel(connection: ConnectionController): IContentRe
 
       function handleFramePointerDown(): void {
         setKeyboardActive(true);
+        if (video.srcObject) {
+          void startPreviewPlayback();
+        }
+      }
+
+      async function startPreviewPlayback(): Promise<void> {
+        video.muted = true;
+        await video.play();
+        video.muted = false;
+        video.volume = 1;
+        status.textContent = '';
       }
 
       function normalizeLocalCandidateText(candidate: string): string {
@@ -330,6 +343,7 @@ export function createPreviewPanel(connection: ConnectionController): IContentRe
           peer = null;
         }
         video.srcObject = null;
+        remoteStream = new MediaStream();
         awaitingOffer = false;
         readyForRemoteCandidates = false;
         pendingCandidates = [];
@@ -348,12 +362,13 @@ export function createPreviewPanel(connection: ConnectionController): IContentRe
         peer = new RTCPeerConnection();
 
         peer.addEventListener('track', (event) => {
-          const [stream] = event.streams;
-          if (stream) {
-            previewDisabled = false;
-            video.srcObject = stream;
-            status.textContent = '';
+          if (!remoteStream.getTracks().some((track) => track.id === event.track.id)) {
+            remoteStream.addTrack(event.track);
           }
+          previewDisabled = false;
+          video.srcObject = remoteStream;
+          status.textContent = '';
+          void startPreviewPlayback().catch(() => undefined);
         });
 
         peer.addEventListener('icecandidate', (event) => {

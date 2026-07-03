@@ -21,7 +21,7 @@ export function createDefaultMenuActions(): MenuActionDefinition[] {
     { id: 'toggle-timeline', label: 'Timeline', menu: 'Panels' },
     { id: 'toggle-preview', label: 'Preview', menu: 'Panels' },
     { id: 'toggle-inspector', label: 'Inspector', menu: 'Panels' },
-    { id: 'toggle-section-editor', label: 'Section Editor', menu: 'Panels' },
+    { id: 'toggle-section-editor', label: 'Bar Editor', menu: 'Panels' },
     { id: 'toggle-events', label: 'Events', menu: 'Panels' },
   ];
 }

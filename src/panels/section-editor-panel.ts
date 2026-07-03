@@ -7,6 +7,10 @@ import type { AppState } from '../state/app-state';
 import type { DbState } from '../state/db-state';
 import type { DbSessionRef } from '../db/db-session';
 import type { DbBar } from '../db/db-schema';
+import type { ConnectionController } from '../ws/connection';
+import type { UndoManager } from '../app/undo-manager';
+import { createPhoenixSectionClient } from '../phoenix/section-client';
+import { ProjectSectionSyncError, syncProjectBarToPhoenix, type ProjectSectionSyncIssue } from '../services/project-section-sync';
 import { createContentRenderer } from './base-panel';
 
 const TEMPLATE_STORAGE_KEY = 'cacablu.sectionEditor.templates';
@@ -47,6 +51,22 @@ interface RemoteSectionTemplate {
 type ScriptTemplateOption =
   | { source: 'local'; name: string; code: string }
   | { source: 'remote'; name: string; url: string };
+
+interface BarPlacement {
+  id: number;
+  layer: number;
+  startTime: number;
+  endTime: number;
+}
+
+interface BarSnapshot extends BarPlacement {
+  name: string;
+  type: string;
+  script: string;
+  srcBlending: string;
+  dstBlending: string;
+  blendingEQ: string;
+}
 
 const FALLBACK_BAR_TYPES = [
   'loading',
@@ -89,11 +109,13 @@ export function createSectionEditorPanel(
   state: AppState,
   dbState: DbState,
   sessionRef: DbSessionRef,
+  connection: ConnectionController,
+  undoManager: UndoManager,
 ): IContentRenderer {
   return createContentRenderer((element) => {
     element.className = 'panel panel--section-editor';
 
-    let activeBarId: number | null = null;
+    let activeSelectionSignature: string | null = null;
     let codeEditor: monaco.editor.IStandaloneCodeEditor | null = null;
     let activeBarTypeInput: HTMLInputElement | null = null;
     let activeBarTypeMenu: HTMLElement | null = null;
@@ -102,6 +124,7 @@ export function createSectionEditorPanel(
     let templateListRequestId = 0;
     let templateContentRequestId = 0;
     let suppressTemplateMismatchClear = false;
+    const phoenixSections = createPhoenixSectionClient();
 
     function disposeCodeEditor(): void {
       templateContentRequestId += 1;
@@ -125,8 +148,32 @@ export function createSectionEditorPanel(
       return sessionRef.current?.data.bars.find((bar) => bar.id === selection.id) ?? null;
     }
 
+    function getSelectedBars(): DbBar[] {
+      const selection = state.getSnapshot().resourceSelection;
+      const bars = sessionRef.current?.data.bars ?? [];
+      if (selection.kind === 'bar') {
+        const bar = bars.find((candidate) => candidate.id === selection.id);
+        return bar ? [bar] : [];
+      }
+      if (selection.kind === 'bars') {
+        const selectedIds = new Set(selection.ids);
+        return bars
+          .filter((bar) => selectedIds.has(bar.id))
+          .sort((a, b) => a.id - b.id);
+      }
+      return [];
+    }
+
+    function getSelectionSignature(): string | null {
+      const selection = state.getSnapshot().resourceSelection;
+      if (selection.kind === 'bar') return `bar:${selection.id}`;
+      if (selection.kind === 'bars') return `bars:${[...selection.ids].sort((a, b) => a - b).join(',')}`;
+      return null;
+    }
+
     function renderEmpty(message = 'Select a timeline bar.'): void {
       disposeCodeEditor();
+      activeSelectionSignature = null;
       activeBarTypeInput = null;
       activeBarTypeMenu = null;
       element.replaceChildren(createPlaceholder(message));
@@ -135,19 +182,25 @@ export function createSectionEditorPanel(
     function render(): void {
       disposeCodeEditor();
       if (dbState.getSnapshot().status !== 'open' || !sessionRef.current) {
-        activeBarId = null;
+        activeSelectionSignature = null;
         renderEmpty('No project open.');
         return;
       }
 
-      const bar = getSelectedBar();
-      if (!bar) {
-        activeBarId = null;
+      const selectedBars = getSelectedBars();
+      if (selectedBars.length === 0) {
+        activeSelectionSignature = null;
         renderEmpty();
         return;
       }
 
-      activeBarId = bar.id;
+      activeSelectionSignature = getSelectionSignature();
+      if (selectedBars.length > 1) {
+        renderMultiSelection(selectedBars);
+        return;
+      }
+
+      const bar = selectedBars[0];
 
       const root = document.createElement('div');
       root.className = 'section-editor';
@@ -172,14 +225,16 @@ export function createSectionEditorPanel(
       timeRow.append(nameField, startField, endField);
 
       attachTimeWheelHandler(startInput, (delta) => {
-        const current = getSelectedBar();
-        if (!current) return false;
-        return applyTimeRange(roundEditorTime(current.startTime + delta), current.endTime);
+        const current = parseEditorTime(startInput.value);
+        if (current === null) return false;
+        startInput.value = formatEditorTime(roundEditorTime(current + delta));
+        return true;
       });
       attachTimeWheelHandler(endInput, (delta) => {
-        const current = getSelectedBar();
-        if (!current) return false;
-        return applyTimeRange(current.startTime, roundEditorTime(current.endTime + delta));
+        const current = parseEditorTime(endInput.value);
+        if (current === null) return false;
+        endInput.value = formatEditorTime(roundEditorTime(current + delta));
+        return true;
       });
 
       const templateRow = document.createElement('div');
@@ -258,10 +313,13 @@ export function createSectionEditorPanel(
         language: 'cpp',
         theme: 'vs-dark',
         automaticLayout: true,
+        fontFamily: '"JetBrains Mono", monospace',
+        fontSize: 10,
         lineNumbers: 'on',
         glyphMargin: false,
-        lineDecorationsWidth: 8,
-        lineNumbersMinChars: 3,
+        lineDecorationsWidth: 5,
+        lineNumbersMinChars: 2,
+        padding: { top: 6, bottom: 6 },
         minimap: { enabled: false },
         scrollBeyondLastLine: false,
         tabSize: 2,
@@ -304,20 +362,11 @@ export function createSectionEditorPanel(
         window.setTimeout(closeBarTypeMenu, 120);
       });
       barTemplateInput.addEventListener('change', () => {
-        const current = getSelectedBar();
-        const session = sessionRef.current;
-        if (!current || !session) return;
-
         const nextType = barTemplateInput.value.trim();
-        if (nextType === current.type.trim()) return;
-
-        session.updateCell('bars', current.id, 'type', nextType);
-        current.type = nextType;
         if (nextType && !barTypes.includes(nextType)) {
           barTypes = normalizeBarTypes([...barTypes, nextType]);
           writeStoredBarTypes(barTypes);
         }
-        window.dispatchEvent(new CustomEvent('cacablu:timeline-bars-changed'));
         scriptTemplateInput.value = '';
         scriptTemplateOptions = mergeScriptTemplateOptions(nextType, []);
         refreshScriptTemplateMenu();
@@ -358,7 +407,7 @@ export function createSectionEditorPanel(
         if (!barType) {
           state.addEvent({
             severity: 'warning',
-            source: 'Section Editor',
+            source: 'Bar Editor',
             description: 'Choose a bar type before saving a script template.',
           });
           return;
@@ -366,7 +415,7 @@ export function createSectionEditorPanel(
         if (!name) {
           state.addEvent({
             severity: 'warning',
-            source: 'Section Editor',
+            source: 'Bar Editor',
             description: 'Enter a script template name before saving.',
           });
           return;
@@ -389,19 +438,20 @@ export function createSectionEditorPanel(
 
       apply.addEventListener('click', () => {
         const current = getSelectedBar();
-        const session = sessionRef.current;
-        if (!current || !session) {
+        if (!current || !sessionRef.current) {
           state.addEvent({
             severity: 'warning',
-            source: 'Section Editor',
-            description: 'No selected bar to apply section editor changes.',
+            source: 'Bar Editor',
+            description: 'No selected bar to apply bar editor changes.',
           });
           return;
         }
 
+        const previous = takeBarSnapshots([current]);
         const nextScript = codeEditor?.getValue() ?? '';
-        const nextName = nameInput.value.trim();
         const nextType = barTemplateInput.value.trim();
+        const nextName = nameInput.value.trim() || nextType;
+        nameInput.value = nextName;
         const nextStartTime = parseEditorTime(startInput.value);
         const nextEndTime = parseEditorTime(endInput.value);
         if (
@@ -411,54 +461,48 @@ export function createSectionEditorPanel(
         ) {
           state.addEvent({
             severity: 'warning',
-            source: 'Section Editor',
+            source: 'Bar Editor',
             subjectId: String(current.id),
             description: `Bar ${current.id} has an invalid time range.`,
           });
           return;
         }
-        session.updateCell('bars', current.id, 'type', nextType);
-        session.updateCell('bars', current.id, 'name', nextName);
-        session.updateCell('bars', current.id, 'script', nextScript);
-        session.updateCell('bars', current.id, 'startTime', nextStartTime);
-        session.updateCell('bars', current.id, 'endTime', nextEndTime);
-        session.updateCell('bars', current.id, 'srcBlending', srcSelect.value);
-        session.updateCell('bars', current.id, 'dstBlending', dstSelect.value);
-        session.updateCell('bars', current.id, 'blendingEQ', equationSelect.value);
-        current.type = nextType;
-        current.name = nextName;
-        current.script = nextScript;
-        current.startTime = nextStartTime;
-        current.endTime = nextEndTime;
-        current.srcBlending = srcSelect.value;
-        current.dstBlending = dstSelect.value;
-        current.blendingEQ = equationSelect.value;
+
+        const next: BarSnapshot[] = [{
+          ...previous[0],
+          name: nextName,
+          type: nextType,
+          script: nextScript,
+          startTime: nextStartTime,
+          endTime: nextEndTime,
+          srcBlending: srcSelect.value,
+          dstBlending: dstSelect.value,
+          blendingEQ: equationSelect.value,
+        }];
+        if (!barSnapshotsChanged(previous, next)) return;
+
+        applyBarSnapshots(next);
+        undoManager.push({
+          label: `Edit bar ${current.id}`,
+          undo: async () => {
+            if (!canApplyBarPlacements(previous)) {
+              state.addEvent({
+                severity: 'warning',
+                source: 'Bar Editor undo',
+                subjectId: String(current.id),
+                description: `Could not undo edit for bar ${current.id} because the original range is occupied.`,
+              });
+              return;
+            }
+            applyBarSnapshots(previous);
+            window.dispatchEvent(new CustomEvent('cacablu:timeline-bars-changed'));
+            await syncBarsToPhoenix(previous.map((snapshot) => snapshot.id));
+          },
+        });
         window.dispatchEvent(new CustomEvent('cacablu:timeline-bars-changed'));
+        void syncBarsToPhoenix([current.id]);
         state.setResourceSelection({ kind: 'bar', id: current.id });
       });
-
-      function applyTimeRange(nextStartTime: number, nextEndTime: number): boolean {
-        const current = getSelectedBar();
-        const session = sessionRef.current;
-        if (!current || !session) return false;
-        if (!isValidTimeRange(current.id, current.layer, nextStartTime, nextEndTime)) {
-          syncTimeInputsFromBar(current);
-          return false;
-        }
-
-        session.updateCell('bars', current.id, 'startTime', nextStartTime);
-        session.updateCell('bars', current.id, 'endTime', nextEndTime);
-        current.startTime = nextStartTime;
-        current.endTime = nextEndTime;
-        syncTimeInputsFromBar(current);
-        window.dispatchEvent(new CustomEvent('cacablu:timeline-bars-changed'));
-        return true;
-      }
-
-      function syncTimeInputsFromBar(current: DbBar): void {
-        startInput.value = formatEditorTime(current.startTime);
-        endInput.value = formatEditorTime(current.endTime);
-      }
 
       function refreshScriptTemplateMenu(query = scriptTemplateInput.value): void {
         populateScriptTemplateMenu(
@@ -497,6 +541,225 @@ export function createSectionEditorPanel(
       }
     }
 
+    function renderMultiSelection(selectedBars: DbBar[]): void {
+      const root = document.createElement('div');
+      root.className = 'section-editor section-editor--multi';
+
+      const timeRow = document.createElement('div');
+      timeRow.className = 'section-editor__row section-editor__row--multi-time';
+
+      const groupStart = Math.min(...selectedBars.map((bar) => bar.startTime));
+      const groupEnd = Math.max(...selectedBars.map((bar) => bar.endTime));
+
+      const startField = createField('Start Time');
+      const startInput = createTimeInput(groupStart);
+      startField.append(startInput);
+
+      const endField = createField('End Time');
+      const endInput = createTimeInput(groupEnd);
+      endField.append(endInput);
+
+      const apply = document.createElement('button');
+      apply.type = 'button';
+      apply.className = 'section-editor__button section-editor__button--primary';
+      apply.textContent = 'Apply';
+
+      timeRow.append(startField, endField, apply);
+      root.append(timeRow);
+      element.replaceChildren(root);
+
+      attachTimeWheelHandler(startInput, (delta) => {
+        const current = parseEditorTime(startInput.value);
+        if (current === null) return false;
+        startInput.value = formatEditorTime(roundEditorTime(current + delta));
+        return true;
+      });
+      attachTimeWheelHandler(endInput, (delta) => {
+        const current = parseEditorTime(endInput.value);
+        if (current === null) return false;
+        endInput.value = formatEditorTime(roundEditorTime(current + delta));
+        return true;
+      });
+
+      apply.addEventListener('click', () => {
+        const currentBars = getSelectedBars();
+        if (currentBars.length <= 1) return;
+
+        const nextGroupStart = parseEditorTime(startInput.value);
+        const nextGroupEnd = parseEditorTime(endInput.value);
+        if (nextGroupStart === null || nextGroupEnd === null || nextGroupEnd <= nextGroupStart) {
+          state.addEvent({
+            severity: 'warning',
+            source: 'Bar Editor',
+            description: 'Selected bars have an invalid time range.',
+          });
+          return;
+        }
+
+        const previous = takeBarSnapshots(currentBars);
+        const previousGroupStart = Math.min(...previous.map((bar) => bar.startTime));
+        const previousGroupEnd = Math.max(...previous.map((bar) => bar.endTime));
+        const startDelta = roundEditorTime(nextGroupStart - previousGroupStart);
+        const endDelta = roundEditorTime(nextGroupEnd - previousGroupEnd);
+        const next = previous.map((bar) => ({
+          ...bar,
+          startTime: roundEditorTime(bar.startTime + startDelta),
+          endTime: roundEditorTime(bar.endTime + endDelta),
+        }));
+
+        if (!barSnapshotsChanged(previous, next)) return;
+        if (!canApplyBarPlacements(next)) {
+          state.addEvent({
+            severity: 'warning',
+            source: 'Bar Editor',
+            description: 'Selected bars were not updated because at least one proposed range conflicts with another bar.',
+          });
+          return;
+        }
+
+        const changedIds = next.map((bar) => bar.id);
+        applyBarSnapshots(next);
+        undoManager.push({
+          label: `Edit ${changedIds.length} bars`,
+          undo: async () => {
+            if (!canApplyBarPlacements(previous)) {
+              state.addEvent({
+                severity: 'warning',
+                source: 'Bar Editor undo',
+                description: `Could not undo edit for ${changedIds.length} bars because the original range is occupied.`,
+              });
+              return;
+            }
+            applyBarSnapshots(previous);
+            window.dispatchEvent(new CustomEvent('cacablu:timeline-bars-changed'));
+            await syncBarsToPhoenix(changedIds);
+          },
+        });
+        window.dispatchEvent(new CustomEvent('cacablu:timeline-bars-changed'));
+        void syncBarsToPhoenix(changedIds);
+      });
+    }
+
+    function takeBarSnapshots(bars: DbBar[]): BarSnapshot[] {
+      return bars.map((bar) => ({
+        id: bar.id,
+        name: bar.name,
+        type: bar.type,
+        layer: bar.layer,
+        startTime: bar.startTime,
+        endTime: bar.endTime,
+        script: bar.script,
+        srcBlending: bar.srcBlending,
+        dstBlending: bar.dstBlending,
+        blendingEQ: bar.blendingEQ,
+      }));
+    }
+
+    function applyBarSnapshots(snapshots: BarSnapshot[]): void {
+      const session = sessionRef.current;
+      if (!session) return;
+
+      for (const snapshot of snapshots) {
+        const bar = session.data.bars.find((candidate) => candidate.id === snapshot.id);
+        if (!bar) continue;
+
+        session.updateCell('bars', snapshot.id, 'name', snapshot.name);
+        session.updateCell('bars', snapshot.id, 'type', snapshot.type);
+        session.updateCell('bars', snapshot.id, 'script', snapshot.script);
+        session.updateCell('bars', snapshot.id, 'startTime', snapshot.startTime);
+        session.updateCell('bars', snapshot.id, 'endTime', snapshot.endTime);
+        session.updateCell('bars', snapshot.id, 'srcBlending', snapshot.srcBlending);
+        session.updateCell('bars', snapshot.id, 'dstBlending', snapshot.dstBlending);
+        session.updateCell('bars', snapshot.id, 'blendingEQ', snapshot.blendingEQ);
+
+        bar.name = snapshot.name;
+        bar.type = snapshot.type;
+        bar.script = snapshot.script;
+        bar.startTime = snapshot.startTime;
+        bar.endTime = snapshot.endTime;
+        bar.srcBlending = snapshot.srcBlending;
+        bar.dstBlending = snapshot.dstBlending;
+        bar.blendingEQ = snapshot.blendingEQ;
+      }
+    }
+
+    function canApplyBarPlacements(nextBars: BarPlacement[]): boolean {
+      const session = sessionRef.current;
+      if (!session) return false;
+
+      const nextById = new Map(nextBars.map((bar) => [bar.id, bar]));
+      const placements = session.data.bars.map((bar) => nextById.get(bar.id) ?? bar);
+      for (const placement of nextBars) {
+        if (!Number.isFinite(placement.startTime) || !Number.isFinite(placement.endTime) || placement.endTime <= placement.startTime) {
+          return false;
+        }
+      }
+
+      for (const left of nextBars) {
+        for (const right of placements) {
+          if (left.id === right.id) continue;
+          if (
+            left.layer === right.layer &&
+            left.startTime < right.endTime &&
+            left.endTime > right.startTime
+          ) {
+            return false;
+          }
+        }
+      }
+      return true;
+    }
+
+    function barSnapshotsChanged(previous: BarSnapshot[], next: BarSnapshot[]): boolean {
+      const previousById = new Map(previous.map((bar) => [bar.id, bar]));
+      return next.some((bar) => {
+        const old = previousById.get(bar.id);
+        return !old || (
+          old.name !== bar.name ||
+          old.type !== bar.type ||
+          old.script !== bar.script ||
+          old.startTime !== bar.startTime ||
+          old.endTime !== bar.endTime ||
+          old.srcBlending !== bar.srcBlending ||
+          old.dstBlending !== bar.dstBlending ||
+          old.blendingEQ !== bar.blendingEQ
+        );
+      });
+    }
+
+    async function syncBarsToPhoenix(barIds: number[]): Promise<void> {
+      const session = sessionRef.current;
+      if (!session || !connection.isConnected()) return;
+
+      for (const barId of barIds) {
+        try {
+          const result = await syncProjectBarToPhoenix(session.data, barId, phoenixSections);
+          recordSectionIssues(result.issues);
+        } catch (err) {
+          if (err instanceof ProjectSectionSyncError) {
+            recordSectionIssues(err.issues);
+            continue;
+          }
+          state.addEvent({
+            severity: 'error',
+            source: 'Phoenix section sync',
+            subjectId: String(barId),
+            description: err instanceof Error ? err.message : 'Could not sync edited timeline bar to Phoenix.',
+          });
+        }
+      }
+    }
+
+    function recordSectionIssues(issues: ProjectSectionSyncIssue[]): void {
+      if (issues.length === 0) return;
+      state.addEvents(issues.map((issue) => ({
+        severity: 'error',
+        source: 'Phoenix section sync',
+        subjectId: String(issue.barId),
+        description: issue.description,
+      })));
+    }
+
     async function refreshScriptTemplates(
       barType: string,
       onLoaded: (templates: RemoteSectionTemplate[]) => void,
@@ -511,7 +774,7 @@ export function createSectionEditorPanel(
         onLoaded([]);
         state.addEvent({
           severity: 'warning',
-          source: 'Section Editor',
+          source: 'Bar Editor',
           description: `Could not load script templates for ${barType}.`,
         });
       }
@@ -530,7 +793,7 @@ export function createSectionEditorPanel(
         if (disposed || requestId !== templateContentRequestId) return;
         state.addEvent({
           severity: 'warning',
-          source: 'Section Editor',
+          source: 'Bar Editor',
           description: `Could not load script template "${templateName}".`,
         });
       }
@@ -560,8 +823,12 @@ export function createSectionEditorPanel(
     }
 
     const unsubscribeState = state.subscribe((snapshot) => {
-      const nextBarId = snapshot.resourceSelection.kind === 'bar' ? snapshot.resourceSelection.id : null;
-      if (nextBarId !== activeBarId) {
+      const nextSelectionSignature = snapshot.resourceSelection.kind === 'bar'
+        ? `bar:${snapshot.resourceSelection.id}`
+        : snapshot.resourceSelection.kind === 'bars'
+          ? `bars:${[...snapshot.resourceSelection.ids].sort((a, b) => a - b).join(',')}`
+          : null;
+      if (nextSelectionSignature !== activeSelectionSignature) {
         render();
       }
     });
@@ -618,7 +885,7 @@ function parseEditorTime(value: string): number | null {
 }
 
 function formatEditorTime(value: number): string {
-  return Number.isFinite(value) ? value.toFixed(3) : '';
+  return Number.isFinite(value) ? Number.parseFloat(value.toFixed(3)).toString() : '';
 }
 
 function roundEditorTime(value: number): number {

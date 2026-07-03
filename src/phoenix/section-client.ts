@@ -45,9 +45,23 @@ export interface PhoenixSectionSyncResult {
   manifest?: PhoenixSectionManifest;
 }
 
+export interface PhoenixSectionSyncStatus {
+  requestId: string;
+  ok: boolean;
+  operation: 'replace-all' | 'update-one' | 'delete-many';
+  phase: string;
+  current: number;
+  total: number;
+  loaded: number;
+  failed: number;
+  done: boolean;
+  message: string;
+}
+
 export interface PhoenixSectionClient {
   fetchManifest(signal?: AbortSignal): Promise<PhoenixSectionManifest>;
-  replaceAll(sections: PhoenixSectionPayload[], signal?: AbortSignal): Promise<PhoenixSectionSyncResult>;
+  fetchSyncStatus(requestId: string, signal?: AbortSignal): Promise<PhoenixSectionSyncStatus | null>;
+  replaceAll(sections: PhoenixSectionPayload[], signal?: AbortSignal, requestId?: string): Promise<PhoenixSectionSyncResult>;
   replaceOne(section: PhoenixSectionPayload, signal?: AbortSignal): Promise<PhoenixSectionSyncResult>;
   deleteMany(ids: string[], signal?: AbortSignal): Promise<PhoenixSectionSyncResult>;
 }
@@ -85,11 +99,17 @@ export function createPhoenixSectionClient(baseUrl = PHOENIX_HTTP_BASE): Phoenix
       return manifest;
     },
 
-    async replaceAll(sections, signal): Promise<PhoenixSectionSyncResult> {
+    async fetchSyncStatus(requestId, signal): Promise<PhoenixSectionSyncStatus | null> {
+      const encodedRequestId = encodeURIComponent(requestId);
+      const payload = await requestJson(`/api/sections/status/${encodedRequestId}`, { signal });
+      return normalizeSectionSyncStatus(payload);
+    },
+
+    async replaceAll(sections, signal, requestId): Promise<PhoenixSectionSyncResult> {
       const payload = await requestJson('/api/sections', {
         method: 'PUT',
         signal,
-        body: JSON.stringify({ requestId: createRequestId(), sections }),
+        body: JSON.stringify({ requestId: requestId ?? createRequestId(), sections }),
       });
       const result = normalizeSectionSyncResult(payload);
       if (!result) throw new Error(`Phoenix returned an invalid section sync response: ${summarizePayload(payload)}`);
@@ -184,6 +204,28 @@ function normalizeSectionSyncResult(input: unknown): PhoenixSectionSyncResult | 
     deletedFiles: Array.isArray(candidate.deletedFiles) ? candidate.deletedFiles.filter((value): value is string => typeof value === 'string') : [],
     failedSections: normalizeFailedSections(candidate.failedSections),
     manifest: normalizeSectionManifest(candidate.manifest) ?? undefined,
+  };
+}
+
+function normalizeSectionSyncStatus(input: unknown): PhoenixSectionSyncStatus | null {
+  if (!input || typeof input !== 'object') return null;
+  const candidate = input as Record<string, unknown>;
+  if (candidate.ok !== true) return null;
+  return {
+    requestId: typeof candidate.requestId === 'string' ? candidate.requestId : '',
+    ok: true,
+    operation: candidate.operation === 'delete-many'
+      ? 'delete-many'
+      : candidate.operation === 'update-one'
+        ? 'update-one'
+        : 'replace-all',
+    phase: typeof candidate.phase === 'string' ? candidate.phase : 'sections',
+    current: typeof candidate.current === 'number' ? candidate.current : 0,
+    total: typeof candidate.total === 'number' ? candidate.total : 0,
+    loaded: typeof candidate.loaded === 'number' ? candidate.loaded : 0,
+    failed: typeof candidate.failed === 'number' ? candidate.failed : 0,
+    done: candidate.done === true,
+    message: typeof candidate.message === 'string' ? candidate.message : 'Syncing Phoenix sections...',
   };
 }
 

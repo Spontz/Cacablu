@@ -161,7 +161,7 @@ describe('project section sync', () => {
       replaceAll,
     }, () => {});
 
-    expect(replaceAll).toHaveBeenCalledWith([expect.objectContaining({ id: '17', type: 'drawImage' })], undefined);
+    expect(replaceAll).toHaveBeenCalledWith([expect.objectContaining({ id: '17', type: 'drawImage' })], undefined, expect.stringMatching(/^sections-/));
     expect(result.valid).toBe(1);
     expect(result.invalid).toBe(1);
     expect(result.issues[0]).toMatchObject({ barId: 165, sectionType: 'setVariable' });

@@ -50,7 +50,7 @@ export interface ProjectSectionSyncOptions {
 
 export async function syncProjectBarsToPhoenix(
   db: Pick<ProjectDatabase, 'bars'>,
-  client: Pick<PhoenixSectionClient, 'fetchManifest' | 'replaceAll'>,
+  client: Pick<PhoenixSectionClient, 'fetchManifest' | 'replaceAll'> & Partial<Pick<PhoenixSectionClient, 'fetchSyncStatus'>>,
   onProgress: ProgressListener,
   options: ProjectSectionSyncOptions = {},
 ): Promise<ProjectSectionSyncResult> {
@@ -94,11 +94,14 @@ export async function syncProjectBarsToPhoenix(
     copied: sections.length,
     skipped: 0,
     failed: 0,
-    message: 'Replacing Phoenix sections...',
+    message: 'Transmitting sections...',
     indeterminate: true,
   });
 
-  const syncResult = await client.replaceAll(sections, options.signal);
+  const requestId = createSectionSyncRequestId();
+  const replacePromise = client.replaceAll(sections, options.signal, requestId);
+  await pollSectionSyncStatus(client, requestId, sections.length, onProgress, replacePromise, options.signal);
+  const syncResult = await replacePromise;
   const loadIssues: ProjectSectionSyncIssue[] = syncResult.failedSections.map((section) => ({
     barId: Number.parseInt(section.id, 10),
     sectionType: sections.find((candidate) => candidate.id === section.id)?.type ?? '(unknown)',
@@ -152,6 +155,55 @@ export async function syncProjectBarToPhoenix(
     skipped: 0,
     issues: allIssues,
   };
+}
+
+async function pollSectionSyncStatus(
+  client: Partial<Pick<PhoenixSectionClient, 'fetchSyncStatus'>>,
+  requestId: string,
+  fallbackTotal: number,
+  onProgress: ProgressListener,
+  replacePromise: Promise<unknown>,
+  signal?: AbortSignal,
+): Promise<void> {
+  if (!client.fetchSyncStatus) return;
+
+  let settled = false;
+  void replacePromise.then(
+    () => { settled = true; },
+    () => { settled = true; },
+  );
+
+  while (!settled) {
+    throwIfAborted(signal);
+    await delay(120);
+    if (settled) break;
+
+    try {
+      const status = await client.fetchSyncStatus(requestId, signal);
+      if (!status) continue;
+      onProgress({
+        phase: status.phase === 'error' ? 'error' : 'sections',
+        current: status.total > 0 ? status.current : 0,
+        total: status.total > 0 ? status.total : fallbackTotal,
+        copied: status.loaded,
+        skipped: 0,
+        failed: status.failed,
+        message: status.message,
+      });
+    } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') throw err;
+    }
+  }
+}
+
+function createSectionSyncRequestId(): string {
+  return `sections-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
 }
 
 async function buildExpectedSectionManifestEntries(

@@ -68,6 +68,13 @@ button {
   background-color: transparent;
 }
 
+.monaco-menu-container,
+.monaco-menu,
+.context-view,
+.context-view.monaco-menu-container {
+  z-index: 20000 !important;
+}
+
 .menu-bar {
   display: flex;
   gap: 8px;
@@ -764,12 +771,17 @@ button {
 .timeline-panel__grid,
 .timeline-panel__lanes {
   position: relative;
+  min-width: 100%;
 }
 
 .timeline-panel__ruler {
+  position: sticky;
+  top: 0;
+  z-index: 6;
   height: 2.4rem;
-  background: rgba(8, 12, 18, 0.62);
+  background: rgba(8, 12, 18, 0.94);
   border-bottom: 1px solid rgba(116, 137, 166, 0.08);
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.18);
 }
 
 .timeline-panel__marker {
@@ -807,14 +819,14 @@ button {
 .timeline-panel__playhead {
   position: absolute;
   top: 0;
-  bottom: 0;
+  height: 100%;
   width: 2px;
   background: linear-gradient(180deg, #61d7ff, #2f8cff);
   box-shadow:
     0 0 0 1px rgba(97, 215, 255, 0.18),
     0 0 8px rgba(97, 215, 255, 0.32);
   pointer-events: none;
-  z-index: 4;
+  z-index: 7;
   transition: box-shadow 420ms ease;
 }
 
@@ -1054,6 +1066,10 @@ button {
   grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 1fr);
 }
 
+.section-editor__row--multi-time {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+}
+
 .section-editor__row--blend {
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) auto;
 }
@@ -1176,8 +1192,8 @@ button {
   width: 100%;
   min-height: 0;
   overflow: hidden;
-  font-family: "Cascadia Code", "JetBrains Mono", Consolas, monospace;
-  font-size: 12px;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 10px;
   line-height: 1.45;
   tab-size: 2;
 }

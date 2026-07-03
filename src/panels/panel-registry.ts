@@ -37,7 +37,7 @@ export function createPanelRegistry(
         case 'inspector-panel':
           return createInspectorPanel(state, dbState, sessionRef);
         case 'section-editor-panel':
-          return createSectionEditorPanel(state, dbState, sessionRef);
+          return createSectionEditorPanel(state, dbState, sessionRef, connection, undoManager);
         case 'events-panel':
           return createEventsPanel(state);
         case 'db-explorer-panel':

@@ -27,7 +27,7 @@ export const DEFAULT_PANELS: PanelDefinition[] = [
   },
   {
     id: 'section-editor',
-    title: 'Section Editor',
+    title: 'Bar Editor',
     component: 'section-editor-panel',
     description: 'Edit the script and blend options for the selected timeline bar.',
   },

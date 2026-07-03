@@ -179,7 +179,7 @@ export function createInspectorPanel(
       }
 
       if (selection.kind === 'bar' || selection.kind === 'bars') {
-        renderEmpty('Use Section Editor to edit the selected timeline bar.');
+        renderEmpty('Use Bar Editor to edit the selected timeline bar.');
         return;
       }
 

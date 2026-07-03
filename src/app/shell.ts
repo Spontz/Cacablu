@@ -54,7 +54,7 @@ export function createAppShell(root: HTMLElement): AppShell {
   let session: DbSession | null = null;
   let poolSyncModal: PoolSyncModal | null = null;
   let lastInspectorSelectionId: number | null = null;
-  let lastSectionEditorSelectionId: number | null = null;
+  let lastSectionEditorSelectionId: string | null = null;
   let lastConnectionStatus = state.getSnapshot().connectionStatus;
   let lastEventCount = state.getSnapshot().events.length;
   let lastDisplayTimelineIds = state.getSnapshot().displayTimelineIds;
@@ -313,13 +313,18 @@ export function createAppShell(root: HTMLElement): AppShell {
         } else if (snapshot.resourceSelection.kind !== 'file') {
           lastInspectorSelectionId = null;
         }
+        const sectionEditorSelectionId = snapshot.resourceSelection.kind === 'bar'
+          ? String(snapshot.resourceSelection.id)
+          : snapshot.resourceSelection.kind === 'bars'
+            ? [...snapshot.resourceSelection.ids].sort((a, b) => a - b).join(',')
+            : null;
         if (
-          snapshot.resourceSelection.kind === 'bar' &&
-          (snapshot.resourceSelection.id !== lastSectionEditorSelectionId || !workspace.isPanelOpen('section-editor'))
+          sectionEditorSelectionId !== null &&
+          (sectionEditorSelectionId !== lastSectionEditorSelectionId || !workspace.isPanelOpen('section-editor'))
         ) {
-          lastSectionEditorSelectionId = snapshot.resourceSelection.id;
+          lastSectionEditorSelectionId = sectionEditorSelectionId;
           workspace.openPanel('section-editor', { widthRatio: SECTION_EDITOR_WIDTH_RATIO });
-        } else if (snapshot.resourceSelection.kind !== 'bar') {
+        } else if (sectionEditorSelectionId === null) {
           lastSectionEditorSelectionId = null;
         }
         if (snapshot.events.length > lastEventCount) {
