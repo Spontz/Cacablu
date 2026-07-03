@@ -62,9 +62,11 @@ As a user, I want to create, move, resize, change layer, and delete bars from th
 
 1. **Given** a project is loaded, **When** the user creates a bar on the timeline, **Then** Cacablu creates a database bar with a stable id and visible clip.
 2. **Given** a bar exists, **When** the user drags it horizontally, **Then** Cacablu updates its start and end times.
-3. **Given** a bar exists, **When** the user drags it to another layer, **Then** Cacablu updates its layer.
-4. **Given** a bar exists, **When** the user resizes its start or end edge, **Then** Cacablu updates the corresponding time while preserving positive duration.
-5. **Given** a bar is selected, **When** the user deletes it, **Then** Cacablu removes it from the project database and the timeline.
+3. **Given** a selected bar exists, **When** the user drags it without overlapping another bar, **Then** Cacablu updates its start time, end time, and layer.
+4. **Given** a selected bar is being dragged, **When** the requested position would overlap another bar on the same layer, **Then** Cacablu blocks that position and does not persist an overlapping edit.
+5. **Given** a bar move was committed, **When** the user chooses Edit > Undo, **Then** Cacablu restores the bar's previous start time, end time, and layer using the undo action stack.
+6. **Given** a bar exists, **When** the user resizes its start or end edge, **Then** Cacablu updates the corresponding time while preserving positive duration.
+7. **Given** a bar is selected, **When** the user deletes it, **Then** Cacablu removes it from the project database and the timeline.
 
 ---
 
@@ -84,6 +86,9 @@ As a user, I want timeline edits to be sent to Phoenix when the engine is connec
 4. **Given** Phoenix rejects section sync, **When** Cacablu receives the response, **Then** Cacablu records Events with affected bar ids when available.
 5. **Given** Phoenix section sync reports errors for known bars, **When** Timeline renders, **Then** the affected timeline bars are shown in red until those Events are cleared.
 6. **Given** Cacablu is preparing or checking section sync, **When** it can count real local work, **Then** the sync modal advances its progress text and bar using actual processed counts, not synthetic animation.
+7. **Given** Phoenix is connected, **When** a bar move is committed, **Then** Cacablu schedules only the updated bar section for Phoenix so Phoenix rewrites the corresponding `.spo` file.
+8. **Given** a bar move was just committed while playback is stopped, **When** the user immediately presses Play, **Then** transport commands take priority over the deferred section sync.
+9. **Given** Phoenix is not connected, **When** the user opens a project, **Then** Cacablu MUST NOT start the initial Phoenix sync step.
 
 ---
 
@@ -105,6 +110,7 @@ As a user, I want transport controls to remain visible and understandable whethe
 ### Edge Cases
 
 - What happens when a drag would move a bar before time zero?
+- What happens when a drag would overlap another bar on the same layer?
 - What happens when a resize would create zero or negative duration?
 - What happens when Phoenix disconnects during debounced section sync?
 - What happens when a selected bar is deleted by another operation before Inspector renders?
@@ -135,9 +141,12 @@ As a user, I want transport controls to remain visible and understandable whethe
 - **FR-015**: Timeline edits MUST be represented in the saved SQLite file after Save.
 - **FR-016**: The system MUST reject or clamp edits that would produce negative times.
 - **FR-017**: The system MUST reject or clamp edits that would produce zero or negative duration.
+- **FR-017a**: The system MUST prevent moved timeline bars from overlapping other bars on the same layer.
+- **FR-017b**: Bar move edits MUST push undoable actions onto an action stack using a command-style undo pattern.
 - **FR-018**: Committed timeline edits MUST schedule Phoenix section synchronization when Phoenix is connected.
 - **FR-019**: Section synchronization after timeline edits MUST be debounced.
 - **FR-020**: Cacablu MUST keep local timeline edits if Phoenix is disconnected or rejects sync.
+- **FR-020a**: Cacablu MUST skip initial project sync entirely when Phoenix is not connected.
 - **FR-021**: Cacablu MUST record sync failures in Events.
 - **FR-022**: Cacablu MUST include affected bar ids in Events when they are known.
 - **FR-022a**: Timeline bars with known Phoenix section sync errors MUST be visually marked in red while their error Events remain present.
@@ -152,6 +161,8 @@ As a user, I want transport controls to remain visible and understandable whethe
 - **FR-031**: The Events panel MUST use compact text sizing suitable for dense diagnostic messages.
 - **FR-032**: The playhead MUST grow its glow trail gradually when playback starts and fade the trail away gradually when playback stops.
 - **FR-033**: View MUST provide `Display IDs`; when enabled, timeline bar labels MUST show `<id> <name>` and the menu item MUST become `Ocultar IDs`.
+- **FR-034**: A committed bar move MUST update the project session and notify Phoenix through deferred single-section sync so Phoenix rewrites only the affected `.spo` file without blocking immediate transport commands.
+- **FR-035**: Edit > Undo MUST pop the latest undoable action and restore the affected bar move when possible.
 
 ### Key Entities *(include if feature involves data)*
 

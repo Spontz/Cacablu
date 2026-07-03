@@ -9,6 +9,7 @@ export interface ProjectSectionSyncProgress {
   skipped: number;
   failed: number;
   message: string;
+  indeterminate?: boolean;
 }
 
 export interface ProjectSectionSyncResult {
@@ -88,12 +89,13 @@ export async function syncProjectBarsToPhoenix(
   throwIfAborted(options.signal);
   onProgress({
     phase: 'sections',
-    current: sections.length,
+    current: 0,
     total: sections.length,
     copied: sections.length,
     skipped: 0,
     failed: 0,
     message: 'Replacing Phoenix sections...',
+    indeterminate: true,
   });
 
   const syncResult = await client.replaceAll(sections, options.signal);
@@ -115,6 +117,41 @@ export async function syncProjectBarsToPhoenix(
       : `Phoenix sections sync complete: ${sections.length} sent.`,
   });
   return { total: sections.length + issues.length, valid: sections.length, invalid: issues.length, replaced: true, skipped: 0, issues: allIssues };
+}
+
+export async function syncProjectBarToPhoenix(
+  db: Pick<ProjectDatabase, 'bars'>,
+  barId: number,
+  client: Pick<PhoenixSectionClient, 'replaceOne'>,
+  options: ProjectSectionSyncOptions = {},
+): Promise<ProjectSectionSyncResult> {
+  throwIfAborted(options.signal);
+  const bar = db.bars.find((candidate) => candidate.id === barId);
+  if (!bar) {
+    return { total: 0, valid: 0, invalid: 0, replaced: false, skipped: 0, issues: [] };
+  }
+
+  const { sections, issues } = collectPhoenixSections({ bars: [bar] });
+  if (sections.length === 0) {
+    if (issues.length > 0) throw new ProjectSectionSyncError(issues);
+    return { total: 1, valid: 0, invalid: 0, replaced: false, skipped: 0, issues };
+  }
+
+  const syncResult = await client.replaceOne(sections[0], options.signal);
+  const loadIssues: ProjectSectionSyncIssue[] = syncResult.failedSections.map((section) => ({
+    barId: Number.parseInt(section.id, 10),
+    sectionType: sections[0].type,
+    description: `Section ${section.id} was sent to Phoenix but did not load: ${section.message}.`,
+  }));
+  const allIssues = [...issues, ...loadIssues];
+  return {
+    total: 1 + issues.length,
+    valid: 1,
+    invalid: issues.length,
+    replaced: true,
+    skipped: 0,
+    issues: allIssues,
+  };
 }
 
 async function buildExpectedSectionManifestEntries(
@@ -163,12 +200,13 @@ async function buildExpectedSectionManifestEntries(
 export function collectPhoenixSections(db: Pick<ProjectDatabase, 'bars'>): ProjectSectionCollection {
   const bars = [...db.bars].sort((a, b) => a.id - b.id);
   const issues = bars
+    .filter((bar) => bar.type.trim() !== '')
     .map((bar) => {
       const sectionType = bar.type.trim();
       return {
         barId: bar.id,
-        sectionType: sectionType || '(empty)',
-        description: `Bar ${bar.id} was not sent to Phoenix because "${sectionType || '(empty)'}" is not a supported Phoenix section type.`,
+        sectionType,
+        description: `Bar ${bar.id} was not sent to Phoenix because "${sectionType}" is not a supported Phoenix section type.`,
       };
     })
     .filter((issue) => !isSupportedPhoenixSectionType(issue.sectionType));

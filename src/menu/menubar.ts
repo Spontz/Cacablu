@@ -15,8 +15,9 @@ export function createMenuBar(options: MenuBarOptions): MenuBar {
   element.className = 'menu-bar';
   element.setAttribute('aria-label', 'Main menu');
 
-  const menuNames = ['File', 'View', 'Window', 'Help'] as const;
+  const menuNames = ['File', 'Edit', 'Bars', 'Panels'] as const;
   const buttonMap = new Map<string, HTMLButtonElement>();
+  const isMac = /\b(Mac|iPhone|iPad|iPod)\b/i.test(navigator.platform);
 
   function render(actions: MenuActionDefinition[]): void {
     buttonMap.clear();
@@ -37,11 +38,32 @@ export function createMenuBar(options: MenuBarOptions): MenuBar {
       const menuActions = actions.filter((action) => action.menu === menuName);
 
       for (const action of menuActions) {
+        if (action.separator) {
+          const separator = document.createElement('div');
+          separator.className = 'menu-bar__separator';
+          separator.setAttribute('role', 'separator');
+          popup.append(separator);
+          continue;
+        }
+
         const actionButton = document.createElement('button');
         actionButton.className = 'menu-bar__item';
         actionButton.type = 'button';
-        actionButton.textContent = action.label;
         actionButton.disabled = action.disabled ?? false;
+
+        const label = document.createElement('span');
+        label.className = 'menu-bar__item-label';
+        label.textContent = action.label;
+        actionButton.append(label);
+
+        const shortcut = getShortcutLabel(action, isMac);
+        if (shortcut) {
+          const shortcutLabel = document.createElement('kbd');
+          shortcutLabel.className = 'menu-bar__shortcut';
+          shortcutLabel.textContent = shortcut;
+          actionButton.append(shortcutLabel);
+        }
+
         actionButton.addEventListener('click', () => {
           popup.dataset.open = 'false';
           options.runAction(action.id);
@@ -84,6 +106,11 @@ export function createMenuBar(options: MenuBarOptions): MenuBar {
     },
   };
 
+}
+
+function getShortcutLabel(action: MenuActionDefinition, isMac: boolean): string {
+  if (!action.shortcut) return '';
+  return isMac && action.shortcut.mac ? action.shortcut.mac : action.shortcut.default;
 }
 
 function closeAllMenus(root: HTMLElement): void {

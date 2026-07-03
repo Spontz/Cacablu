@@ -35,7 +35,7 @@ export interface PhoenixSectionPayload {
 export interface PhoenixSectionSyncResult {
   requestId: string;
   ok: boolean;
-  operation: 'replace-all';
+  operation: 'replace-all' | 'update-one' | 'delete-many';
   received: number;
   loaded: number;
   failed: number;
@@ -48,6 +48,8 @@ export interface PhoenixSectionSyncResult {
 export interface PhoenixSectionClient {
   fetchManifest(signal?: AbortSignal): Promise<PhoenixSectionManifest>;
   replaceAll(sections: PhoenixSectionPayload[], signal?: AbortSignal): Promise<PhoenixSectionSyncResult>;
+  replaceOne(section: PhoenixSectionPayload, signal?: AbortSignal): Promise<PhoenixSectionSyncResult>;
+  deleteMany(ids: string[], signal?: AbortSignal): Promise<PhoenixSectionSyncResult>;
 }
 
 export function createPhoenixSectionClient(baseUrl = PHOENIX_HTTP_BASE): PhoenixSectionClient {
@@ -91,6 +93,28 @@ export function createPhoenixSectionClient(baseUrl = PHOENIX_HTTP_BASE): Phoenix
       });
       const result = normalizeSectionSyncResult(payload);
       if (!result) throw new Error(`Phoenix returned an invalid section sync response: ${summarizePayload(payload)}`);
+      return result;
+    },
+
+    async replaceOne(section, signal): Promise<PhoenixSectionSyncResult> {
+      const payload = await requestJson('/api/sections/section', {
+        method: 'PUT',
+        signal,
+        body: JSON.stringify({ requestId: createRequestId(), sections: [section] }),
+      });
+      const result = normalizeSectionSyncResult(payload);
+      if (!result) throw new Error(`Phoenix returned an invalid section sync response: ${summarizePayload(payload)}`);
+      return result;
+    },
+
+    async deleteMany(ids, signal): Promise<PhoenixSectionSyncResult> {
+      const payload = await requestJson('/api/sections', {
+        method: 'DELETE',
+        signal,
+        body: JSON.stringify({ requestId: createRequestId(), ids }),
+      });
+      const result = normalizeSectionSyncResult(payload);
+      if (!result) throw new Error(`Phoenix returned an invalid section delete response: ${summarizePayload(payload)}`);
       return result;
     },
   };
@@ -148,7 +172,11 @@ function normalizeSectionSyncResult(input: unknown): PhoenixSectionSyncResult | 
   return {
     requestId: typeof candidate.requestId === 'string' ? candidate.requestId : '',
     ok: candidate.ok !== false,
-    operation: 'replace-all',
+    operation: candidate.operation === 'delete-many'
+      ? 'delete-many'
+      : candidate.operation === 'update-one'
+        ? 'update-one'
+        : 'replace-all',
     received: typeof candidate.received === 'number' ? candidate.received : 0,
     loaded: typeof candidate.loaded === 'number' ? candidate.loaded : 0,
     failed: typeof candidate.failed === 'number' ? candidate.failed : 0,

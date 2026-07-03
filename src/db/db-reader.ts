@@ -21,21 +21,22 @@ export function readDatabase(db: SqlDatabase): ProjectDatabase {
 
   const bars: DbBar[] = queryRows(
     db,
-    'SELECT id, type, layer, startTime, endTime, enabled, selected, script, srcBlending, dstBlending, blendingEQ, srcAlpha, dstAlpha FROM BARS',
+    'SELECT id, name, type, layer, startTime, endTime, enabled, selected, script, srcBlending, dstBlending, blendingEQ, srcAlpha, dstAlpha FROM BARS',
   ).map((r) => ({
     id: r[0] as number,
-    type: (r[1] as string) ?? '',
-    layer: r[2] as number,
-    startTime: r[3] as number,
-    endTime: r[4] as number,
-    enabled: Boolean(r[5]),
-    selected: Boolean(r[6]),
-    script: toText(r[7]),
-    srcBlending: (r[8] as string) ?? '',
-    dstBlending: (r[9] as string) ?? '',
-    blendingEQ: (r[10] as string) ?? '',
-    srcAlpha: (r[11] as string) ?? '',
-    dstAlpha: (r[12] as string) ?? '',
+    name: (r[1] as string) ?? '',
+    type: (r[2] as string) ?? '',
+    layer: r[3] as number,
+    startTime: r[4] as number,
+    endTime: r[5] as number,
+    enabled: Boolean(r[6]),
+    selected: Boolean(r[7]),
+    script: toText(r[8]),
+    srcBlending: (r[9] as string) ?? '',
+    dstBlending: (r[10] as string) ?? '',
+    blendingEQ: (r[11] as string) ?? '',
+    srcAlpha: (r[12] as string) ?? '',
+    dstAlpha: (r[13] as string) ?? '',
   }));
 
   const fbos: DbFbo[] = queryRows(

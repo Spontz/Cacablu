@@ -4,6 +4,7 @@ import type { AppState } from '../state/app-state';
 import type { DbState } from '../state/db-state';
 import type { DbSessionRef } from '../db/db-session';
 import type { ConnectionController } from '../ws/connection';
+import type { UndoManager } from '../app/undo-manager';
 import { createContentRenderer } from './base-panel';
 import { createDbExplorerPanel } from './db-explorer-panel';
 import { createEventsPanel } from './events-panel';
@@ -22,6 +23,7 @@ export function createPanelRegistry(
   dbState: DbState,
   sessionRef: DbSessionRef,
   connection: ConnectionController,
+  undoManager: UndoManager,
 ): PanelRegistry {
   return {
     create(name: string): IContentRenderer {
@@ -29,7 +31,7 @@ export function createPanelRegistry(
         case 'resources-panel':
           return createResourcesPanel(state, dbState, sessionRef, connection);
         case 'timeline-panel':
-          return createTimelinePanel(state, dbState, sessionRef, connection);
+          return createTimelinePanel(state, dbState, sessionRef, connection, undoManager);
         case 'preview-panel':
           return createPreviewPanel(connection);
         case 'inspector-panel':

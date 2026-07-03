@@ -2,10 +2,11 @@ import { getSqlJs } from './sql-loader';
 import type { SqlDatabase } from './sql-loader';
 import { readDatabase } from './db-reader';
 import { serializeDatabase } from './db-writer';
-import type { DbFile, DbFolder, ProjectDatabase } from './db-schema';
+import type { DbBar, DbFile, DbFolder, ProjectDatabase } from './db-schema';
 
 type EditableDbValue = string | number | boolean | null;
 type DbTableName = 'variables' | 'bars' | 'fbos' | 'files' | 'folders';
+type NewTimelineBar = Pick<DbBar, 'layer' | 'startTime' | 'endTime'> & Partial<Omit<DbBar, 'layer' | 'startTime' | 'endTime'>>;
 type NewResourceFile = Pick<DbFile, 'name' | 'parent' | 'bytes' | 'type' | 'data' | 'format'> & Partial<Pick<DbFile, 'enabled'>>;
 type NewResourceFolder = Pick<DbFolder, 'name' | 'parent'> & Partial<Pick<DbFolder, 'enabled'>>;
 
@@ -19,6 +20,8 @@ export interface DbSession {
   readonly fileName: string;
   readonly data: ProjectDatabase;
   updateCell(tableName: DbTableName, rowKey: string | number, columnName: string, value: EditableDbValue): void;
+  insertTimelineBar(input: NewTimelineBar): DbBar;
+  deleteTimelineBars(ids: number[]): DbBar[];
   upsertResourceFile(input: NewResourceFile): DbFile;
   insertResourceFolder(input: NewResourceFolder): DbFolder;
   moveResourceFile(fileId: number, parentId: number): DbFile;
@@ -49,6 +52,7 @@ export async function openDbSession(handle: FileSystemFileHandle): Promise<DbSes
 
   const SQL = await getSqlJs();
   const db = new SQL.Database(bytes);
+  migrateDatabaseSchema(db);
   const data = readDatabase(db);
   return makeSession(handle, db, data);
 }
@@ -69,6 +73,72 @@ function makeSession(handle: FileSystemFileHandle, db: SqlDatabase, data: Projec
         `UPDATE ${quoteIdentifier(tableName)} SET ${quoteIdentifier(columnName)} = ? WHERE ${quoteIdentifier(whereColumn)} = ?`,
         [toSqlValue(value), rowKey],
       );
+    },
+
+    insertTimelineBar(input): DbBar {
+      const bar: Omit<DbBar, 'id'> = {
+        name: input.name ?? '',
+        type: input.type ?? '',
+        layer: input.layer,
+        startTime: input.startTime,
+        endTime: input.endTime,
+        enabled: input.enabled ?? true,
+        selected: input.selected ?? false,
+        script: input.script ?? '',
+        srcBlending: input.srcBlending ?? 'ONE',
+        dstBlending: input.dstBlending ?? 'ZERO',
+        blendingEQ: input.blendingEQ ?? '',
+        srcAlpha: input.srcAlpha ?? '',
+        dstAlpha: input.dstAlpha ?? '',
+      };
+
+      const columns = input.id !== undefined
+        ? '"id", "name", "type", "layer", "startTime", "endTime", "enabled", "selected", "script", "srcBlending", "dstBlending", "blendingEQ", "srcAlpha", "dstAlpha"'
+        : '"name", "type", "layer", "startTime", "endTime", "enabled", "selected", "script", "srcBlending", "dstBlending", "blendingEQ", "srcAlpha", "dstAlpha"';
+      const placeholders = input.id !== undefined
+        ? '?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?'
+        : '?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?';
+      const values = [
+        bar.name,
+        bar.type,
+        bar.layer,
+        bar.startTime,
+        bar.endTime,
+        bar.enabled ? 1 : 0,
+        bar.selected ? 1 : 0,
+        bar.script,
+        bar.srcBlending,
+        bar.dstBlending,
+        bar.blendingEQ,
+        bar.srcAlpha,
+        bar.dstAlpha,
+      ];
+
+      db.run(
+        `INSERT INTO "BARS" (${columns}) VALUES (${placeholders})`,
+        input.id !== undefined ? [input.id, ...values] : values,
+      );
+
+      const inserted: DbBar = {
+        id: input.id ?? lastInsertRowId(db),
+        ...bar,
+      };
+      data.bars.push(inserted);
+      return inserted;
+    },
+
+    deleteTimelineBars(ids): DbBar[] {
+      if (ids.length === 0) return [];
+      const idSet = new Set(ids);
+      const deleted = data.bars
+        .filter((bar) => idSet.has(bar.id))
+        .map((bar) => ({ ...bar }));
+      if (deleted.length === 0) return [];
+
+      const placeholders = deleted.map(() => '?').join(', ');
+      db.run(`DELETE FROM "BARS" WHERE "id" IN (${placeholders})`, deleted.map((bar) => bar.id));
+      removeWhere(data.bars, (bar) => idSet.has(bar.id));
+      return deleted;
     },
 
     upsertResourceFile(input): DbFile {
@@ -220,6 +290,26 @@ function makeSession(handle: FileSystemFileHandle, db: SqlDatabase, data: Projec
       db.close();
     },
   };
+}
+
+function migrateDatabaseSchema(db: SqlDatabase): void {
+  const columns = getTableColumnNames(db, 'BARS');
+  if (columns.length === 0 || columns.some((column) => column.toLowerCase() === 'name')) {
+    return;
+  }
+
+  db.run('ALTER TABLE "BARS" ADD COLUMN "name" TEXT DEFAULT ""');
+  db.run('UPDATE "BARS" SET "name" = COALESCE("type", "") WHERE "name" IS NULL OR "name" = ""');
+}
+
+function getTableColumnNames(db: SqlDatabase, tableName: string): string[] {
+  try {
+    return (db.exec(`PRAGMA table_info(${quoteIdentifier(tableName)})`)[0]?.values ?? [])
+      .map((row) => row[1])
+      .filter((value): value is string => typeof value === 'string');
+  } catch {
+    return [];
+  }
 }
 
 function quoteIdentifier(identifier: string): string {

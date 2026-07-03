@@ -10,17 +10,76 @@ import type { AppState } from '../state/app-state';
 import type { DbState } from '../state/db-state';
 import type { DbSessionRef } from '../db/db-session';
 import type { ConnectionController } from '../ws/connection';
+import type { DbBar } from '../db/db-schema';
+import type { UndoManager } from '../app/undo-manager';
+import { createPhoenixSectionClient } from '../phoenix/section-client';
+import { ProjectSectionSyncError, syncProjectBarToPhoenix } from '../services/project-section-sync';
 import { createContentRenderer } from './base-panel';
 
 const CLIP_COLOR = '#5e86b8';
 const MIN_MARKER_LABEL_SPACING = 88;
 const TRANSPORT_STEP_SECONDS = 1;
+const DRAG_THRESHOLD_PX = 3;
+const MOVE_SYNC_DELAY_MS = 850;
+const TRANSPORT_SYNC_GRACE_MS = 1200;
+
+interface BarDragState {
+  pointerId: number;
+  barId: number;
+  startClientX: number;
+  startClientY: number;
+  originStart: number;
+  originEnd: number;
+  originLayer: number;
+  duration: number;
+  currentStart: number;
+  currentEnd: number;
+  currentLayer: number;
+  hasMoved: boolean;
+  blocked: boolean;
+}
+
+interface BoxSelectionState {
+  pointerId: number;
+  startClientX: number;
+  startClientY: number;
+  startX: number;
+  startY: number;
+  currentX: number;
+  currentY: number;
+  selectedIds: number[];
+  hasMoved: boolean;
+}
+
+interface EmptyBarCreationState {
+  pointerId: number;
+  startClientX: number;
+  startClientY: number;
+  startX: number;
+  currentX: number;
+  layer: number;
+  hasMoved: boolean;
+}
+
+interface GroupBarDragState {
+  pointerId: number;
+  barIds: number[];
+  startClientX: number;
+  startClientY: number;
+  originPointerLayer: number;
+  currentTimeDelta: number;
+  currentLayerDelta: number;
+  originals: Array<{ id: number; startTime: number; endTime: number; layer: number }>;
+  hasMoved: boolean;
+  blocked: boolean;
+}
 
 export function createTimelinePanel(
   appState: AppState,
   dbState: DbState,
   sessionRef: DbSessionRef,
   connection: ConnectionController,
+  undoManager: UndoManager,
 ): IContentRenderer {
   const state = createTimelineState({
     duration: 0,
@@ -34,30 +93,57 @@ export function createTimelinePanel(
   let pendingPlayback: { playing: boolean; until: number } | null = null;
   let lastRenderedDuration = Number.NaN;
   let lastRenderedConnected = false;
-  let lastRenderedSelectedBarId: number | null = null;
+  let lastRenderedSelectionSignature = '';
   let lastRenderedErrorSignature = '';
   let lastRenderedDisplayTimelineIds = false;
   let runtimeAnchorTime = state.transport.currentTime;
   let runtimeAnchorTimestamp = performance.now();
+  let dragState: BarDragState | null = null;
+  let groupDragState: GroupBarDragState | null = null;
+  let boxSelectionState: BoxSelectionState | null = null;
+  let emptyBarCreationState: EmptyBarCreationState | null = null;
+  let suppressNextClick = false;
+  let suppressNextClickTimeout: number | null = null;
+  let moveSyncTimeout: number | null = null;
+  const pendingMovedBarIds = new Set<number>();
+  let suppressUndoRegistration = false;
+  let renderTimeline: ((force?: boolean) => void) | null = null;
+  const phoenixSections = createPhoenixSectionClient();
 
   function isProjectReady(): boolean {
     const status = dbState.getSnapshot().status;
     return Boolean(sessionRef.current && (status === 'open' || status === 'saving'));
   }
 
-  function loadFromDb(): void {
+  function loadFromDb(options: { preserveTransport?: boolean } = {}): void {
     const db = sessionRef.current?.data ?? null;
+    const previousCurrentTime = state.transport.currentTime;
+    const previousIsPlaying = state.transport.isPlaying;
 
     state.tracks = [];
     state.clips = [];
-    state.transport.currentTime = 0;
-    state.transport.isPlaying = false;
-    lastTimestamp = 0;
+    if (!options.preserveTransport) {
+      state.transport.currentTime = 0;
+      state.transport.isPlaying = false;
+      lastTimestamp = 0;
+      runtimeAnchorTime = 0;
+      runtimeAnchorTimestamp = performance.now();
+    }
 
     if (!db) return;
 
     const parsed = parseFloat(db.variables.get('endTime') ?? '');
     state.transport.duration = isFinite(parsed) && parsed > 0 ? parsed : 30;
+    if (options.preserveTransport) {
+      state.transport.currentTime = Math.min(
+        Math.max(previousCurrentTime, 0),
+        Math.max(state.transport.duration, 0),
+      );
+      state.transport.isPlaying = previousIsPlaying;
+      lastTimestamp = 0;
+      runtimeAnchorTime = state.transport.currentTime;
+      runtimeAnchorTimestamp = performance.now();
+    }
 
     const layerNums = [...new Set(db.bars.map((b) => b.layer))].sort((a, b) => a - b);
 
@@ -69,7 +155,7 @@ export function createTimelinePanel(
       createClip({
         id: `bar-${bar.id}`,
         trackId: `layer-${bar.layer}`,
-        label: bar.type || `Bar ${bar.id}`,
+        label: bar.name.trim(),
         start: bar.startTime,
         end: Math.max(bar.endTime, bar.startTime),
         metadata: { dbId: bar.id },
@@ -90,7 +176,7 @@ export function createTimelinePanel(
   }
 
   function formatTime(value: number): string {
-    return Number(value.toFixed(2)).toString();
+    return Number.isFinite(value) ? value.toFixed(3) : '0.000';
   }
 
   function getMarkerStep(pixelsPerSecond: number): number {
@@ -139,14 +225,471 @@ export function createTimelinePanel(
     return ids;
   }
 
+  function findBar(barId: number): DbBar | null {
+    return sessionRef.current?.data.bars.find((bar) => bar.id === barId) ?? null;
+  }
+
+  function getLayerFromTrackId(trackId: string): number {
+    const value = Number(trackId.replace(/^layer-/, ''));
+    return Number.isFinite(value) ? value : 0;
+  }
+
+  function getLayerAtPoint(clientX: number, clientY: number, fallback: number): number {
+    const target = document.elementFromPoint(clientX, clientY);
+    const lane = target?.closest<HTMLElement>('.timeline-panel__lane');
+    const layer = Number(lane?.dataset.layer);
+    return Number.isFinite(layer) ? layer : fallback;
+  }
+
+  function getSelectedBarIds(): Set<number> {
+    const selection = appState.getSnapshot().resourceSelection;
+    if (selection.kind === 'bar') return new Set([selection.id]);
+    if (selection.kind === 'bars') return new Set(selection.ids);
+    return new Set();
+  }
+
+  function getSelectedBarIdList(): number[] {
+    const selection = appState.getSnapshot().resourceSelection;
+    if (selection.kind === 'bar') return [selection.id];
+    if (selection.kind === 'bars') return [...selection.ids];
+    return [];
+  }
+
+  function getSelectionSignature(ids: Set<number>): string {
+    return [...ids].sort((a, b) => a - b).join(',');
+  }
+
+  function getTimelineContentPoint(viewport: HTMLElement, clientX: number, clientY: number): { x: number; y: number } {
+    const rect = viewport.getBoundingClientRect();
+    return {
+      x: clientX - rect.left + viewport.scrollLeft,
+      y: clientY - rect.top + viewport.scrollTop,
+    };
+  }
+
+  function getBoxSelectionRect(selection = boxSelectionState): { left: number; top: number; right: number; bottom: number } | null {
+    if (!selection) return null;
+    return {
+      left: Math.min(selection.startX, selection.currentX),
+      top: Math.min(selection.startY, selection.currentY),
+      right: Math.max(selection.startX, selection.currentX),
+      bottom: Math.max(selection.startY, selection.currentY),
+    };
+  }
+
+  function getBoxSelectionStyle(): string {
+    const rect = getBoxSelectionRect();
+    if (!rect) return '';
+    return `left:${rect.left}px;top:${rect.top}px;width:${rect.right - rect.left}px;height:${rect.bottom - rect.top}px`;
+  }
+
+  function getEmptyBarCreationRect(): { left: number; top: number; width: number; height: number } | null {
+    const creation = emptyBarCreationState;
+    if (!creation) return null;
+    const track = state.tracks.find((candidate) => getLayerFromTrackId(candidate.id) === creation.layer);
+    const lanes = document.querySelector<HTMLElement>('.timeline-panel__lanes');
+    const viewport = document.querySelector<HTMLElement>('.timeline-panel__viewport');
+    const lanesRect = lanes?.getBoundingClientRect();
+    const viewportRect = viewport?.getBoundingClientRect();
+    const lanesTop = lanesRect && viewportRect && viewport
+      ? lanesRect.top - viewportRect.top + viewport.scrollTop
+      : 0;
+    const left = Math.min(creation.startX, creation.currentX);
+    const right = Math.max(creation.startX, creation.currentX);
+    return {
+      left,
+      top: getTrackTop(`layer-${creation.layer}`, lanesTop) + 2,
+      width: Math.max(right - left, 1),
+      height: Math.max((track?.height ?? 18) - 4, 1),
+    };
+  }
+
+  function getEmptyBarCreationStyle(): string {
+    const rect = getEmptyBarCreationRect();
+    if (!rect) return '';
+    return `left:${rect.left}px;top:${rect.top}px;width:${rect.width}px;height:${rect.height}px`;
+  }
+
+  function getTrackTop(trackId: string, lanesTop: number): number {
+    let top = lanesTop;
+    for (const track of state.tracks) {
+      if (track.id === trackId) return top;
+      top += track.height;
+    }
+    return top;
+  }
+
+  function collectBarsInSelectionRect(viewport: HTMLElement, selection = boxSelectionState): number[] {
+    const rect = getBoxSelectionRect(selection);
+    if (!rect || !selection) return [];
+    const selected: number[] = [];
+    const effectivePixelsPerSecond = state.viewport.pixelsPerSecond * state.viewport.zoom;
+    if (!Number.isFinite(effectivePixelsPerSecond) || effectivePixelsPerSecond <= 0) {
+      return selected;
+    }
+
+    const lanes = viewport.querySelector<HTMLElement>('.timeline-panel__lanes');
+    const viewportRect = viewport.getBoundingClientRect();
+    const lanesRect = lanes?.getBoundingClientRect();
+    const lanesTop = lanesRect ? lanesRect.top - viewportRect.top + viewport.scrollTop : 0;
+
+    for (const clip of state.clips) {
+      const dbId = typeof clip.metadata?.dbId === 'number' ? clip.metadata.dbId : null;
+      if (dbId === null) continue;
+
+      const track = state.tracks.find((candidate) => candidate.id === clip.trackId);
+      if (!track) continue;
+
+      const left = clip.start * effectivePixelsPerSecond;
+      const right = clip.end * effectivePixelsPerSecond;
+      const top = getTrackTop(clip.trackId, lanesTop);
+      const bottom = top + track.height;
+      const matches = left < rect.right && right > rect.left && top < rect.bottom && bottom > rect.top;
+      if (matches) selected.push(dbId);
+    }
+
+    return selected.sort((a, b) => a - b);
+  }
+
+  function wouldOverlap(barId: number, layer: number, startTime: number, endTime: number): boolean {
+    const bars = sessionRef.current?.data.bars ?? [];
+    return bars.some((bar) => (
+      bar.id !== barId
+      && bar.layer === layer
+      && startTime < bar.endTime
+      && endTime > bar.startTime
+    ));
+  }
+
+  function wouldGroupOverlap(nextBars: Array<{ id: number; layer: number; startTime: number; endTime: number }>): boolean {
+    const movingIds = new Set(nextBars.map((bar) => bar.id));
+    const existing = sessionRef.current?.data.bars ?? [];
+    return nextBars.some((next) => (
+      existing.some((bar) => (
+        !movingIds.has(bar.id)
+        && bar.layer === next.layer
+        && next.startTime < bar.endTime
+        && next.endTime > bar.startTime
+      ))
+    ));
+  }
+
+  function hasValidGroupLayers(nextBars: Array<{ layer: number }>): boolean {
+    const layers = new Set(state.tracks.map((track) => getLayerFromTrackId(track.id)));
+    return nextBars.every((bar) => layers.has(bar.layer));
+  }
+
+  function findClipForBar(barId: number) {
+    return state.clips.find((clip) => clip.metadata?.dbId === barId) ?? null;
+  }
+
+  function applyDragPreview(next: BarDragState): void {
+    const clip = findClipForBar(next.barId);
+    if (clip) {
+      clip.start = next.currentStart;
+      clip.end = next.currentEnd;
+      clip.trackId = `layer-${next.currentLayer}`;
+    }
+  }
+
+  function applyGroupDragPreview(next: GroupBarDragState, timeDelta: number, layerDelta: number): void {
+    for (const original of next.originals) {
+      const clip = findClipForBar(original.id);
+      if (!clip) continue;
+      clip.start = original.startTime + timeDelta;
+      clip.end = original.endTime + timeDelta;
+      clip.trackId = `layer-${original.layer + layerDelta}`;
+    }
+  }
+
+  function restoreGroupDragPreview(previous: GroupBarDragState): void {
+    for (const original of previous.originals) {
+      const clip = findClipForBar(original.id);
+      if (!clip) continue;
+      clip.start = original.startTime;
+      clip.end = original.endTime;
+      clip.trackId = `layer-${original.layer}`;
+    }
+  }
+
+  function restoreDragPreview(previous: BarDragState): void {
+    const clip = findClipForBar(previous.barId);
+    if (clip) {
+      clip.start = previous.originStart;
+      clip.end = previous.originEnd;
+      clip.trackId = `layer-${previous.originLayer}`;
+    }
+  }
+
+  function applyBarPlacement(bar: DbBar, startTime: number, endTime: number, layer: number): void {
+    const session = sessionRef.current;
+    if (!session) return;
+
+    session.updateCell('bars', bar.id, 'startTime', startTime);
+    session.updateCell('bars', bar.id, 'endTime', endTime);
+    session.updateCell('bars', bar.id, 'layer', layer);
+    bar.startTime = startTime;
+    bar.endTime = endTime;
+    bar.layer = layer;
+  }
+
+  function commitBarMove(next: BarDragState): boolean {
+    const session = sessionRef.current;
+    const bar = findBar(next.barId);
+    if (!session || !bar) return false;
+    if (
+      bar.startTime === next.currentStart &&
+      bar.endTime === next.currentEnd &&
+      bar.layer === next.currentLayer
+    ) {
+      return false;
+    }
+
+    const previous = {
+      startTime: bar.startTime,
+      endTime: bar.endTime,
+      layer: bar.layer,
+    };
+    const movedBarId = bar.id;
+    applyBarPlacement(bar, next.currentStart, next.currentEnd, next.currentLayer);
+    appState.setResourceSelection({ kind: 'bar', id: bar.id });
+    if (!suppressUndoRegistration) {
+      undoManager.push({
+        label: `Move bar ${movedBarId}`,
+        undo: async () => {
+          const current = findBar(movedBarId);
+          if (!current) return;
+          if (wouldOverlap(movedBarId, previous.layer, previous.startTime, previous.endTime)) {
+            appState.addEvent({
+              severity: 'warning',
+              source: 'Timeline undo',
+              subjectId: String(movedBarId),
+              description: `Could not undo move for bar ${movedBarId} because the original range is occupied.`,
+            });
+            return;
+          }
+
+          suppressUndoRegistration = true;
+          try {
+            applyBarPlacement(current, previous.startTime, previous.endTime, previous.layer);
+          } finally {
+            suppressUndoRegistration = false;
+          }
+          appState.setResourceSelection({ kind: 'bar', id: movedBarId });
+          loadFromDb({ preserveTransport: true });
+          renderTimeline?.(true);
+          scheduleMovedBarSync(movedBarId, MOVE_SYNC_DELAY_MS);
+        },
+      });
+    }
+    scheduleMovedBarSync(bar.id, MOVE_SYNC_DELAY_MS);
+    return true;
+  }
+
+  function commitGroupBarMove(next: GroupBarDragState): boolean {
+    const bars = next.originals
+      .map((original) => findBar(original.id))
+      .filter((bar): bar is DbBar => Boolean(bar));
+    if (bars.length !== next.originals.length || bars.length === 0) return false;
+
+    const nextBars = next.originals.map((original) => ({
+      id: original.id,
+      startTime: original.startTime + next.currentTimeDelta,
+      endTime: original.endTime + next.currentTimeDelta,
+      layer: original.layer + next.currentLayerDelta,
+    }));
+    if (!hasValidGroupLayers(nextBars) || wouldGroupOverlap(nextBars)) return false;
+
+    const changed = nextBars.some((bar) => {
+      const original = next.originals.find((candidate) => candidate.id === bar.id);
+      return Boolean(original && (
+        original.startTime !== bar.startTime ||
+        original.endTime !== bar.endTime ||
+        original.layer !== bar.layer
+      ));
+    });
+    if (!changed) return false;
+
+    const previous = next.originals.map((original) => ({ ...original }));
+    const movedIds = previous.map((bar) => bar.id);
+    for (const target of nextBars) {
+      const bar = findBar(target.id);
+      if (bar) applyBarPlacement(bar, target.startTime, target.endTime, target.layer);
+    }
+    appState.setResourceSelection(movedIds.length === 1 ? { kind: 'bar', id: movedIds[0] } : { kind: 'bars', ids: movedIds });
+    if (!suppressUndoRegistration) {
+      undoManager.push({
+        label: `Move ${movedIds.length} bars`,
+        undo: async () => {
+          if (wouldGroupOverlap(previous) || !hasValidGroupLayers(previous)) {
+            appState.addEvent({
+              severity: 'warning',
+              source: 'Timeline undo',
+              description: `Could not undo move for ${movedIds.length} bars because the original range is occupied.`,
+            });
+            return;
+          }
+
+          suppressUndoRegistration = true;
+          try {
+            for (const original of previous) {
+              const bar = findBar(original.id);
+              if (bar) applyBarPlacement(bar, original.startTime, original.endTime, original.layer);
+            }
+          } finally {
+            suppressUndoRegistration = false;
+          }
+          appState.setResourceSelection(movedIds.length === 1 ? { kind: 'bar', id: movedIds[0] } : { kind: 'bars', ids: movedIds });
+          loadFromDb({ preserveTransport: true });
+          renderTimeline?.(true);
+          scheduleMovedBarsSync(movedIds, MOVE_SYNC_DELAY_MS);
+        },
+      });
+    }
+    scheduleMovedBarsSync(movedIds, MOVE_SYNC_DELAY_MS);
+    return true;
+  }
+
+  function scheduleMovedBarSync(barId: number, delayMs: number): void {
+    scheduleMovedBarsSync([barId], delayMs);
+  }
+
+  function scheduleMovedBarsSync(barIds: number[], delayMs: number): void {
+    for (const barId of barIds) {
+      pendingMovedBarIds.add(barId);
+    }
+    if (moveSyncTimeout !== null) {
+      window.clearTimeout(moveSyncTimeout);
+    }
+    moveSyncTimeout = window.setTimeout(() => {
+      moveSyncTimeout = null;
+      const barsToSync = [...pendingMovedBarIds];
+      pendingMovedBarIds.clear();
+      for (const barToSync of barsToSync) {
+        void syncMovedBarToPhoenix(barToSync);
+      }
+    }, delayMs);
+  }
+
+  function deferMovedBarsSyncForTransport(): void {
+    if (moveSyncTimeout !== null && pendingMovedBarIds.size > 0) {
+      scheduleMovedBarsSync([...pendingMovedBarIds], TRANSPORT_SYNC_GRACE_MS);
+    }
+  }
+
+  async function syncMovedBarToPhoenix(barId: number): Promise<void> {
+    const session = sessionRef.current;
+    if (!session) return;
+
+    if (!connection.isConnected()) {
+      return;
+    }
+
+    try {
+      const result = await syncProjectBarToPhoenix(session.data, barId, phoenixSections);
+      recordSectionIssues(result.issues);
+    } catch (err) {
+      if (err instanceof ProjectSectionSyncError) {
+        recordSectionIssues(err.issues);
+        return;
+      }
+
+      appState.addEvent({
+        severity: 'error',
+        source: 'Phoenix section sync',
+        subjectId: String(barId),
+        description: err instanceof Error ? err.message : 'Could not sync moved timeline bar to Phoenix.',
+      });
+    }
+  }
+
+  async function deleteBarsFromPhoenix(barIds: number[]): Promise<void> {
+    if (!connection.isConnected() || barIds.length === 0) return;
+    try {
+      await phoenixSections.deleteMany(barIds.map(String));
+    } catch (err) {
+      appState.addEvent({
+        severity: 'error',
+        source: 'Phoenix section sync',
+        description: err instanceof Error ? err.message : 'Could not delete timeline bars from Phoenix.',
+      });
+    }
+  }
+
+  function deleteSelectedBars(): boolean {
+    const session = sessionRef.current;
+    const selectedIds = getSelectedBarIdList();
+    if (!session || selectedIds.length === 0) return false;
+
+    const deletedBars = session.deleteTimelineBars(selectedIds);
+    if (deletedBars.length === 0) return false;
+
+    const deletedIds = deletedBars.map((bar) => bar.id);
+    undoManager.push({
+      label: `Delete ${deletedIds.length} bars`,
+      undo: async () => {
+        for (const bar of deletedBars.sort((a, b) => a.id - b.id)) {
+          session.insertTimelineBar(bar);
+        }
+        appState.setResourceSelection(deletedIds.length === 1 ? { kind: 'bar', id: deletedIds[0] } : { kind: 'bars', ids: deletedIds });
+        loadFromDb({ preserveTransport: true });
+        renderTimeline?.(true);
+        scheduleMovedBarsSync(deletedIds, MOVE_SYNC_DELAY_MS);
+      },
+    });
+
+    appState.clearResourceSelection();
+    loadFromDb({ preserveTransport: true });
+    renderTimeline?.(true);
+    void deleteBarsFromPhoenix(deletedIds);
+    return true;
+  }
+
+  function recordSectionIssues(issues: ProjectSectionSyncError['issues']): void {
+    if (issues.length === 0) return;
+    appState.addEvents(issues.map((issue) => ({
+      severity: 'error',
+      source: 'Phoenix section sync',
+      subjectId: String(issue.barId),
+      description: issue.description,
+    })));
+  }
+
+  function suppressUpcomingClick(): void {
+    suppressNextClick = true;
+    if (suppressNextClickTimeout !== null) {
+      window.clearTimeout(suppressNextClickTimeout);
+    }
+    suppressNextClickTimeout = window.setTimeout(() => {
+      suppressNextClick = false;
+      suppressNextClickTimeout = null;
+    }, 200);
+  }
+
+  function consumeSuppressedClick(): boolean {
+    if (!suppressNextClick) return false;
+    suppressNextClick = false;
+    if (suppressNextClickTimeout !== null) {
+      window.clearTimeout(suppressNextClickTimeout);
+      suppressNextClickTimeout = null;
+    }
+    return true;
+  }
+
   return createContentRenderer((element) => {
     element.className = 'panel panel--timeline';
+    element.tabIndex = 0;
 
     const updatePlayhead = (): void => {
       const playhead = element.querySelector<HTMLElement>('.timeline-panel__playhead');
       if (!playhead) {
         return;
       }
+      if (!connection.isConnected()) {
+        playhead.hidden = true;
+        return;
+      }
+      playhead.hidden = false;
 
       const playheadLeft = state.transport.currentTime * state.viewport.pixelsPerSecond * state.viewport.zoom;
       playhead.style.left = `${playheadLeft}px`;
@@ -154,6 +697,29 @@ export function createTimelinePanel(
       const label = playhead.querySelector('span');
       if (label) {
         label.textContent = `${formatTime(state.transport.currentTime)}s`;
+      }
+    };
+
+    const updateActiveClipStates = (): void => {
+      const connected = connection.isConnected();
+      const erroredBarIds = getErroredSectionBarIds();
+      const clipsByBarId = new Map<number, { start: number; end: number }>();
+      for (const clip of state.clips) {
+        const dbId = typeof clip.metadata?.dbId === 'number' ? clip.metadata.dbId : null;
+        if (dbId !== null) clipsByBarId.set(dbId, { start: clip.start, end: clip.end });
+      }
+
+      for (const clipElement of element.querySelectorAll<HTMLElement>('.timeline-panel__clip[data-bar-id]')) {
+        const dbId = Number(clipElement.dataset.barId);
+        const clip = Number.isInteger(dbId) ? clipsByBarId.get(dbId) : null;
+        const isActive = Boolean(
+          connected &&
+          clip &&
+          !erroredBarIds.has(dbId) &&
+          state.transport.currentTime >= clip.start &&
+          state.transport.currentTime < clip.end,
+        );
+        clipElement.classList.toggle('is-active', isActive);
       }
     };
 
@@ -182,8 +748,9 @@ export function createTimelinePanel(
       const transportDisabled = !connection.isConnected();
       const connected = !transportDisabled;
       const snapshot = appState.getSnapshot();
-      const selection = snapshot.resourceSelection;
-      const selectedBarId = selection.kind === 'bar' ? selection.id : null;
+      const selectedBarIds = getSelectedBarIds();
+      const boxSelectedBarIds = new Set(boxSelectionState?.selectedIds ?? []);
+      const selectionSignature = getSelectionSignature(selectedBarIds);
       const displayTimelineIds = snapshot.displayTimelineIds;
       const erroredBarIds = getErroredSectionBarIds();
       const errorSignature = [...erroredBarIds].sort((a, b) => a - b).join(',');
@@ -191,18 +758,19 @@ export function createTimelinePanel(
         !force &&
         state.transport.duration === lastRenderedDuration &&
         connected === lastRenderedConnected &&
-        selectedBarId === lastRenderedSelectedBarId &&
+        selectionSignature === lastRenderedSelectionSignature &&
         errorSignature === lastRenderedErrorSignature &&
         displayTimelineIds === lastRenderedDisplayTimelineIds
       ) {
         updatePlaybackVisualState();
         updatePlayhead();
+        updateActiveClipStates();
         return;
       }
 
       lastRenderedDuration = state.transport.duration;
       lastRenderedConnected = connected;
-      lastRenderedSelectedBarId = selectedBarId;
+      lastRenderedSelectionSignature = selectionSignature;
       lastRenderedErrorSignature = errorSignature;
       lastRenderedDisplayTimelineIds = displayTimelineIds;
 
@@ -212,6 +780,9 @@ export function createTimelinePanel(
       const markerStep = getMarkerStep(effectivePixelsPerSecond);
       const markerCount = Math.floor(state.transport.duration / markerStep) + 1;
       const playTitle = state.transport.isPlaying ? 'Pause' : 'Play';
+      const previousViewport = element.querySelector<HTMLElement>('.timeline-panel__viewport');
+      const previousScrollLeft = previousViewport?.scrollLeft ?? 0;
+      const previousScrollTop = previousViewport?.scrollTop ?? 0;
 
       element.innerHTML = `
         <div class="timeline-panel ${state.transport.isPlaying ? 'is-playing' : ''}">
@@ -232,9 +803,17 @@ export function createTimelinePanel(
                 }).join('')}
               </div>
 
-              <div class="timeline-panel__playhead" style="left:${playheadLeft}px">
-                <span>${formatTime(state.transport.currentTime)}s</span>
-              </div>
+              ${connected
+                ? `<div class="timeline-panel__playhead" style="left:${playheadLeft}px">
+                    <span>${formatTime(state.transport.currentTime)}s</span>
+                  </div>`
+                : ''}
+              ${boxSelectionState?.hasMoved
+                ? `<div class="timeline-panel__selection-box" style="${getBoxSelectionStyle()}"></div>`
+                : ''}
+              ${emptyBarCreationState?.hasMoved
+                ? `<div class="timeline-panel__new-bar-preview" style="${getEmptyBarCreationStyle()}"></div>`
+                : ''}
 
               <div class="timeline-panel__lanes" style="width:${timelineWidth}px">
                 ${state.tracks
@@ -244,24 +823,33 @@ export function createTimelinePanel(
                       .sort((a, b) => a.start - b.start);
 
                     return `
-                      <div class="timeline-panel__lane" style="height:${track.height}px">
+                      <div class="timeline-panel__lane" data-layer="${getLayerFromTrackId(track.id)}" style="height:${track.height}px">
                         ${trackClips
                           .map((clip) => {
                             const left = clip.start * state.viewport.pixelsPerSecond * state.viewport.zoom;
                             const width = Math.max(
                               (clip.end - clip.start) * state.viewport.pixelsPerSecond * state.viewport.zoom,
-                              36,
+                              1,
                             );
-                            const isActive =
-                              state.transport.currentTime >= clip.start &&
-                              state.transport.currentTime <= clip.end;
                             const dbId = typeof clip.metadata?.dbId === 'number' ? clip.metadata.dbId : null;
-                            const isSelected = dbId !== null && dbId === selectedBarId;
+                            const isBoxSelected = dbId !== null && boxSelectedBarIds.has(dbId);
+                            const isSelected = dbId !== null && (selectedBarIds.has(dbId) || isBoxSelected);
+                            const isMovable = dbId !== null && (
+                              (snapshot.resourceSelection.kind === 'bar' && snapshot.resourceSelection.id === dbId) ||
+                              (snapshot.resourceSelection.kind === 'bars' && snapshot.resourceSelection.ids.includes(dbId))
+                            );
                             const hasError = dbId !== null && erroredBarIds.has(dbId);
-                            const label = displayTimelineIds && dbId !== null ? `${dbId} ${clip.label}` : clip.label;
+                            const isActive =
+                              connected &&
+                              !hasError &&
+                              state.transport.currentTime >= clip.start &&
+                              state.transport.currentTime < clip.end;
+                            const isDragging = dbId !== null && (dragState?.barId === dbId || groupDragState?.barIds.includes(dbId));
+                            const isBlocked = isDragging && (dragState?.blocked || groupDragState?.blocked);
+                            const label = displayTimelineIds && dbId !== null && clip.label ? `${dbId} ${clip.label}` : clip.label;
 
                             return `
-                              <article class="timeline-panel__clip ${isActive ? 'is-active' : ''} ${isSelected ? 'is-selected' : ''} ${hasError ? 'has-error' : ''}" data-bar-id="${dbId ?? ''}" tabindex="0" style="left:${left}px;width:${width}px;border-color:${clip.color ?? CLIP_COLOR}">
+                              <article class="timeline-panel__clip ${isActive ? 'is-active' : ''} ${isSelected ? 'is-selected' : ''} ${isBoxSelected ? 'is-box-selected' : ''} ${isMovable ? 'is-movable' : ''} ${hasError ? 'has-error' : ''} ${isDragging ? 'is-dragging' : ''} ${isBlocked ? 'is-blocked' : ''}" data-bar-id="${dbId ?? ''}" tabindex="0" style="left:${left}px;width:${width}px;border-color:${clip.color ?? CLIP_COLOR}">
                                 <span class="timeline-panel__clip-label">${label}</span>
                               </article>
                             `;
@@ -307,10 +895,19 @@ export function createTimelinePanel(
         </div>
       `;
 
+      const nextViewport = element.querySelector<HTMLElement>('.timeline-panel__viewport');
+      if (nextViewport) {
+        nextViewport.scrollLeft = previousScrollLeft;
+        nextViewport.scrollTop = previousScrollTop;
+      }
       updatePlayhead();
+      updateActiveClipStates();
     };
+    renderTimeline = render;
 
     const handleAction = (action: string): void => {
+      deferMovedBarsSyncForTransport();
+
       if (!connection.isConnected()) {
         render();
         return;
@@ -453,6 +1050,406 @@ export function createTimelinePanel(
     render();
     requestAnimationFrame(tick);
 
+    function beginDrag(event: PointerEvent): void {
+      if (event.button !== 0 || !isProjectReady()) {
+        return;
+      }
+
+      const clip = (event.target as HTMLElement | null)?.closest<HTMLElement>('[data-bar-id]');
+      if (!clip?.dataset.barId) {
+        if (event.shiftKey) {
+          beginBoxSelection(event);
+        } else {
+          beginEmptyBarCreation(event);
+        }
+        return;
+      }
+
+      const barId = Number(clip.dataset.barId);
+      const selection = appState.getSnapshot().resourceSelection;
+      if (!Number.isInteger(barId)) {
+        return;
+      }
+
+      const bar = findBar(barId);
+      if (!bar) return;
+
+      if (selection.kind === 'bars' && selection.ids.includes(barId)) {
+        const originals = selection.ids
+          .map((id) => findBar(id))
+          .filter((selectedBar): selectedBar is DbBar => Boolean(selectedBar))
+          .map((selectedBar) => ({
+            id: selectedBar.id,
+            startTime: selectedBar.startTime,
+            endTime: selectedBar.endTime,
+            layer: selectedBar.layer,
+          }));
+        if (originals.length === 0) return;
+
+        groupDragState = {
+          pointerId: event.pointerId,
+          barIds: originals.map((original) => original.id),
+          startClientX: event.clientX,
+          startClientY: event.clientY,
+          originPointerLayer: bar.layer,
+          currentTimeDelta: 0,
+          currentLayerDelta: 0,
+          originals,
+          hasMoved: false,
+          blocked: false,
+        };
+        clip.setPointerCapture(event.pointerId);
+        return;
+      }
+
+      if (selection.kind !== 'bar' || selection.id !== barId) {
+        return;
+      }
+
+      dragState = {
+        pointerId: event.pointerId,
+        barId,
+        startClientX: event.clientX,
+        startClientY: event.clientY,
+        originStart: bar.startTime,
+        originEnd: bar.endTime,
+        originLayer: bar.layer,
+        duration: Math.max(bar.endTime - bar.startTime, 0),
+        currentStart: bar.startTime,
+        currentEnd: bar.endTime,
+        currentLayer: bar.layer,
+        hasMoved: false,
+        blocked: false,
+      };
+      clip.setPointerCapture(event.pointerId);
+    }
+
+    function beginBoxSelection(event: PointerEvent): void {
+      const target = event.target as HTMLElement | null;
+      const viewport = target?.closest<HTMLElement>('.timeline-panel__viewport');
+      if (!viewport || target?.closest('[data-action], .timeline-panel__ruler')) {
+        return;
+      }
+
+      const point = getTimelineContentPoint(viewport, event.clientX, event.clientY);
+      boxSelectionState = {
+        pointerId: event.pointerId,
+        startClientX: event.clientX,
+        startClientY: event.clientY,
+        startX: point.x,
+        startY: point.y,
+        currentX: point.x,
+        currentY: point.y,
+        selectedIds: [],
+        hasMoved: false,
+      };
+      viewport.setPointerCapture(event.pointerId);
+    }
+
+    function beginEmptyBarCreation(event: PointerEvent): void {
+      const target = event.target as HTMLElement | null;
+      const viewport = target?.closest<HTMLElement>('.timeline-panel__viewport');
+      if (!viewport || target?.closest('[data-action], .timeline-panel__ruler')) {
+        return;
+      }
+
+      const point = getTimelineContentPoint(viewport, event.clientX, event.clientY);
+      emptyBarCreationState = {
+        pointerId: event.pointerId,
+        startClientX: event.clientX,
+        startClientY: event.clientY,
+        startX: point.x,
+        currentX: point.x,
+        layer: getLayerAtPoint(event.clientX, event.clientY, 0),
+        hasMoved: false,
+      };
+      viewport.setPointerCapture(event.pointerId);
+    }
+
+    function updateDrag(event: PointerEvent): void {
+      if (boxSelectionState && event.pointerId === boxSelectionState.pointerId) {
+        updateBoxSelection(event);
+        return;
+      }
+
+      if (emptyBarCreationState && event.pointerId === emptyBarCreationState.pointerId) {
+        updateEmptyBarCreation(event);
+        return;
+      }
+
+      if (groupDragState && event.pointerId === groupDragState.pointerId) {
+        updateGroupDrag(event);
+        return;
+      }
+
+      if (!dragState || event.pointerId !== dragState.pointerId) {
+        return;
+      }
+
+      const deltaX = event.clientX - dragState.startClientX;
+      const deltaY = event.clientY - dragState.startClientY;
+      if (!dragState.hasMoved && Math.hypot(deltaX, deltaY) < DRAG_THRESHOLD_PX) {
+        return;
+      }
+
+      event.preventDefault();
+      const effectivePixelsPerSecond = state.viewport.pixelsPerSecond * state.viewport.zoom;
+      if (!Number.isFinite(effectivePixelsPerSecond) || effectivePixelsPerSecond <= 0 || dragState.duration <= 0) {
+        return;
+      }
+
+      dragState.hasMoved = true;
+      const targetLayer = getLayerAtPoint(event.clientX, event.clientY, dragState.originLayer);
+      let nextStart = dragState.originStart + deltaX / effectivePixelsPerSecond;
+      nextStart = Math.max(0, nextStart);
+      if (state.transport.duration > 0) {
+        nextStart = Math.min(nextStart, Math.max(0, state.transport.duration - dragState.duration));
+      }
+      const nextEnd = nextStart + dragState.duration;
+
+      if (wouldOverlap(dragState.barId, targetLayer, nextStart, nextEnd)) {
+        dragState.blocked = true;
+        render(true);
+        return;
+      }
+
+      dragState.currentStart = nextStart;
+      dragState.currentEnd = nextEnd;
+      dragState.currentLayer = targetLayer;
+      dragState.blocked = false;
+      applyDragPreview(dragState);
+      render(true);
+    }
+
+    function updateGroupDrag(event: PointerEvent): void {
+      if (!groupDragState) return;
+
+      const deltaX = event.clientX - groupDragState.startClientX;
+      const deltaY = event.clientY - groupDragState.startClientY;
+      if (!groupDragState.hasMoved && Math.hypot(deltaX, deltaY) < DRAG_THRESHOLD_PX) {
+        return;
+      }
+
+      event.preventDefault();
+      const effectivePixelsPerSecond = state.viewport.pixelsPerSecond * state.viewport.zoom;
+      if (!Number.isFinite(effectivePixelsPerSecond) || effectivePixelsPerSecond <= 0) {
+        return;
+      }
+
+      const targetLayer = getLayerAtPoint(event.clientX, event.clientY, groupDragState.originPointerLayer);
+      const layerDelta = targetLayer - groupDragState.originPointerLayer;
+      const minStart = Math.min(...groupDragState.originals.map((bar) => bar.startTime));
+      const maxEnd = Math.max(...groupDragState.originals.map((bar) => bar.endTime));
+      let timeDelta = deltaX / effectivePixelsPerSecond;
+      timeDelta = Math.max(timeDelta, -minStart);
+      if (state.transport.duration > 0) {
+        timeDelta = Math.min(timeDelta, Math.max(0, state.transport.duration - maxEnd));
+      }
+
+      const nextBars = groupDragState.originals.map((bar) => ({
+        id: bar.id,
+        startTime: bar.startTime + timeDelta,
+        endTime: bar.endTime + timeDelta,
+        layer: bar.layer + layerDelta,
+      }));
+
+      groupDragState.hasMoved = true;
+      groupDragState.currentTimeDelta = timeDelta;
+      groupDragState.currentLayerDelta = layerDelta;
+      if (!hasValidGroupLayers(nextBars) || wouldGroupOverlap(nextBars)) {
+        groupDragState.blocked = true;
+        render(true);
+        return;
+      }
+
+      groupDragState.blocked = false;
+      applyGroupDragPreview(groupDragState, timeDelta, layerDelta);
+      render(true);
+    }
+
+    function updateBoxSelection(event: PointerEvent): void {
+      if (!boxSelectionState) return;
+
+      const viewport = element.querySelector<HTMLElement>('.timeline-panel__viewport');
+      if (!viewport) return;
+
+      const deltaX = event.clientX - boxSelectionState.startClientX;
+      const deltaY = event.clientY - boxSelectionState.startClientY;
+      if (!boxSelectionState.hasMoved && Math.hypot(deltaX, deltaY) < DRAG_THRESHOLD_PX) {
+        return;
+      }
+
+      event.preventDefault();
+      const point = getTimelineContentPoint(viewport, event.clientX, event.clientY);
+      boxSelectionState.currentX = point.x;
+      boxSelectionState.currentY = point.y;
+      boxSelectionState.hasMoved = true;
+      boxSelectionState.selectedIds = collectBarsInSelectionRect(viewport, boxSelectionState);
+      render(true);
+    }
+
+    function updateEmptyBarCreation(event: PointerEvent): void {
+      if (!emptyBarCreationState) return;
+
+      const viewport = element.querySelector<HTMLElement>('.timeline-panel__viewport');
+      if (!viewport) return;
+
+      const deltaX = event.clientX - emptyBarCreationState.startClientX;
+      const deltaY = event.clientY - emptyBarCreationState.startClientY;
+      if (!emptyBarCreationState.hasMoved && Math.hypot(deltaX, deltaY) < DRAG_THRESHOLD_PX) {
+        return;
+      }
+
+      event.preventDefault();
+      const point = getTimelineContentPoint(viewport, event.clientX, event.clientY);
+      emptyBarCreationState.currentX = Math.max(0, point.x);
+      emptyBarCreationState.hasMoved = true;
+      render(true);
+    }
+
+    function endDrag(event: PointerEvent): void {
+      if (boxSelectionState && event.pointerId === boxSelectionState.pointerId) {
+        endBoxSelection();
+        return;
+      }
+
+      if (emptyBarCreationState && event.pointerId === emptyBarCreationState.pointerId) {
+        endEmptyBarCreation();
+        return;
+      }
+
+      if (groupDragState && event.pointerId === groupDragState.pointerId) {
+        endGroupDrag();
+        return;
+      }
+
+      if (!dragState || event.pointerId !== dragState.pointerId) {
+        return;
+      }
+
+      const finishedDrag = dragState;
+      dragState = null;
+      if (!finishedDrag.hasMoved) {
+        return;
+      }
+
+      suppressUpcomingClick();
+      if (!commitBarMove(finishedDrag)) {
+        restoreDragPreview(finishedDrag);
+      }
+      loadFromDb({ preserveTransport: true });
+      render(true);
+    }
+
+    function endGroupDrag(): void {
+      const finishedDrag = groupDragState;
+      groupDragState = null;
+      if (!finishedDrag?.hasMoved) {
+        return;
+      }
+
+      suppressUpcomingClick();
+      if (!commitGroupBarMove(finishedDrag)) {
+        restoreGroupDragPreview(finishedDrag);
+      }
+      loadFromDb({ preserveTransport: true });
+      render(true);
+    }
+
+    function endBoxSelection(): void {
+      const finishedSelection = boxSelectionState;
+      if (!finishedSelection?.hasMoved) {
+        boxSelectionState = null;
+        return;
+      }
+
+      const viewport = element.querySelector<HTMLElement>('.timeline-panel__viewport');
+      if (!viewport) {
+        boxSelectionState = null;
+        return;
+      }
+
+      suppressUpcomingClick();
+      const selectedIds = finishedSelection.selectedIds.length > 0
+        ? finishedSelection.selectedIds
+        : collectBarsInSelectionRect(viewport, finishedSelection);
+      boxSelectionState = null;
+      if (selectedIds.length === 0) {
+        appState.clearResourceSelection();
+      } else if (selectedIds.length === 1) {
+        appState.setResourceSelection({ kind: 'bar', id: selectedIds[0] });
+      } else {
+        appState.setResourceSelection({ kind: 'bars', ids: selectedIds });
+      }
+      render(true);
+    }
+
+    function endEmptyBarCreation(): void {
+      const finishedCreation = emptyBarCreationState;
+      emptyBarCreationState = null;
+      if (!finishedCreation?.hasMoved) {
+        return;
+      }
+
+      const effectivePixelsPerSecond = state.viewport.pixelsPerSecond * state.viewport.zoom;
+      if (!Number.isFinite(effectivePixelsPerSecond) || effectivePixelsPerSecond <= 0) {
+        render(true);
+        return;
+      }
+
+      const left = Math.max(0, Math.min(finishedCreation.startX, finishedCreation.currentX));
+      const right = Math.max(0, Math.max(finishedCreation.startX, finishedCreation.currentX));
+      const startTime = left / effectivePixelsPerSecond;
+      const endTime = right / effectivePixelsPerSecond;
+      if (endTime <= startTime || wouldOverlap(-1, finishedCreation.layer, startTime, endTime)) {
+        render(true);
+        return;
+      }
+
+      const session = sessionRef.current;
+      if (!session) {
+        render(true);
+        return;
+      }
+
+      const bar = session.insertTimelineBar({
+        layer: finishedCreation.layer,
+        startTime,
+        endTime,
+        type: '',
+        script: '',
+      });
+      suppressUpcomingClick();
+      appState.setResourceSelection({ kind: 'bar', id: bar.id });
+      loadFromDb({ preserveTransport: true });
+      render(true);
+    }
+
+    element.addEventListener('pointerdown', beginDrag);
+    element.addEventListener('pointermove', updateDrag);
+    element.addEventListener('pointerup', endDrag);
+    element.addEventListener('pointercancel', endDrag);
+    element.addEventListener('keydown', (event) => {
+      if (event.key !== 'Delete' && event.key !== 'Backspace') return;
+      if (deleteSelectedBars()) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+    });
+
+    const handleDeleteAction = (event: Event): void => {
+      if (deleteSelectedBars()) {
+        event.preventDefault();
+      }
+    };
+    window.addEventListener('cacablu:edit-delete', handleDeleteAction);
+
+    const handleBarsChanged = (): void => {
+      loadFromDb({ preserveTransport: true });
+      render(true);
+    };
+    window.addEventListener('cacablu:timeline-bars-changed', handleBarsChanged);
+
     element.addEventListener('click', (event) => {
       const target = (event.target as HTMLElement | null)?.closest<HTMLElement>('[data-action]');
       if (!target) {
@@ -463,6 +1460,11 @@ export function createTimelinePanel(
     });
 
     element.addEventListener('click', (event) => {
+      if (consumeSuppressedClick()) {
+        event.stopImmediatePropagation();
+        return;
+      }
+
       if ((event.target as HTMLElement | null)?.closest('[data-action]')) {
         return;
       }
@@ -523,6 +1525,11 @@ export function createTimelinePanel(
     );
 
     element.addEventListener('click', (event) => {
+      if (consumeSuppressedClick()) {
+        event.stopImmediatePropagation();
+        return;
+      }
+
       const ruler = (event.target as HTMLElement | null)?.closest<HTMLElement>('.timeline-panel__ruler');
       if (!ruler) {
         return;
@@ -548,5 +1555,20 @@ export function createTimelinePanel(
       }
       render();
     });
+
+    return () => {
+      if (moveSyncTimeout !== null) {
+        window.clearTimeout(moveSyncTimeout);
+        moveSyncTimeout = null;
+      }
+      if (suppressNextClickTimeout !== null) {
+        window.clearTimeout(suppressNextClickTimeout);
+        suppressNextClickTimeout = null;
+      }
+      pendingMovedBarIds.clear();
+      window.removeEventListener('cacablu:edit-delete', handleDeleteAction);
+      window.removeEventListener('cacablu:timeline-bars-changed', handleBarsChanged);
+      renderTimeline = null;
+    };
   });
 }

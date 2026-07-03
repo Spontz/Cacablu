@@ -66,14 +66,15 @@
 **Independent Validation**: Edit a copied project, save, reopen, and confirm persisted bars.
 
 - [ ] T027 [US3] Add a bar creation command or gesture
-- [ ] T028 [US3] Implement drag-to-move timing changes
-- [ ] T029 [US3] Implement drag-to-layer changes
+- [x] T028 [US3] Implement drag-to-move timing changes
+- [x] T029 [US3] Implement drag-to-layer changes
 - [ ] T030 [US3] Implement resize handles for start/end time changes
 - [ ] T031 [US3] Implement selected bar deletion
-- [ ] T032 [US3] Persist committed edits through the project session
-- [ ] T033 [US3] Reject or clamp invalid timeline edits before persistence
-- [ ] T034 [US3] Add tests for persisted create/move/resize/delete behavior
-- [ ] T035 [US3] Manually validate save and reopen persistence
+- [x] T032 [US3] Persist committed move edits through the project session
+- [x] T033 [US3] Reject or clamp invalid move edits before persistence, including same-layer overlap
+- [x] T034 [US3] Add undo stack command for committed bar moves
+- [ ] T035 [US3] Add tests for persisted create/move/resize/delete behavior
+- [ ] T036 [US3] Manually validate save and reopen persistence
 
 ---
 
@@ -83,15 +84,15 @@
 
 **Independent Validation**: Edit bars with Phoenix connected and disconnected.
 
-- [ ] T036 [US4] Add debounced timeline section sync scheduler
-- [ ] T037 [US4] Reuse current project bar snapshot sync for committed timeline edits
-- [ ] T038 [US4] Skip sync when Phoenix is disconnected and record an Event
-- [x] T039 [US4] Record Phoenix section sync errors as Events with bar ids when known
-- [x] T040 [US4] Mark timeline bars with known section sync errors in red
-- [x] T041 [US4] Ensure sync modal progress counters advance only for real processed units
-- [ ] T042 [US4] Prevent sync loops from runtime state updates
-- [ ] T043 [US4] Add tests for sync scheduling and disconnected behavior
-- [ ] T044 [US4] Manually validate connected and disconnected edit sync flows
+- [ ] T037 [US4] Add debounced timeline section sync scheduler
+- [x] T038 [US4] Use single-section sync for committed bar move edits
+- [ ] T039 [US4] Skip sync when Phoenix is disconnected and record an Event
+- [x] T040 [US4] Record Phoenix section sync errors as Events with bar ids when known
+- [x] T041 [US4] Mark timeline bars with known section sync errors in red
+- [x] T042 [US4] Ensure sync modal progress counters advance only for real processed units
+- [ ] T043 [US4] Prevent sync loops from runtime state updates
+- [ ] T044 [US4] Add tests for sync scheduling and disconnected behavior
+- [ ] T045 [US4] Manually validate connected and disconnected edit sync flows
 
 ---
 
@@ -101,22 +102,22 @@
 
 **Independent Validation**: Open Timeline while Phoenix is disconnected and connected.
 
-- [ ] T045 [US5] Keep transport visible when Phoenix is disconnected
-- [ ] T046 [US5] Disable or no-op Phoenix-only transport controls while disconnected
-- [ ] T047 [US5] Keep playhead driven by Phoenix runtime state when connected
-- [x] T048 [US5] Add playhead glow trail while playing and fade it on pause
-- [ ] T049 [US5] Manually validate transport states
+- [ ] T046 [US5] Keep transport visible when Phoenix is disconnected
+- [ ] T047 [US5] Disable or no-op Phoenix-only transport controls while disconnected
+- [ ] T048 [US5] Keep playhead driven by Phoenix runtime state when connected
+- [x] T049 [US5] Add playhead glow trail while playing and fade it on pause
+- [ ] T050 [US5] Manually validate transport states
 
 ---
 
 ## Phase 8: Polish & Validation
 
-- [ ] T050 Run `npm test`
-- [ ] T051 Run `npm run typecheck`
-- [ ] T052 Run `npm run build`
-- [ ] T053 Run quickstart validation from `quickstart.md`
-- [ ] T054 Verify Events panel reports timeline sync failures clearly with compact text sizing
-- [ ] T055 Verify labels and controls do not overlap at high/low zoom
+- [ ] T051 Run `npm test`
+- [ ] T052 Run `npm run typecheck`
+- [ ] T053 Run `npm run build`
+- [ ] T054 Run quickstart validation from `quickstart.md`
+- [ ] T055 Verify Events panel reports timeline sync failures clearly with compact text sizing
+- [ ] T056 Verify labels and controls do not overlap at high/low zoom
 
 ## Dependencies & Execution Order
 

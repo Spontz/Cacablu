@@ -6,7 +6,8 @@ export type ResourceSelection =
   | { kind: 'none' }
   | { kind: 'folder'; id: number; name: string }
   | { kind: 'file'; id: number; name: string; fileType: string }
-  | { kind: 'bar'; id: number };
+  | { kind: 'bar'; id: number }
+  | { kind: 'bars'; ids: number[] };
 
 export type AppEventSeverity = 'info' | 'warning' | 'error';
 
@@ -29,8 +30,13 @@ export interface PanelDefinition {
 export interface MenuActionDefinition {
   id: string;
   label: string;
-  menu: 'File' | 'View' | 'Window' | 'Help';
+  menu: 'File' | 'Edit' | 'Bars' | 'Panels';
   disabled?: boolean;
+  separator?: boolean;
+  shortcut?: {
+    default: string;
+    mac?: string;
+  };
 }
 
 export interface AppSnapshot {

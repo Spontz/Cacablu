@@ -11,6 +11,7 @@ export interface ProjectPoolSyncProgress {
   failed: number;
   path?: string;
   message: string;
+  indeterminate?: boolean;
 }
 
 export interface ProjectPoolSyncResult {

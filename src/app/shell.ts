@@ -11,6 +11,7 @@ import { openDbSession, createDbSessionRef } from '../db/db-session';
 import type { DbSession } from '../db/db-session';
 import { createPhoenixAssetClient } from '../phoenix/asset-client';
 import { createPhoenixSectionClient } from '../phoenix/section-client';
+import { createUndoManager } from './undo-manager';
 import {
   syncPublishedPoolFilesToPhoenix,
   type ProjectPoolSyncProgress,
@@ -28,7 +29,8 @@ export function createAppShell(root: HTMLElement): AppShell {
   const dbState = createDbState();
   const sessionRef = createDbSessionRef();
   const connection = createConnectionController(state);
-  const panels = createPanelRegistry(state, dbState, sessionRef, connection);
+  const undoManager = createUndoManager();
+  const panels = createPanelRegistry(state, dbState, sessionRef, connection, undoManager);
   const workspace = createDockviewWorkspace({
     state,
     panels,
@@ -56,6 +58,8 @@ export function createAppShell(root: HTMLElement): AppShell {
   let lastConnectionStatus = state.getSnapshot().connectionStatus;
   let lastEventCount = state.getSnapshot().events.length;
   let lastDisplayTimelineIds = state.getSnapshot().displayTimelineIds;
+  let projectPhoenixSyncState: 'pending' | 'synced' = 'pending';
+  let phoenixProjectPromptOpen = false;
 
   const fsSupported = isFileSystemAccessSupported();
 
@@ -72,11 +76,29 @@ export function createAppShell(root: HTMLElement): AppShell {
         case 'save-database-as':
           void handleSaveAs();
           break;
+        case 'edit-undo':
+          void handleUndo();
+          break;
+        case 'edit-cut':
+          runEditCommand('cut');
+          break;
+        case 'edit-copy':
+          runEditCommand('copy');
+          break;
+        case 'edit-paste':
+          runEditCommand('paste');
+          break;
+        case 'edit-delete':
+          runDeleteAction();
+          break;
         case 'reset-layout':
           workspace.resetLayout();
           break;
         case 'toggle-display-timeline-ids':
           state.toggleDisplayTimelineIds();
+          break;
+        case 'select-all-bars':
+          selectAllBars();
           break;
         case 'toggle-db-explorer':
           workspace.openFloating('db-explorer', 'db-explorer-panel', 'Database Explorer');
@@ -98,12 +120,6 @@ export function createAppShell(root: HTMLElement): AppShell {
           break;
         case 'toggle-events':
           workspace.openPanel('events');
-          break;
-        case 'connection-status':
-          connection.cycleDemoState();
-          break;
-        case 'about-shell':
-          window.alert('Cacablu shell skeleton ready for feature work.');
           break;
         default:
           break;
@@ -130,9 +146,56 @@ export function createAppShell(root: HTMLElement): AppShell {
     await openProjectHandle(handle);
   }
 
+  async function handleUndo(): Promise<void> {
+    const undone = await undoManager.undo();
+    if (!undone) {
+      runEditCommand('undo');
+    }
+  }
+
+  function runEditCommand(command: 'undo' | 'cut' | 'copy' | 'paste' | 'delete'): void {
+    document.execCommand(command);
+  }
+
+  function runDeleteAction(): void {
+    const event = new Event('cacablu:edit-delete', { cancelable: true });
+    if (!window.dispatchEvent(event)) return;
+    runEditCommand('delete');
+  }
+
+  function isAppUndoShortcut(event: KeyboardEvent): boolean {
+    return event.key.toLowerCase() === 'z' && !event.shiftKey && !event.altKey && (event.ctrlKey || event.metaKey);
+  }
+
+  function isAppDeleteShortcut(event: KeyboardEvent): boolean {
+    return (event.key === 'Delete' || event.key === 'Backspace') && !event.ctrlKey && !event.metaKey && !event.altKey;
+  }
+
+  function isSelectAllBarsShortcut(event: KeyboardEvent): boolean {
+    return event.key.toLowerCase() === 'a' && !event.shiftKey && !event.altKey && (event.ctrlKey || event.metaKey);
+  }
+
+  function isTextEditingTarget(target: EventTarget | null): boolean {
+    if (!(target instanceof HTMLElement)) return false;
+    return Boolean(target.closest('input, textarea, select, [contenteditable="true"], .monaco-editor'));
+  }
+
+  function selectAllBars(): void {
+    const bars = sessionRef.current?.data.bars ?? [];
+    const ids = bars.map((bar) => bar.id).sort((a, b) => a - b);
+    if (ids.length === 0) {
+      state.clearResourceSelection();
+      return;
+    }
+
+    state.setResourceSelection(ids.length === 1 ? { kind: 'bar', id: ids[0] } : { kind: 'bars', ids });
+  }
+
   async function openProjectHandle(handle: FileSystemFileHandle): Promise<void> {
     dbState.setOpening();
     state.clearResourceSelection();
+    undoManager.clear();
+    projectPhoenixSyncState = 'pending';
     workspace.closePanel('resources');
     workspace.closePanel('inspector');
     workspace.closePanel('section-editor');
@@ -144,9 +207,14 @@ export function createAppShell(root: HTMLElement): AppShell {
       session = null;
       sessionRef.current = null;
       nextSession = await openDbSession(handle);
-      await syncOpenedProjectPool(nextSession);
+      if (connection.isConnected()) {
+        await syncOpenedProjectPool(nextSession);
+      }
       session = nextSession;
       sessionRef.current = session;
+      if (!connection.isConnected()) {
+        projectPhoenixSyncState = 'pending';
+      }
       dbState.setOpen(session.fileName);
       workspace.closePanel('inspector');
       workspace.openPanel('timeline');
@@ -236,6 +304,7 @@ export function createAppShell(root: HTMLElement): AppShell {
           if (workspace.isPanelOpen('preview')) {
             enablePhoenixPreview();
           }
+          promptToLoadProjectInPhoenix();
         }
         lastConnectionStatus = snapshot.connectionStatus;
         if (snapshot.resourceSelection.kind === 'file' && snapshot.resourceSelection.id !== lastInspectorSelectionId) {
@@ -268,10 +337,43 @@ export function createAppShell(root: HTMLElement): AppShell {
         syncMenuDisabled(snapshot);
       });
 
+      undoManager.subscribe(() => {
+        syncMenuDisabled(dbState.getSnapshot());
+      });
+
       connection.subscribeWebRtc((message) => {
         if (message.type === 'webrtc.offer') {
           workspace.openPanel('preview');
         }
+      });
+
+      window.addEventListener('keydown', (event) => {
+        if (!isAppUndoShortcut(event) || isTextEditingTarget(event.target)) {
+          return;
+        }
+
+        event.preventDefault();
+        void handleUndo();
+      });
+
+      window.addEventListener('keydown', (event) => {
+        if (!isAppDeleteShortcut(event) || isTextEditingTarget(event.target)) {
+          return;
+        }
+
+        const deleteEvent = new Event('cacablu:edit-delete', { cancelable: true });
+        if (!window.dispatchEvent(deleteEvent)) {
+          event.preventDefault();
+        }
+      });
+
+      window.addEventListener('keydown', (event) => {
+        if (!isSelectAllBarsShortcut(event) || isTextEditingTarget(event.target)) {
+          return;
+        }
+
+        event.preventDefault();
+        selectAllBars();
       });
     },
   };
@@ -296,6 +398,9 @@ export function createAppShell(root: HTMLElement): AppShell {
     const hasFile = snapshot.status === 'open' || snapshot.status === 'saving';
     return createDefaultMenuActions().map((action) => {
       const fileActionDisabled = !fsSupported && ['open-database', 'save-database', 'save-database-as'].includes(action.id);
+      if (action.id === 'edit-undo') {
+        return { ...action, disabled: !undoManager.canUndo() };
+      }
       if (action.id === 'save-database' || action.id === 'save-database-as') {
         return { ...action, disabled: fileActionDisabled || !hasFile };
       }
@@ -305,14 +410,23 @@ export function createAppShell(root: HTMLElement): AppShell {
           label: state.getSnapshot().displayTimelineIds ? 'Ocultar IDs' : 'Display IDs',
         };
       }
+      if (action.id === 'select-all-bars') {
+        return { ...action, disabled: !session || session.data.bars.length === 0 };
+      }
       if (fileActionDisabled) return { ...action, disabled: true };
       return action;
     });
   }
 
   async function syncOpenedProjectPool(openedSession: DbSession): Promise<void> {
+    if (!connection.isConnected()) {
+      projectPhoenixSyncState = 'pending';
+      return;
+    }
+
     const abortController = new AbortController();
     poolSyncModal?.show(abortController);
+    let wentOfflineDuringSync = false;
     try {
       await syncPublishedPoolFilesToPhoenix(openedSession.data, phoenixAssets, (progress) => {
         poolSyncModal?.update(progress);
@@ -328,33 +442,36 @@ export function createAppShell(root: HTMLElement): AppShell {
           recordSectionIssues(err.issues);
         } else if (err instanceof Error) {
           const isPhoenixOffline = err.message.includes('Could not connect to Phoenix');
-          state.addEvent({
-            severity: isPhoenixOffline ? 'warning' : 'error',
-            source: 'Phoenix section sync',
-            description: isPhoenixOffline 
-              ? 'Phoenix is offline. Project loaded without syncing sections.' 
-              : err.message,
-          });
-          if (!isPhoenixOffline) {
+          if (isPhoenixOffline) {
+            wentOfflineDuringSync = true;
+            projectPhoenixSyncState = 'pending';
+          } else {
+            state.addEvent({
+              severity: 'error',
+              source: 'Phoenix section sync',
+              description: err.message,
+            });
             workspace.openPanel('events');
           }
         }
+      }
+      if (!wentOfflineDuringSync) {
+        projectPhoenixSyncState = 'synced';
       }
     } catch (err) {
       if (isAbortError(err)) throw err;
       if (err instanceof Error) {
         const isPhoenixOffline = err.message.includes('Could not connect to Phoenix');
-        state.addEvent({
-          severity: isPhoenixOffline ? 'warning' : 'error',
-          source: 'Phoenix project sync',
-          description: isPhoenixOffline 
-            ? 'Phoenix is offline. Project loaded without syncing pool files.' 
-            : err.message,
-        });
-        if (!isPhoenixOffline) {
+        if (isPhoenixOffline) {
+          wentOfflineDuringSync = true;
+          projectPhoenixSyncState = 'pending';
+        } else {
+          state.addEvent({
+            severity: 'error',
+            source: 'Phoenix project sync',
+            description: err.message,
+          });
           workspace.openPanel('events');
-        }
-        if (!isPhoenixOffline) {
           poolSyncModal?.update({
             phase: 'error',
             current: 0,
@@ -370,6 +487,32 @@ export function createAppShell(root: HTMLElement): AppShell {
     } finally {
       poolSyncModal?.hide();
     }
+  }
+
+  function promptToLoadProjectInPhoenix(): void {
+    if (!session || projectPhoenixSyncState === 'synced' || phoenixProjectPromptOpen) {
+      return;
+    }
+
+    phoenixProjectPromptOpen = true;
+    window.setTimeout(() => {
+      try {
+        if (!session || !connection.isConnected() || projectPhoenixSyncState === 'synced') {
+          return;
+        }
+
+        const shouldLoad = window.confirm(
+          `Phoenix is connected. Do you want to load "${session.fileName}" in Phoenix now?`,
+        );
+        if (!shouldLoad) {
+          return;
+        }
+
+        void syncOpenedProjectPool(session);
+      } finally {
+        phoenixProjectPromptOpen = false;
+      }
+    }, 0);
   }
 
   function recordSectionIssues(issues: ProjectSectionSyncError['issues']): void {
@@ -414,10 +557,15 @@ function createPoolSyncModal(shell: HTMLElement): PoolSyncModal {
   const label = document.createElement('div');
   label.className = 'pool-sync-indicator__label';
 
-  const progress = document.createElement('progress');
+  const progress = document.createElement('div');
   progress.className = 'pool-sync-indicator__progress';
-  progress.max = 1;
-  progress.value = 0;
+  progress.setAttribute('role', 'progressbar');
+  progress.setAttribute('aria-valuemin', '0');
+  progress.setAttribute('aria-valuemax', '100');
+  progress.style.setProperty('--pool-sync-progress', '0%');
+  const progressFill = document.createElement('div');
+  progressFill.className = 'pool-sync-indicator__progress-fill';
+  progress.append(progressFill);
 
   indicator.append(label, progress);
   const actions = document.createElement('div');
@@ -451,9 +599,10 @@ function createPoolSyncModal(shell: HTMLElement): PoolSyncModal {
       cancel.disabled = false;
       overlay.hidden = false;
       indicator.dataset.phase = 'scanning';
+      indicator.dataset.mode = 'indeterminate';
       label.textContent = 'Preparing Phoenix pool sync...';
-      progress.max = 1;
-      progress.value = 0;
+      progress.removeAttribute('aria-valuenow');
+      progress.style.setProperty('--pool-sync-progress', '0%');
       setShellBlocked(true);
       cancel.focus();
     },
@@ -472,19 +621,26 @@ function updatePoolSyncIndicator(indicator: HTMLElement | null, progress: Projec
   if (!indicator) return;
 
   const label = indicator.querySelector<HTMLElement>('.pool-sync-indicator__label');
-  const progressBar = indicator.querySelector<HTMLProgressElement>('.pool-sync-indicator__progress');
+  const progressBar = indicator.querySelector<HTMLElement>('.pool-sync-indicator__progress');
   const total = Math.max(progress.total, 1);
+  const isIndeterminate = Boolean(progress.indeterminate) || progress.total <= 0;
 
   indicator.hidden = false;
   indicator.dataset.phase = progress.phase;
+  indicator.dataset.mode = isIndeterminate ? 'indeterminate' : 'determinate';
   if (label) {
-    const count = progress.total > 0 ? ` (${progress.current}/${progress.total})` : '';
+    const count = !isIndeterminate && progress.total > 0 ? ` (${progress.current}/${progress.total})` : '';
     label.textContent = `${progress.message}${count}`;
   }
   if (progressBar) {
-    if (progress.total > 0) {
-      progressBar.max = total;
-      progressBar.value = Math.min(progress.current, total);
+    if (isIndeterminate) {
+      progressBar.removeAttribute('aria-valuenow');
+      progressBar.style.setProperty('--pool-sync-progress', '0%');
+    } else {
+      const value = Math.min(progress.current, total);
+      const percent = Math.max(0, Math.min(100, (value / total) * 100));
+      progressBar.setAttribute('aria-valuenow', String(Math.round(percent)));
+      progressBar.style.setProperty('--pool-sync-progress', `${percent}%`);
     }
   }
 }

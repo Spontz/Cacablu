@@ -1,5 +1,6 @@
 export interface DbBar {
   id: number;
+  name: string;
   type: string;
   layer: number;
   startTime: number;

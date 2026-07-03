@@ -39,6 +39,7 @@ function makeDb(): Pick<ProjectDatabase, 'bars' | 'fbos' | 'files' | 'folders' |
     bars: [
       {
         id: 51,
+        name: '',
         type: 'drawVolumeImage',
         layer: 50,
         startTime: 0,

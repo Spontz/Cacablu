@@ -78,7 +78,7 @@ export function createConnectionController(state: AppState): ConnectionControlle
     }
 
     clearReconnect();
-    state.setConnection('connecting', 'Connecting to Phoenix...');
+    state.setConnection('connecting', 'Phoenix disconnected');
 
     try {
       socket = new WebSocket(PHOENIX_WS_URL);

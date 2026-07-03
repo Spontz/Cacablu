@@ -7,6 +7,7 @@ function makeDb(): Pick<ProjectDatabase, 'bars'> {
     bars: [
       {
         id: 17,
+        name: '',
         type: 'drawImage',
         layer: 2,
         startTime: 1,
