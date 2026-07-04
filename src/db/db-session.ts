@@ -2,13 +2,22 @@ import { getSqlJs } from './sql-loader';
 import type { SqlDatabase } from './sql-loader';
 import { readDatabase } from './db-reader';
 import { serializeDatabase } from './db-writer';
-import type { DbBar, DbFile, DbFolder, ProjectDatabase } from './db-schema';
+import type { DbBar, DbFbo, DbFile, DbFolder, ProjectDatabase } from './db-schema';
 
 type EditableDbValue = string | number | boolean | null;
 type DbTableName = 'variables' | 'bars' | 'fbos' | 'files' | 'folders';
 type NewTimelineBar = Pick<DbBar, 'layer' | 'startTime' | 'endTime'> & Partial<Omit<DbBar, 'layer' | 'startTime' | 'endTime'>>;
 type NewResourceFile = Pick<DbFile, 'name' | 'parent' | 'bytes' | 'type' | 'data' | 'format'> & Partial<Pick<DbFile, 'enabled'>>;
 type NewResourceFolder = Pick<DbFolder, 'name' | 'parent'> & Partial<Pick<DbFolder, 'enabled'>>;
+type GraphicsContextUpdate = {
+  colorDepth: number;
+  width: number;
+  height: number;
+  fullscreen: boolean;
+  vsync: boolean;
+  targetFps: number | null;
+};
+type GraphicsFboUpdate = Pick<DbFbo, 'id' | 'ratio' | 'width' | 'height' | 'format' | 'colorAttachments' | 'filter'>;
 
 // First 16 bytes of any valid SQLite file: "SQLite format 3\0"
 const SQLITE_MAGIC = new Uint8Array([
@@ -28,6 +37,7 @@ export interface DbSession {
   setResourceFileEnabled(fileId: number, enabled: boolean): DbFile;
   deleteResourceFile(fileId: number): DbFile;
   deleteResourceFolder(folderId: number): { folders: DbFolder[]; files: DbFile[] };
+  updateGraphicsConfig(context: GraphicsContextUpdate, fbos: GraphicsFboUpdate[]): void;
   save(): Promise<void>;
   saveAs(handle: FileSystemFileHandle): Promise<DbSession>;
   close(): void;
@@ -270,6 +280,33 @@ function makeSession(handle: FileSystemFileHandle, db: SqlDatabase, data: Projec
       return { folders: deletedFolders, files: deletedFiles };
     },
 
+    updateGraphicsConfig(context, fbos): void {
+      upsertVariable(db, data.variables, 'colorDepth', String(context.colorDepth));
+      upsertVariable(db, data.variables, 'screenWidth', String(context.width));
+      upsertVariable(db, data.variables, 'screenHeight', String(context.height));
+      upsertVariable(db, data.variables, 'fullScreen', context.fullscreen ? '1' : '0');
+      upsertVariable(db, data.variables, 'vsync', context.vsync ? '1' : '0');
+      upsertVariable(db, data.variables, 'targetFps', context.targetFps === null ? '' : String(context.targetFps));
+
+      for (const fbo of fbos) {
+        const existing = data.fbos.find((candidate) => candidate.id === fbo.id);
+        if (existing) {
+          db.run(
+            'UPDATE "FBOs" SET "ratio" = ?, "width" = ?, "height" = ?, "format" = ?, "colorAttachments" = ?, "filter" = ? WHERE "id" = ?',
+            [fbo.ratio, fbo.width, fbo.height, fbo.format, fbo.colorAttachments, fbo.filter, fbo.id],
+          );
+          Object.assign(existing, fbo);
+        } else {
+          db.run(
+            'INSERT INTO "FBOs" ("id", "ratio", "width", "height", "format", "colorAttachments", "filter") VALUES (?, ?, ?, ?, ?, ?, ?)',
+            [fbo.id, fbo.ratio, fbo.width, fbo.height, fbo.format, fbo.colorAttachments, fbo.filter],
+          );
+          data.fbos.push({ ...fbo });
+        }
+      }
+      data.fbos.sort((a, b) => a.id - b.id);
+    },
+
     async save(): Promise<void> {
       // .slice() copies the WASM-backed buffer into a plain ArrayBuffer
       const blob = new Blob([serializeDatabase(db).slice()]);
@@ -324,6 +361,15 @@ function toSqlValue(value: EditableDbValue): string | number | null {
 function lastInsertRowId(db: SqlDatabase): number {
   const value = db.exec('SELECT last_insert_rowid()')[0]?.values[0]?.[0];
   return typeof value === 'number' ? value : 0;
+}
+
+function upsertVariable(db: SqlDatabase, variables: Map<string, string>, key: string, value: string): void {
+  if (variables.has(key)) {
+    db.run('UPDATE "variables" SET "value" = ? WHERE "variable" = ?', [value, key]);
+  } else {
+    db.run('INSERT INTO "variables" ("variable", "value") VALUES (?, ?)', [key, value]);
+  }
+  variables.set(key, value);
 }
 
 function removeWhere<T>(items: T[], predicate: (item: T) => boolean): void {

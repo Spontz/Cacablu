@@ -279,6 +279,7 @@ function formatGraphicsConfig(db: Pick<ProjectDatabase, 'fbos' | 'variables'>): 
 
     lines.push(`fbo_${fboIndex}_format ${fbo.format}`);
     lines.push(`fbo_${fboIndex}_colorAttachments ${fbo.colorAttachments}`);
+    lines.push(`fbo_${fboIndex}_useFilter ${formatFilter(fbo.filter)}`);
   });
 
   return `${lines.join('\r\n')}\r\n`;
@@ -290,6 +291,7 @@ const GRAPHICS_VARIABLES = [
   { outputName: 'gl_height', sourceName: 'screenHeight' },
   { outputName: 'gl_aspect', calculate: calculateAspect },
   { outputName: 'gl_vsync', sourceName: 'vsync' },
+  { outputName: 'gl_colorDepth', sourceName: 'colorDepth' },
 ] as const;
 
 const CONTROL_VARIABLES = [
@@ -373,6 +375,10 @@ function formatSectionFile(bar: ProjectDatabase['bars'][number]): string {
 
 function formatNumber(value: number): string {
   return Number.isInteger(value) ? String(value) : String(value);
+}
+
+function formatFilter(value: string): string {
+  return value === '0' || value.toLowerCase() === 'none' || value.toLowerCase() === 'no' ? '0' : '1';
 }
 
 function normalizeParentId(parent: number): number {

@@ -6,7 +6,7 @@
 ## Summary
 
 Make Cacablu's Timeline an editable project bar management surface. Timeline will render bars from the loaded SQLite project, support selection and core edit operations, persist committed edits through the project session, and schedule debounced Phoenix section synchronization when the engine is connected.
-The first editing surface is a right-side Section Editor opened from a selected timeline bar, allowing script and blend setting edits before broader drag/resize timeline operations are added.
+The first editing surface is a right-side Bar Editor opened from a selected timeline bar, allowing script and blend setting edits before broader drag/resize timeline operations are added.
 The editor must provide real diagnostic feedback: section sync progress counters only advance for counted local work, bars with section sync errors are colored red, and Events remains a compact diagnostics surface.
 
 ## Technical Context
@@ -86,9 +86,10 @@ Research is captured in [research.md](./research.md). Key decisions:
 - Timeline edits are committed locally first, then synced to Phoenix when possible.
 - Phoenix sync is debounced and uses the existing full bar snapshot replacement pathway.
 - Sync errors are Events, not edit rollbacks.
-- Section Editor opens from a single click and owns script/blend editing for selected bars.
+- Bar Editor opens from a single click and owns script/blend editing for selected bars.
 - Blend Equation displays Add, Subtract, and Reverse subtract while storing Phoenix-compatible values.
 - Timeline visual diagnostics include red errored bars and a playhead glow trail that fades when playback stops.
+- Monaco overflow widgets are hosted at document level and assigned topmost stacking so Bar Editor popups cannot appear behind the timeline or Dockview panels.
 
 ## Phase 1: Design And Contracts
 

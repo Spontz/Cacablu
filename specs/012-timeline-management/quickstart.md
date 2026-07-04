@@ -13,18 +13,18 @@
 3. Confirm the timeline opens with no default bars and no default layers.
 4. Open a known SQLite project.
 5. Confirm the timeline shows bars from the project database.
-6. Single-click a bar and confirm Section Editor opens on the right.
-7. Close Section Editor, single-click the same bar again, and confirm it reopens.
-8. Confirm Section Editor shows Bar Type, Script Template, Save Template, code editor, Blend Source, Blend Destination, Blend Equation, and Apply.
+6. Single-click a bar and confirm Bar Editor opens on the right.
+7. Close Bar Editor, single-click the same bar again, and confirm it reopens.
+8. Confirm Bar Editor shows Bar Type, Script Template, Save Template, code editor, Blend Source, Blend Destination, Blend Equation, and Apply.
 9. Confirm Blend Equation offers Add, Subtract, and Reverse subtract.
-10. Choose View > Display IDs and confirm timeline labels show `<id> <name>`.
+10. Choose Bars > Display IDs and confirm timeline labels show `<id> <name>`.
 11. Confirm the menu item becomes Ocultar IDs and toggles labels back to names only.
 12. Change script or blend values, click Apply, save the project, reopen it, and confirm edits persist.
 13. Move a bar in time and confirm its displayed start/end update.
 14. Move a bar to another layer and confirm the layer changes.
 15. Resize a bar and confirm duration remains positive.
 16. Create a new bar and confirm it appears in the timeline.
-17. Delete a selected bar and confirm it disappears and Section Editor clears.
+17. Delete a selected bar and confirm it disappears and Bar Editor clears.
 
 ## Phoenix Sync Validation
 

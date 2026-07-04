@@ -41,21 +41,22 @@
 
 ## Phase 4: User Story 2 - Select And Edit Timeline Bar Sections (Priority: P1)
 
-**Goal**: Bar selection updates shared state and opens a right-side Section Editor.
+**Goal**: Bar selection updates shared state and opens a right-side Bar Editor.
 
-**Independent Validation**: Select a bar, edit script/blend fields in Section Editor, apply, then clear selection.
+**Independent Validation**: Select a bar, edit script/blend fields in Bar Editor, apply, then clear selection.
 
 - [x] T016 [US2] Implement bar click selection in `src/panels/timeline-panel.ts`
 - [x] T017 [US2] Implement empty-space deselection
-- [x] T018 [US2] Open/update Section Editor for selected timeline bars
-- [x] T019 [US2] Register Section Editor in layout, panel registry, and Window menu
+- [x] T018 [US2] Open/update Bar Editor for selected timeline bars
+- [x] T019 [US2] Register Bar Editor in layout, panel registry, and Panels menu
 - [x] T020 [US2] Implement Bar Type selector, Script Template selector, and Save Template control in `src/panels/section-editor-panel.ts`
 - [x] T021 [US2] Implement script code field, Blend Source selector, Blend Destination selector, Blend Equation selector, and Apply persistence
-- [ ] T022 [US2] Clear Section Editor state after selected bar deletion
-- [x] T023 [US2] Reopen/initialize Section Editor on single-click, including repeated clicks on the same selected bar
+- [ ] T022 [US2] Clear Bar Editor state after selected bar deletion
+- [x] T023 [US2] Reopen/initialize Bar Editor on single-click, including repeated clicks on the same selected bar
 - [x] T024 [US2] Present Blend Equation values as Add, Subtract, and Reverse subtract while storing Phoenix-compatible values
 - [x] T025 [US2] Add View menu toggle for displaying bar ids in timeline labels
-- [ ] T026 [US2] Manually validate selection and Section Editor behavior
+- [ ] T026 [US2] Manually validate selection and Bar Editor behavior
+- [x] T026a [US2] Ensure Monaco overflow widgets in Bar Editor render above the timeline and dock panels using fixed/body-hosted overflow widgets
 
 ---
 
@@ -118,13 +119,14 @@
 - [ ] T054 Run quickstart validation from `quickstart.md`
 - [ ] T055 Verify Events panel reports timeline sync failures clearly with compact text sizing
 - [ ] T056 Verify labels and controls do not overlap at high/low zoom
+- [x] T057 Verify Monaco suggest/menu popup z-order with Playwright against a real project and timeline layout
 
 ## Dependencies & Execution Order
 
 - Setup before Foundational
 - Foundational before user stories
 - US1 and US2 are required before US3
-- US4 depends on committed edit flow from US3 and Section Editor Apply behavior from US2
+- US4 depends on committed edit flow from US3 and Bar Editor Apply behavior from US2
 - US5 can proceed after US1 but should be validated after US4
 
 ## Parallel Opportunities

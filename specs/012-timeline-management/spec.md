@@ -35,18 +35,19 @@ As a user, I want the Timeline to be empty before a project is loaded and then s
 
 As a user, I want to select a bar on the Timeline and edit its section script and blend settings so that I can change the Phoenix section represented by that bar.
 
-**Why this priority**: Selection is required before safe editing, deletion, and section editor integration.
+**Why this priority**: Selection is required before safe editing, deletion, and Bar Editor integration.
 
-**Independent Test**: Load a project, select a timeline bar, verify Section Editor opens on the right with that bar's script and blend settings; click empty timeline space and verify selection clears.
+**Independent Test**: Load a project, select a timeline bar, verify Bar Editor opens on the right with that bar's script and blend settings; click empty timeline space and verify selection clears.
 
 **Acceptance Scenarios**:
 
-1. **Given** a project is loaded, **When** the user single-clicks a timeline bar, **Then** Cacablu records the selected bar id and opens or updates Section Editor on the right side, even when the same bar was already selected.
+1. **Given** a project is loaded, **When** the user single-clicks a timeline bar, **Then** Cacablu records the selected bar id and opens or updates Bar Editor on the right side, even when the same bar was already selected.
 2. **Given** a timeline bar is selected, **When** the user clicks empty timeline space, **Then** Cacablu clears the selected bar.
-3. **Given** a selected bar is deleted, **When** deletion completes, **Then** Cacablu clears selection and Section Editor no longer shows stale bar data.
+3. **Given** a selected bar is deleted, **When** deletion completes, **Then** Cacablu clears selection and Bar Editor no longer shows stale bar data.
 4. **Given** a timeline bar is selected, **When** the user edits script or blend fields and applies them, **Then** Cacablu persists those values to the loaded project session.
-5. **Given** Section Editor is open for a selected bar, **When** it renders, **Then** it shows Bar Type, Script Template, Save Template, code editor, Blend Source, Blend Destination, Blend Equation, and Apply controls.
-6. **Given** Timeline is visible, **When** the user toggles View > Display IDs, **Then** each bar label shows its id before the name separated by one space, and the menu changes to Ocultar IDs until toggled off.
+5. **Given** Bar Editor is open for a selected bar, **When** it renders, **Then** it shows Bar Type, Script Template, Save Template, code editor, Blend Source, Blend Destination, Blend Equation, and Apply controls.
+6. **Given** Timeline is visible, **When** the user toggles Bars > Display IDs, **Then** each bar label shows its id before the name separated by one space, and the menu changes to Ocultar IDs until toggled off.
+7. **Given** Bar Editor's Monaco code editor opens suggest lists, context menus, or hover widgets, **When** those popups overlap the timeline area, **Then** they render above every docked workspace panel and are not clipped by the timeline or Dockview layout.
 
 ---
 
@@ -117,7 +118,7 @@ As a user, I want transport controls to remain visible and understandable whethe
 - What happens when a project has zero bars?
 - What happens when a bar has unsupported type or malformed script and Phoenix rejects it?
 - What happens when a save fails after timeline edits have been applied in memory?
-- What happens when Section Editor is opened without a project or without a selected bar?
+- What happens when Bar Editor is opened without a project or without a selected bar?
 - What happens when a stored blend equation uses a legacy OpenGL-style value?
 
 ## Requirements *(mandatory)*
@@ -130,7 +131,7 @@ As a user, I want transport controls to remain visible and understandable whethe
 - **FR-004**: Each rendered clip MUST preserve the bar id, type, layer, start time, and end time.
 - **FR-005**: Users MUST be able to select a bar from Timeline.
 - **FR-006**: Timeline selection MUST be reflected in shared app selection state.
-- **FR-007**: Section Editor MUST open on the right when a timeline bar is single-clicked, including repeated clicks on the same selected bar.
+- **FR-007**: Bar Editor MUST open on the right when a timeline bar is single-clicked, including repeated clicks on the same selected bar.
 - **FR-008**: Users MUST be able to clear timeline bar selection by selecting empty timeline space.
 - **FR-009**: Users MUST be able to create a bar from Timeline.
 - **FR-010**: Users MUST be able to move a bar in time.
@@ -154,21 +155,24 @@ As a user, I want transport controls to remain visible and understandable whethe
 - **FR-024**: Transport actions that require Phoenix MUST be disabled or no-op with clear disconnected state when Phoenix is disconnected.
 - **FR-025**: The feature MUST preserve Cacablu's static browser-only deployment model.
 - **FR-026**: The feature MUST use existing Phoenix editor API section sync rather than the legacy raw TCP protocol.
-- **FR-027**: Section Editor MUST provide a Bar Type selector, Script Template selector, Save Template button, code editing field, Blend Source selector, Blend Destination selector, Blend Equation selector, and Apply button.
-- **FR-028**: Section Editor Apply MUST update the selected bar script, source blend, destination blend, and blend equation in the loaded project session.
+- **FR-027**: Bar Editor MUST provide a Bar Type selector, Script Template selector, Save Template button, code editing field, Blend Source selector, Blend Destination selector, Blend Equation selector, and Apply button.
+- **FR-028**: Bar Editor Apply MUST update the selected bar script, source blend, destination blend, and blend equation in the loaded project session.
 - **FR-029**: Blend Equation MUST present the user-facing values `Add`, `Subtract`, and `Reverse subtract`, while storing Phoenix-compatible values.
 - **FR-030**: The sync modal MUST only show count progress when backed by real processed units, including section manifest checking; one-shot Phoenix requests MUST not display stale `0/N` counters or reset the bar to zero.
 - **FR-031**: The Events panel MUST use compact text sizing suitable for dense diagnostic messages.
 - **FR-032**: The playhead MUST grow its glow trail gradually when playback starts and fade the trail away gradually when playback stops.
-- **FR-033**: View MUST provide `Display IDs`; when enabled, timeline bar labels MUST show `<id> <name>` and the menu item MUST become `Ocultar IDs`.
+- **FR-033**: Bars menu MUST provide `Display IDs`; when enabled, timeline bar labels MUST show `<id> <name>` and the menu item MUST become `Ocultar IDs`.
 - **FR-034**: A committed bar move MUST update the project session and notify Phoenix through deferred single-section sync so Phoenix rewrites only the affected `.spo` file without blocking immediate transport commands.
 - **FR-035**: Edit > Undo MUST pop the latest undoable action and restore the affected bar move when possible.
+- **FR-036**: The Bar Editor Monaco editor MUST render overflow widgets, including suggest lists, hover widgets, and context menus, above the timeline and other docked panels without clipping or stacking behind them.
+- **FR-037**: Bar Editor Monaco overflow behavior MUST be validated with Playwright or equivalent browser automation when changed.
 
 ### Key Entities *(include if feature involves data)*
 
 - **Timeline Bar**: The editable visual representation of a project database bar, including id, type, layer, start time, end time, enabled state, blend metadata, and script.
 - **Timeline Selection**: The current selected timeline bar id or empty selection state shared with Inspector.
-- **Section Editor**: The right-side panel for editing a selected bar's type/template, script, blend source, blend destination, and blend equation.
+- **Bar Editor**: The right-side panel for editing a selected bar's type/template, script, blend source, blend destination, and blend equation.
+- **Monaco Overflow Widget**: A Monaco-owned popup such as the suggest list, hover widget, or context menu that must escape dock-panel clipping and remain topmost while editing code.
 - **Timeline Edit Transaction**: A create, move, resize, layer change, property edit, or delete operation applied to the project database.
 - **Section Sync Request**: A debounced request that serializes all current project bars and asks Phoenix to align runtime sections.
 - **Timeline Sync Event**: A non-blocking Event row that reports disconnected, validation, or Phoenix section sync failures.
@@ -185,8 +189,9 @@ As a user, I want transport controls to remain visible and understandable whethe
 - **SC-006**: With Phoenix disconnected, committed timeline edits remain local and produce an Event.
 - **SC-007**: Phoenix section sync failures are visible in Events and identify affected bar ids when available.
 - **SC-008**: `npm test`, `npm run typecheck`, and `npm run build` complete without new errors after implementation.
-- **SC-009**: Section Editor opens from a single click and applies script/blend changes to the active project session.
+- **SC-009**: Bar Editor opens from a single click and applies script/blend changes to the active project session.
 - **SC-010**: Timeline bars with section sync errors are visibly red and return to normal after the associated Events are cleared.
+- **SC-011**: Browser automation confirms Monaco popups opened from Bar Editor are the top element at their screen position and do not appear behind the timeline.
 
 ## Assumptions
 

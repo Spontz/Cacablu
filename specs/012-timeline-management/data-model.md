@@ -23,7 +23,7 @@ Validation:
 - `layer` must be finite.
 - `blendingEQ` is stored as a Phoenix-compatible value. The editor presents `Add`, `Subtract`, and `Reverse subtract`, mapped to `ADD`, `SUBTRACT`, and `REVERSE_SUBTRACT`.
 
-## Section Editor State
+## Bar Editor State
 
 Represents the selected bar editing surface.
 
@@ -37,7 +37,7 @@ Fields:
 - `blendingEQ`: blend equation.
 
 Rules:
-- Single-clicking a timeline bar opens or reinitializes the Section Editor, including repeated clicks on the same bar.
+- Single-clicking a timeline bar opens or reinitializes the Bar Editor, including repeated clicks on the same bar.
 - Applying edits updates the loaded project session before any Phoenix sync attempt.
 - Opening without a project or without a selected bar shows an empty state rather than blocking the panel.
 

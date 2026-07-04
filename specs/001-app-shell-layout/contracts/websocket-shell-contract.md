@@ -75,3 +75,15 @@ events panel or forwarded to future features.
 - Invalid payloads should be ignored or surfaced as non-blocking errors.
 - Connection loss must degrade to a visible disconnected or error state without
   destroying the current workspace layout.
+
+## WebRTC Preview Expectations
+
+When Phoenix preview signaling is active, the shell uses the existing WebSocket channel for:
+
+- `webrtc.request`
+- `webrtc.offer`
+- `webrtc.answer`
+- `webrtc.ice-candidate`
+- `webrtc.state`
+
+The Preview panel MUST attach all received remote WebRTC tracks to one `MediaStream`. Video and audio tracks are both expected. The preview SHOULD attempt media playback automatically and MUST NOT require a panel click as part of the normal connected flow.

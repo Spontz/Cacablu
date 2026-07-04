@@ -161,14 +161,34 @@ export function createDockviewWorkspace(options: WorkspaceOptions): DockviewWork
         return;
       }
 
+      const floatingSize = component === 'graphics-settings-panel'
+        ? getCenteredFloatingSize(workspaceContainer, 1040, 720)
+        : getCenteredFloatingSize(workspaceContainer, 640, 420);
+
       dockview.addPanel({
         id,
         component,
         title,
         renderer: 'always',
-        floating: { width: 640, height: 420, x: 80, y: 60 },
+        floating: floatingSize,
       });
     },
+  };
+}
+
+function getCenteredFloatingSize(container: HTMLElement | null, preferredWidth: number, preferredHeight: number): { width: number; height: number; x: number; y: number } {
+  const margin = 32;
+  const rect = container?.getBoundingClientRect();
+  const viewportWidth = Math.max(320, Math.round(rect?.width ?? window.innerWidth));
+  const viewportHeight = Math.max(240, Math.round(rect?.height ?? window.innerHeight));
+  const width = Math.min(preferredWidth, Math.max(320, viewportWidth - margin * 2));
+  const height = Math.min(preferredHeight, Math.max(240, viewportHeight - margin * 2));
+
+  return {
+    width,
+    height,
+    x: Math.max(margin / 2, Math.round((viewportWidth - width) / 2)),
+    y: Math.max(margin / 2, Math.round((viewportHeight - height) / 2)),
   };
 }
 

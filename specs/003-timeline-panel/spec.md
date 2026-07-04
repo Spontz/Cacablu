@@ -159,7 +159,7 @@ verify that the panel can represent them without breaking the existing view.
 - **FR-015**: The default timeline UI MUST not include helper copy above the
   ruler or a visible zoom slider.
 - **FR-016**: Timeline clip bars and labels MUST use a dense, studio-style
-  presentation with square corners and single-line text that does not wrap.
+  presentation with small rounded corners and single-line text that does not wrap.
 - **FR-017**: Timeline clip bars MUST share a uniform vertical size and use a
   compact lane layout with reduced vertical spacing between tracks.
 - **FR-018**: The transport bar buttons MUST use centered white icons on a
@@ -203,7 +203,7 @@ verify that the panel can represent them without breaking the existing view.
   without a backend or engine connection.
 - **SC-006**: Manual visual validation confirms the timeline feels dense and
   studio-like rather than calendar-like or spreadsheet-like.
-- **SC-007**: Timeline clips render with square corners, a uniform height, and
+- **SC-007**: Timeline clips render with small rounded corners, a uniform height, and
   single-line labels that stay on one line during manual visual validation.
 - **SC-008**: The track lanes are visibly compact, with reduced vertical spacing
   compared to the earlier timeline layout.

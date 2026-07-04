@@ -7,7 +7,7 @@
 
 ## Runtime Context *(mandatory)*
 
-**Browser Surface**: A dockable panel inside the main application shell, registered as a workspace panel and accessible from the Window menu  
+**Browser Surface**: A dockable panel inside the main application shell, registered as a workspace panel and accessible from the Panels menu  
 **Local Engine Dependency**: The panel does not require the local visuals engine; it reads only from the in-memory database session already loaded by the shell  
 **Static Deployment Impact**: The panel must remain fully usable in a static browser application with no backend or server dependency  
 **Real-Time Sensitivity**: Table selection and row display must respond instantly to user interaction; no background loading or async operations should be required once the database is in memory  
@@ -50,16 +50,16 @@ As a user, I want to click a table name and see its rows and columns on the righ
 
 ### User Story 3 - Open the Panel from the Window Menu (Priority: P2)
 
-As a user, I want to open the Database Explorer from the Window menu so that I can access it without needing to know its keyboard shortcut or panel ID.
+As a user, I want to open the Database Explorer from the Panels menu so that I can access it without needing to know its keyboard shortcut or panel ID.
 
 **Why this priority**: Discoverability from the menu is required for the panel to be useful to new users.
 
-**Independent Test**: Use the Window menu to open the Database Explorer and confirm the panel appears in the workspace.
+**Independent Test**: Use the Panels menu to open the Database Explorer and confirm the panel appears in the workspace.
 
 **Acceptance Scenarios**:
 
-1. **Given** the application is open, **When** the user selects "Database Explorer" from the Window menu, **Then** the panel appears as a floating window over the workspace.
-2. **Given** the panel is already open, **When** the user selects it again from the Window menu, **Then** the panel is focused rather than duplicated.
+1. **Given** the application is open, **When** the user selects "Database Explorer" from the Panels menu, **Then** the panel appears as a floating window over the workspace.
+2. **Given** the panel is already open, **When** the user selects it again from the Panels menu, **Then** the panel is focused rather than duplicated.
 3. **Given** the application has just launched, **When** the workspace renders, **Then** the Database Explorer is not visible until the user opens it from the menu.
 
 ---
@@ -96,7 +96,7 @@ As a user, I want to change displayed database field values directly in the Data
 ### Functional Requirements
 
 - **FR-001**: The system MUST provide a panel called "Database Explorer" registered in the workspace panel registry.
-- **FR-002**: The system MUST add a "Database Explorer" option to the Window menu that opens the panel as a floating window or focuses it if already open.
+- **FR-002**: The system MUST add a "Database Explorer" option to the Panels menu that opens the panel as a floating window or focuses it if already open.
 - **FR-013**: The panel MUST open as a floating window rather than a docked tab; it must NOT appear in the workspace by default on launch.
 - **FR-003**: The panel MUST display the list of tables available in the currently loaded database on its left side.
 - **FR-004**: The panel MUST update the table list whenever the active database session changes (new file opened or database closed).
@@ -123,7 +123,7 @@ As a user, I want to change displayed database field values directly in the Data
 
 ### Measurable Outcomes
 
-- **SC-001**: A user can open the Database Explorer from the Window menu and see the panel appear as a floating window; it is not visible on launch before the user opens it.
+- **SC-001**: A user can open the Database Explorer from the Panels menu and see the panel appear as a floating window; it is not visible on launch before the user opens it.
 - **SC-002**: A user can click any table in the left list and see its columns and rows appear on the right side.
 - **SC-003**: Manual validation confirms the panel shows a clear placeholder when no database is loaded.
 - **SC-004**: Manual validation confirms that BLOB columns display a byte count summary rather than raw data.

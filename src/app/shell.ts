@@ -91,6 +91,9 @@ export function createAppShell(root: HTMLElement): AppShell {
         case 'edit-delete':
           runDeleteAction();
           break;
+        case 'edit-graphics':
+          workspace.openFloating('graphics-settings', 'graphics-settings-panel', 'Graphics');
+          break;
         case 'reset-layout':
           workspace.resetLayout();
           break;

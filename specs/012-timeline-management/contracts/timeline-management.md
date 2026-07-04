@@ -49,9 +49,9 @@ Timeline sync Events SHOULD include:
 
 Known section sync errors MUST drive the timeline error style for matching bars until the Events collection is cleared.
 
-## Section Editor Controls
+## Bar Editor Controls
 
-The Section Editor MUST expose:
+The Bar Editor MUST expose:
 
 - `Bar Type` selector
 - `Script Template` selector
@@ -64,7 +64,17 @@ The Section Editor MUST expose:
 
 `Apply` MUST persist script, source blend, destination blend, and blend equation to the active project session. Blend Equation user-facing values are `Add`, `Subtract`, and `Reverse subtract`; persisted values remain Phoenix-compatible.
 
-Single-clicking a timeline bar MUST open or reinitialize the Section Editor on the right, including when the same selected bar is clicked again.
+Single-clicking a timeline bar MUST open or reinitialize the Bar Editor on the right, including when the same selected bar is clicked again.
+
+## Monaco Overflow Contract
+
+The Bar Editor code editor MUST configure Monaco overflow widgets so that editor-owned popups are not clipped by Dockview panels and are not hidden behind the timeline.
+
+Required behavior:
+
+- suggest widgets, context menus, and hover widgets render above all docked panels
+- widget positioning is computed against a stable document-level overlay, not a clipped panel viewport
+- browser automation SHOULD verify that `document.elementFromPoint()` over a visible Monaco popup resolves to the popup or one of its descendants
 
 ## No New Phoenix Protocol Expected
 

@@ -13,6 +13,7 @@ import { createPreviewPanel } from './preview-panel';
 import { createResourcesPanel } from './resources-panel';
 import { createSectionEditorPanel } from './section-editor-panel';
 import { createTimelinePanel } from './timeline-panel';
+import { createGraphicsSettingsPanel } from './graphics-settings-dialog';
 
 export interface PanelRegistry {
   create(name: string): IContentRenderer;
@@ -42,6 +43,8 @@ export function createPanelRegistry(
           return createEventsPanel(state);
         case 'db-explorer-panel':
           return createDbExplorerPanel(dbState, sessionRef);
+        case 'graphics-settings-panel':
+          return createGraphicsSettingsPanel(state, dbState, sessionRef);
         default:
           return createFallbackPanel(name);
       }

@@ -3,7 +3,7 @@
 **Feature Branch**: `001-app-shell-layout`  
 **Created**: 2026-04-11  
 **Status**: Draft  
-**Input**: User description: "Create a base application skeleton for Cacablu with a menu bar, dockable window system, and a foundation that can be served as a static browser app."
+**Input**: User description: "Create a base application skeleton for Cacablu with a menu bar, dockable window system, Phoenix preview, and a foundation that can be served as a static browser app."
 
 ## Runtime Context *(mandatory)*
 
@@ -106,6 +106,22 @@ panel visibility or layout reset.
 
 ---
 
+### User Story 5 - Monitor Phoenix Preview (Priority: P2)
+
+As a user, I want the Preview panel to show Phoenix video and audio without extra interaction so that the editor can monitor the running demo from one place.
+
+**Why this priority**: The Preview panel is the primary feedback surface when Phoenix is connected in slave mode.
+
+**Independent Test**: Connect Phoenix with WebRTC preview enabled, open the Preview panel, and verify video and audio arrive in the preview element without requiring a click in the panel.
+
+**Acceptance Scenarios**:
+
+1. **Given** Phoenix is connected and WebRTC preview is enabled, **When** the Preview panel opens, **Then** Cacablu negotiates a WebRTC session and attaches all remote media tracks to one preview media stream.
+2. **Given** Phoenix sends both video and audio tracks, **When** the browser starts playback, **Then** the preview attempts audio playback automatically without showing a "click to enable audio" message.
+3. **Given** the browser allows autoplay for the local app context, **When** playback starts, **Then** the user hears Phoenix preview audio from Cacablu rather than from Phoenix's local output.
+
+---
+
 ### Edge Cases
 
 - What happens when the app loads before any connection to the local visuals
@@ -125,15 +141,15 @@ panel visibility or layout reset.
 
 - **FR-001**: The system MUST render a single-window application shell in the
   browser.
-- **FR-002**: The system MUST provide a top menu bar with at least File, View,
-  Window, and Help menus.
+- **FR-002**: The system MUST provide a top menu bar with File, Edit, Bars,
+  and Panels menus.
 - **FR-003**: The system MUST provide a dockable multi-panel workspace with a
   default arrangement suitable for resources, timeline, preview, inspector, and
   event output.
 - **FR-004**: The system MUST allow users to move and resize workspace panels
   during a session.
-- **FR-005**: The system MUST provide a way to restore the default layout after
-  the user changes it.
+- **FR-005**: The system MUST provide Panels > Close all panels as the first
+  Panels menu action, followed by a separator and individual panel open actions.
 - **FR-006**: The system MUST load successfully without a local visuals engine
   connection and expose a non-blocking connection status.
 - **FR-007**: The system MUST define the initial browser-side contract surface
@@ -156,7 +172,7 @@ panel visibility or layout reset.
   the unmodified wheel scrolls vertically.
 - **FR-015**: The timeline panel MUST not display helper copy above the ruler or
   a visible zoom slider in the default UI.
-- **FR-016**: The timeline panel MUST render clip bars with square corners and
+- **FR-016**: The timeline panel MUST render clip bars with small rounded corners and
   labels that stay on a single line without wrapping.
 - **FR-017**: The timeline panel MUST keep clip bars at a uniform height and
   use compact vertical spacing between tracks.
@@ -164,6 +180,9 @@ panel visibility or layout reset.
   white icons on a dark blue raised background.
 - **FR-019**: The timeline panel MUST NOT render visible layer-name labels or a
   layer-name sidebar beside the lanes.
+- **FR-020**: The Preview panel MUST combine all WebRTC remote tracks from Phoenix into a single media stream so audio and video remain attached to the same preview element.
+- **FR-021**: The Preview panel MUST attempt audio playback automatically and MUST NOT show a "click to enable audio" message in normal connected preview flow.
+- **FR-022**: The shell MUST not include a Help top-level menu unless a future feature adds meaningful Help actions.
 
 ### Key Entities *(include if feature involves data)*
 
@@ -182,6 +201,8 @@ panel visibility or layout reset.
 - **Engine Message Category**: A high-level classification for future shell
   traffic such as resource data, timeline updates, engine events, and status
   messages.
+- **Preview Media Stream**: The browser media stream assembled from Phoenix
+  WebRTC video and audio tracks for the Preview panel.
 
 ## Success Criteria *(mandatory)*
 
@@ -210,6 +231,7 @@ panel visibility or layout reset.
   interactions remain usable in at least one supported browser.
 - **SC-011**: Project lint, typecheck, and build commands complete without new
   errors for the shell implementation.
+- **SC-012**: Manual validation confirms Phoenix preview audio is attempted automatically without requiring the user to click the Preview panel.
 
 ## Assumptions
 

@@ -11,7 +11,7 @@
   --accent-soft: rgba(49, 196, 141, 0.16);
   --menu-bg: #171b20;
   --menu-hover: #24303b;
-  --shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+  --shadow: 0 1px 3px rgba(0, 0, 0, 0.34), 0 0 0 1px rgba(0, 0, 0, 0.22);
   --font-ui: "JetBrains Sans", "Segoe UI", "Helvetica Neue", sans-serif;
   --font-popup: "Roboto Condensed", "Arial Narrow", "Segoe UI", sans-serif;
 }

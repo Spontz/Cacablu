@@ -11,6 +11,8 @@ export function createDefaultMenuActions(): MenuActionDefinition[] {
     { id: 'edit-copy', label: 'Copy', menu: 'Edit' },
     { id: 'edit-paste', label: 'Paste', menu: 'Edit' },
     { id: 'edit-delete', label: 'Delete', menu: 'Edit', shortcut: { default: 'Del' } },
+    { id: 'edit-separator-graphics', label: '', menu: 'Edit', separator: true },
+    { id: 'edit-graphics', label: 'Graphics', menu: 'Edit' },
     { id: 'toggle-display-timeline-ids', label: 'Display IDs', menu: 'Bars' },
     { id: 'bars-separator-selection', label: '', menu: 'Bars', separator: true },
     { id: 'select-all-bars', label: 'Select All', menu: 'Bars', shortcut: { default: 'Ctrl+A', mac: '⌘A' } },

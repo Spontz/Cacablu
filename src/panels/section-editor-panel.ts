@@ -325,6 +325,8 @@ export function createSectionEditorPanel(
         tabSize: 2,
         insertSpaces: true,
         wordWrap: 'on',
+        fixedOverflowWidgets: true,
+        overflowWidgetsDomNode: document.body,
       });
       requestAnimationFrame(() => {
         codeEditor?.layout();

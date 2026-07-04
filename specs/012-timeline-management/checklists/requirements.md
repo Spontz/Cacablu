@@ -9,7 +9,7 @@
 - [x] CHK001 Runtime context identifies browser surface, Phoenix dependency, static deployment, real-time sensitivity, and File System Access assumptions.
 - [x] CHK002 User stories are independently testable and prioritized.
 - [x] CHK003 Requirements cover no-project empty state and loaded-project rendering.
-- [x] CHK004 Requirements cover selection, Section Editor behavior, editing, persistence, Phoenix sync, diagnostics, and transport behavior.
+- [x] CHK004 Requirements cover selection, Bar Editor behavior, editing, persistence, Phoenix sync, diagnostics, and transport behavior.
 - [x] CHK005 Edge cases include invalid timing, disconnected Phoenix, sync rejection, zero bars, and save failure.
 
 ## Clarity
