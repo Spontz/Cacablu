@@ -14,6 +14,8 @@ import { createResourcesPanel } from './resources-panel';
 import { createSectionEditorPanel } from './section-editor-panel';
 import { createTimelinePanel } from './timeline-panel';
 import { createGraphicsSettingsPanel } from './graphics-settings-dialog';
+import { createGlslAssetEditorPanel } from './glsl-asset-editor-panel';
+import { createDemoSettingsPanel } from './demo-settings-dialog';
 
 export interface PanelRegistry {
   create(name: string): IContentRenderer;
@@ -45,6 +47,10 @@ export function createPanelRegistry(
           return createDbExplorerPanel(dbState, sessionRef);
         case 'graphics-settings-panel':
           return createGraphicsSettingsPanel(state, dbState, sessionRef);
+        case 'demo-settings-panel':
+          return createDemoSettingsPanel(state, dbState, sessionRef);
+        case 'glsl-asset-editor-panel':
+          return createGlslAssetEditorPanel(state, dbState, sessionRef, connection);
         default:
           return createFallbackPanel(name);
       }

@@ -18,6 +18,13 @@ type GraphicsContextUpdate = {
   targetFps: number | null;
 };
 type GraphicsFboUpdate = Pick<DbFbo, 'id' | 'ratio' | 'width' | 'height' | 'format' | 'colorAttachments' | 'filter'>;
+type DemoSettingsUpdate = {
+  demoName: string;
+  loop: boolean;
+  sound: boolean;
+  debugGrid: boolean;
+  logDetail: number;
+};
 
 // First 16 bytes of any valid SQLite file: "SQLite format 3\0"
 const SQLITE_MAGIC = new Uint8Array([
@@ -34,10 +41,12 @@ export interface DbSession {
   upsertResourceFile(input: NewResourceFile): DbFile;
   insertResourceFolder(input: NewResourceFolder): DbFolder;
   moveResourceFile(fileId: number, parentId: number): DbFile;
+  updateResourceFileContent(fileId: number, input: Pick<DbFile, 'bytes' | 'type' | 'data' | 'format'>): DbFile;
   setResourceFileEnabled(fileId: number, enabled: boolean): DbFile;
   deleteResourceFile(fileId: number): DbFile;
   deleteResourceFolder(folderId: number): { folders: DbFolder[]; files: DbFile[] };
   updateGraphicsConfig(context: GraphicsContextUpdate, fbos: GraphicsFboUpdate[]): void;
+  updateDemoSettings(settings: DemoSettingsUpdate): void;
   save(): Promise<void>;
   saveAs(handle: FileSystemFileHandle): Promise<DbSession>;
   close(): void;
@@ -229,6 +238,20 @@ function makeSession(handle: FileSystemFileHandle, db: SqlDatabase, data: Projec
       return file;
     },
 
+    updateResourceFileContent(fileId, input): DbFile {
+      const file = data.files.find((candidate) => candidate.id === fileId);
+      if (!file) {
+        throw new Error(`Resource file ${fileId} was not found.`);
+      }
+
+      db.run(
+        'UPDATE "FILES" SET "bytes" = ?, "type" = ?, "data" = ?, "format" = ? WHERE "id" = ?',
+        [input.bytes, input.type, input.data, input.format, fileId],
+      );
+      Object.assign(file, input);
+      return file;
+    },
+
     setResourceFileEnabled(fileId, enabled): DbFile {
       const file = data.files.find((candidate) => candidate.id === fileId);
       if (!file) {
@@ -305,6 +328,14 @@ function makeSession(handle: FileSystemFileHandle, db: SqlDatabase, data: Projec
         }
       }
       data.fbos.sort((a, b) => a.id - b.id);
+    },
+
+    updateDemoSettings(settings): void {
+      upsertVariable(db, data.variables, 'demoName', settings.demoName);
+      upsertVariable(db, data.variables, 'demoLoop', settings.loop ? '1' : '0');
+      upsertVariable(db, data.variables, 'demoSound', settings.sound ? '1' : '0');
+      upsertVariable(db, data.variables, 'debugEnableGrid', settings.debugGrid ? '1' : '0');
+      upsertVariable(db, data.variables, 'logDetail', String(settings.logDetail));
     },
 
     async save(): Promise<void> {

@@ -11,11 +11,14 @@ import { openDbSession, createDbSessionRef } from '../db/db-session';
 import type { DbSession } from '../db/db-session';
 import { createPhoenixAssetClient } from '../phoenix/asset-client';
 import { createPhoenixSectionClient } from '../phoenix/section-client';
+import { createPhoenixDemoSettingsClient } from '../phoenix/demo-settings-client';
+import { createPhoenixLogClient } from '../phoenix/log-client';
 import { createUndoManager } from './undo-manager';
 import {
   syncPublishedPoolFilesToPhoenix,
   type ProjectPoolSyncProgress,
 } from '../services/project-pool-sync';
+import { syncProjectDemoSettingsToPhoenix, type ProjectDemoSettingsSyncProgress } from '../services/project-demo-settings-sync';
 import { ProjectSectionSyncError, syncProjectBarsToPhoenix, type ProjectSectionSyncProgress } from '../services/project-section-sync';
 
 export interface AppShell {
@@ -50,6 +53,9 @@ export function createAppShell(root: HTMLElement): AppShell {
   });
   const phoenixAssets = createPhoenixAssetClient();
   const phoenixSections = createPhoenixSectionClient();
+  const phoenixDemoSettings = createPhoenixDemoSettingsClient();
+  const phoenixLogs = createPhoenixLogClient();
+  const recordedPhoenixLogs = new Set<string>();
 
   let session: DbSession | null = null;
   let poolSyncModal: PoolSyncModal | null = null;
@@ -93,6 +99,9 @@ export function createAppShell(root: HTMLElement): AppShell {
           break;
         case 'edit-graphics':
           workspace.openFloating('graphics-settings', 'graphics-settings-panel', 'Graphics');
+          break;
+        case 'edit-demo-settings':
+          workspace.openFloating('demo-settings', 'demo-settings-panel', 'Demo Settings');
           break;
         case 'reset-layout':
           workspace.resetLayout();
@@ -331,7 +340,13 @@ export function createAppShell(root: HTMLElement): AppShell {
           lastSectionEditorSelectionId = null;
         }
         if (snapshot.events.length > lastEventCount) {
-          workspace.openPanel('events');
+          const newEventCount = snapshot.events.length - lastEventCount;
+          const hasNewError = snapshot.events
+            .slice(0, newEventCount)
+            .some((event) => event.severity === 'error');
+          if (hasNewError) {
+            workspace.openPanel('events');
+          }
         }
         lastEventCount = snapshot.events.length;
         if (snapshot.displayTimelineIds !== lastDisplayTimelineIds) {
@@ -353,6 +368,22 @@ export function createAppShell(root: HTMLElement): AppShell {
         if (message.type === 'webrtc.offer') {
           workspace.openPanel('preview');
         }
+      });
+
+      window.addEventListener('cacablu:open-glsl-editor', (event) => {
+        const detail = event instanceof CustomEvent ? event.detail as { fileId?: unknown; name?: unknown } : null;
+        const fileId = typeof detail?.fileId === 'number' && Number.isFinite(detail.fileId) ? detail.fileId : null;
+        const name = typeof detail?.name === 'string' && detail.name ? detail.name : 'GLSL Editor';
+        if (fileId === null) {
+          workspace.openFloating('glsl-asset-editor', 'glsl-asset-editor-panel', 'GLSL Editor');
+          return;
+        }
+        workspace.openFloating(
+          `glsl-asset-editor-${fileId}`,
+          'glsl-asset-editor-panel',
+          name,
+          { fileId },
+        );
       });
 
       window.addEventListener('keydown', (event) => {
@@ -439,13 +470,20 @@ export function createAppShell(root: HTMLElement): AppShell {
       await syncPublishedPoolFilesToPhoenix(openedSession.data, phoenixAssets, (progress) => {
         poolSyncModal?.update(progress);
       }, { signal: abortController.signal });
+      await syncProjectDemoSettingsToPhoenix(openedSession.data, phoenixDemoSettings, (progress) => {
+        poolSyncModal?.update(progress);
+      }, { signal: abortController.signal });
+      let stopLogCapture: (() => void) | null = null;
       try {
+        stopLogCapture = startPhoenixLogCapture(abortController.signal);
         const sectionSync = await syncProjectBarsToPhoenix(openedSession.data, phoenixSections, (progress) => {
           poolSyncModal?.update(progress);
         }, { signal: abortController.signal });
+        await recordRecentPhoenixLogs(abortController.signal);
         recordSectionIssues(sectionSync.issues);
       } catch (err) {
         if (isAbortError(err)) throw err;
+        await recordRecentPhoenixLogs(abortController.signal);
         if (err instanceof ProjectSectionSyncError) {
           recordSectionIssues(err.issues);
         } else if (err instanceof Error) {
@@ -462,6 +500,8 @@ export function createAppShell(root: HTMLElement): AppShell {
             workspace.openPanel('events');
           }
         }
+      } finally {
+        stopLogCapture?.();
       }
       if (!wentOfflineDuringSync) {
         projectPhoenixSyncState = 'synced';
@@ -532,6 +572,46 @@ export function createAppShell(root: HTMLElement): AppShell {
       description: issue.description,
     })));
     workspace.openPanel('events');
+  }
+
+  function startPhoenixLogCapture(signal: AbortSignal): () => void {
+    let stopped = false;
+    const timer = window.setInterval(() => {
+      if (stopped || signal.aborted) return;
+      void recordRecentPhoenixLogs(signal);
+    }, 50);
+
+    void recordRecentPhoenixLogs(signal);
+
+    return () => {
+      stopped = true;
+      window.clearInterval(timer);
+    };
+  }
+
+  async function recordRecentPhoenixLogs(signal?: AbortSignal): Promise<void> {
+    try {
+      const logs = await phoenixLogs.fetchRecent(signal);
+      const next = logs
+        .filter((entry) => entry.severity !== 'info')
+        .filter((entry) => entry.message.trim() !== '')
+        .filter((entry) => {
+          const key = `${entry.severity}:${entry.message}`;
+          if (recordedPhoenixLogs.has(key)) return false;
+          recordedPhoenixLogs.add(key);
+          return true;
+        })
+        .map((entry) => ({
+          severity: entry.severity,
+          source: 'Phoenix log',
+          description: entry.message,
+        }));
+      if (next.length > 0) {
+        state.addEvents(next);
+      }
+    } catch (err) {
+      if (isAbortError(err)) throw err;
+    }
   }
 }
 
@@ -625,7 +705,10 @@ function createPoolSyncModal(shell: HTMLElement): PoolSyncModal {
   };
 }
 
-function updatePoolSyncIndicator(indicator: HTMLElement | null, progress: ProjectPoolSyncProgress | ProjectSectionSyncProgress): void {
+function updatePoolSyncIndicator(
+  indicator: HTMLElement | null,
+  progress: ProjectPoolSyncProgress | ProjectDemoSettingsSyncProgress | ProjectSectionSyncProgress,
+): void {
   if (!indicator) return;
 
   const label = indicator.querySelector<HTMLElement>('.pool-sync-indicator__label');

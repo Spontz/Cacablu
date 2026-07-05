@@ -89,7 +89,7 @@ export function createConnectionController(state: AppState): ConnectionControlle
     }
 
     socket.addEventListener('open', () => {
-      state.setConnection('connected', 'Phoenix connected');
+      state.setConnection('connecting', 'Phoenix runtime pending');
     });
 
     socket.addEventListener('message', (event) => {
@@ -131,6 +131,7 @@ export function createConnectionController(state: AppState): ConnectionControlle
 
     socket.addEventListener('close', () => {
       socket = null;
+      runtimeState = null;
       state.setConnection('disconnected', 'Phoenix disconnected');
       scheduleReconnect();
     });

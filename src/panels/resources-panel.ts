@@ -5,6 +5,7 @@ import type { DbState } from '../state/db-state';
 import type { DbSessionRef } from '../db/db-session';
 import type { ConnectionController } from '../ws/connection';
 import { createPhoenixAssetClient } from '../phoenix/asset-client';
+import { addAssetImpactEvents } from '../phoenix/asset-impact-events';
 import { deleteAllowedAssetDirectory, deleteAllowedAssetFile, writeAllowedAssetFile } from '../phoenix/asset-operations';
 import { buildResourceTree, type ResourceTreeNode } from '../resources/resource-tree';
 import { createContentRenderer } from './base-panel';
@@ -364,12 +365,23 @@ export function createResourcesPanel(
 
       const file = target.closest<HTMLElement>('[data-resource-kind="file"]');
       if (file?.dataset.resourceId) {
+        const name = file.dataset.resourceName ?? '';
         state.setResourceSelection({
           kind: 'file',
           id: Number(file.dataset.resourceId),
-          name: file.dataset.resourceName ?? '',
+          name,
           fileType: file.dataset.resourceType ?? '',
         });
+        if (event.detail >= 2 && name.toLowerCase().endsWith('.glsl')) {
+          event.preventDefault();
+          event.stopPropagation();
+          window.dispatchEvent(new CustomEvent('cacablu:open-glsl-editor', {
+            detail: {
+              fileId: Number(file.dataset.resourceId),
+              name,
+            },
+          }));
+        }
         return;
       }
 
@@ -385,6 +397,28 @@ export function createResourcesPanel(
       if (expandedIds.has(id)) expandedIds.delete(id);
       else expandedIds.add(id);
       render();
+    });
+
+    treeEl.addEventListener('dblclick', (event) => {
+      const target = event.target as HTMLElement;
+      const file = target.closest<HTMLElement>('[data-resource-kind="file"]');
+      if (!file?.dataset.resourceId || !file.dataset.poolPath) return;
+      const name = file.dataset.resourceName ?? '';
+      if (!name.toLowerCase().endsWith('.glsl')) return;
+      event.preventDefault();
+      event.stopPropagation();
+      state.setResourceSelection({
+        kind: 'file',
+        id: Number(file.dataset.resourceId),
+        name,
+        fileType: file.dataset.resourceType ?? '',
+      });
+      window.dispatchEvent(new CustomEvent('cacablu:open-glsl-editor', {
+        detail: {
+          fileId: Number(file.dataset.resourceId),
+          name,
+        },
+      }));
     });
 
     treeEl.addEventListener('change', (event) => {
@@ -443,7 +477,7 @@ export function createResourcesPanel(
           });
 
           if (connection.isConnected()) {
-            await writeAllowedAssetFile(phoenixAssets, relativePath, bytes);
+            addAssetImpactEvents(state, await writeAllowedAssetFile(phoenixAssets, relativePath, bytes), `Imported ${file.name}`);
           }
         }
 
@@ -493,7 +527,7 @@ export function createResourcesPanel(
 
         if (connection.isConnected() && sourceFile.enabled) {
           try {
-            await writeAllowedAssetFile(phoenixAssets, destinationPath, bytes);
+            addAssetImpactEvents(state, await writeAllowedAssetFile(phoenixAssets, destinationPath, bytes), `Moved ${payload.name}`);
           } catch (err) {
             setSyncStatus('error', err instanceof Error ? err.message : 'Could not write Phoenix destination asset.');
           }
@@ -501,7 +535,7 @@ export function createResourcesPanel(
 
         if (connection.isConnected() && sourceFile.enabled) {
           try {
-            await deleteAllowedAssetFile(phoenixAssets, payload.sourcePath);
+            addAssetImpactEvents(state, await deleteAllowedAssetFile(phoenixAssets, payload.sourcePath), `Moved ${payload.name}`);
           } catch (err) {
             setSyncStatus('error', err instanceof Error ? err.message : 'Could not delete Phoenix source asset.');
           }
@@ -525,11 +559,16 @@ export function createResourcesPanel(
         const file = session.setResourceFileEnabled(fileId, enabled);
         dbState.setDirty();
 
+        if (!connection.isConnected()) {
+          render();
+          return;
+        }
+
         try {
           if (enabled) {
-            await writeAllowedAssetFile(phoenixAssets, poolPath, new Uint8Array(file.data));
+            addAssetImpactEvents(state, await writeAllowedAssetFile(phoenixAssets, poolPath, new Uint8Array(file.data)), `Enabled ${name}`);
           } else {
-            await deleteAllowedAssetFile(phoenixAssets, poolPath);
+            addAssetImpactEvents(state, await deleteAllowedAssetFile(phoenixAssets, poolPath), `Disabled ${name}`);
           }
         } catch (err) {
           setSyncStatus('discrepant', `Updated in Cacablu, but Phoenix did not apply it: ${err instanceof Error ? err.message : 'Could not update Phoenix asset state.'}`);
@@ -581,7 +620,7 @@ export function createResourcesPanel(
 
         if (connection.isConnected()) {
           try {
-            await deleteAllowedAssetFile(phoenixAssets, poolPath);
+            addAssetImpactEvents(state, await deleteAllowedAssetFile(phoenixAssets, poolPath), `Deleted ${name}`);
           } catch (err) {
             setSyncStatus('error', err instanceof Error ? err.message : 'Could not delete Phoenix asset.');
           }
@@ -609,7 +648,7 @@ export function createResourcesPanel(
 
         if (connection.isConnected()) {
           try {
-            await deleteAllowedAssetDirectory(phoenixAssets, poolPath, true);
+            addAssetImpactEvents(state, await deleteAllowedAssetDirectory(phoenixAssets, poolPath, true), `Deleted folder ${name}`);
           } catch (err) {
             setSyncStatus('error', err instanceof Error ? err.message : 'Could not delete Phoenix asset folder.');
           }

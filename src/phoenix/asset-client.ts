@@ -3,13 +3,24 @@ import { normalizeAssetPath } from './asset-paths';
 
 const PHOENIX_HTTP_BASE = 'http://127.0.0.1:29100';
 
-export type AssetOperationName = 'create-directory' | 'write-file' | 'delete-file' | 'delete-directory';
+export type AssetOperationName = 'create-directory' | 'write-file' | 'delete-file' | 'delete-directory' | 'preview-asset';
+
+export interface AssetImpactSection {
+  id: string;
+  type?: string;
+  message?: string;
+}
 
 export interface AssetOperationResult {
   requestId: string;
   ok: boolean;
   operation: AssetOperationName;
   entry?: AssetManifestEntry;
+  path?: string;
+  persisted?: boolean;
+  reloadedSections?: AssetImpactSection[];
+  deactivatedSections?: AssetImpactSection[];
+  failedSections?: AssetImpactSection[];
   code?: string;
   message?: string;
 }
@@ -17,6 +28,7 @@ export interface AssetOperationResult {
 export interface PhoenixAssetClient {
   fetchManifest(signal?: AbortSignal): Promise<AssetManifest>;
   createDirectory(path: string, signal?: AbortSignal): Promise<AssetOperationResult>;
+  previewFile(path: string, content: string, signal?: AbortSignal): Promise<AssetOperationResult>;
   writeFile(path: string, bytes: Uint8Array, signal?: AbortSignal): Promise<AssetOperationResult>;
   deleteFile(path: string, signal?: AbortSignal): Promise<AssetOperationResult>;
   deleteDirectory(path: string, recursive: boolean, signal?: AbortSignal): Promise<AssetOperationResult>;
@@ -76,6 +88,19 @@ export function createPhoenixAssetClient(baseUrl = PHOENIX_HTTP_BASE): PhoenixAs
       }), 'create-directory');
     },
 
+    async previewFile(path, content, signal): Promise<AssetOperationResult> {
+      return normalizeOperationResult(await requestJson('/api/assets/preview', {
+        method: 'PUT',
+        signal,
+        body: JSON.stringify({
+          requestId: createRequestId(),
+          path: requirePath(path),
+          encoding: 'utf-8',
+          content,
+        }),
+      }), 'preview-asset');
+    },
+
     async writeFile(path, bytes, signal): Promise<AssetOperationResult> {
       return normalizeOperationResult(await requestJson('/api/assets/file', {
         method: 'PUT',
@@ -120,18 +145,48 @@ function getNetworkErrorMessage(error: unknown): string {
 
 function normalizeOperationResult(input: unknown, fallbackOperation: AssetOperationName): AssetOperationResult {
   if (!input || typeof input !== 'object') {
-    return { requestId: '', ok: false, operation: fallbackOperation, code: 'invalid-response', message: 'Invalid Phoenix response.' };
+    return {
+      requestId: '',
+      ok: false,
+      operation: fallbackOperation,
+      reloadedSections: [],
+      deactivatedSections: [],
+      failedSections: [],
+      code: 'invalid-response',
+      message: 'Invalid Phoenix response.',
+    };
   }
 
   const candidate = input as Record<string, unknown>;
+  const normalizedPath = typeof candidate.path === 'string' ? normalizeAssetPath(candidate.path) : null;
   return {
     requestId: typeof candidate.requestId === 'string' ? candidate.requestId : '',
     ok: candidate.ok !== false,
     operation: isOperation(candidate.operation) ? candidate.operation : fallbackOperation,
     entry: normalizeEntry(candidate.entry),
+    path: normalizedPath?.path,
+    persisted: typeof candidate.persisted === 'boolean' ? candidate.persisted : undefined,
+    reloadedSections: normalizeImpactSections(candidate.reloadedSections),
+    deactivatedSections: normalizeImpactSections(candidate.deactivatedSections),
+    failedSections: normalizeImpactSections(candidate.failedSections),
     code: typeof candidate.code === 'string' ? candidate.code : undefined,
     message: typeof candidate.message === 'string' ? candidate.message : undefined,
   };
+}
+
+function normalizeImpactSections(input: unknown): AssetImpactSection[] {
+  if (!Array.isArray(input)) return [];
+  return input.flatMap((item): AssetImpactSection[] => {
+    if (!item || typeof item !== 'object') return [];
+    const candidate = item as Record<string, unknown>;
+    const rawId = candidate.id;
+    if (typeof rawId !== 'string' && typeof rawId !== 'number') return [];
+    return [{
+      id: String(rawId),
+      type: typeof candidate.type === 'string' && candidate.type ? candidate.type : undefined,
+      message: typeof candidate.message === 'string' && candidate.message ? candidate.message : undefined,
+    }];
+  });
 }
 
 function normalizeEntry(input: unknown): AssetManifestEntry | undefined {
@@ -159,7 +214,7 @@ function createRequestId(): string {
 }
 
 function isOperation(value: unknown): value is AssetOperationName {
-  return value === 'create-directory' || value === 'write-file' || value === 'delete-file' || value === 'delete-directory';
+  return value === 'create-directory' || value === 'write-file' || value === 'delete-file' || value === 'delete-directory' || value === 'preview-asset';
 }
 
 function bytesToBase64(bytes: Uint8Array): string {

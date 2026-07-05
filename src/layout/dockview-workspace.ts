@@ -19,7 +19,7 @@ export interface DockviewWorkspace {
   openPanel(panelId: string, options?: OpenPanelOptions): void;
   closePanel(panelId: string): void;
   isPanelOpen(panelId: string): boolean;
-  openFloating(id: string, component: string, title: string): void;
+  openFloating(id: string, component: string, title: string, params?: Record<string, unknown>): void;
 }
 
 interface OpenPanelOptions {
@@ -151,7 +151,7 @@ export function createDockviewWorkspace(options: WorkspaceOptions): DockviewWork
       return Boolean(dockview?.getGroupPanel(panelId));
     },
 
-    openFloating(id: string, component: string, title: string): void {
+    openFloating(id: string, component: string, title: string, params?: Record<string, unknown>): void {
       if (!dockview) return;
 
       const existing = dockview.getGroupPanel(id);
@@ -163,13 +163,16 @@ export function createDockviewWorkspace(options: WorkspaceOptions): DockviewWork
 
       const floatingSize = component === 'graphics-settings-panel'
         ? getCenteredFloatingSize(workspaceContainer, 1040, 720)
-        : getCenteredFloatingSize(workspaceContainer, 640, 420);
+        : component === 'demo-settings-panel'
+          ? getCenteredFloatingSize(workspaceContainer, 520, 390)
+          : getCenteredFloatingSize(workspaceContainer, 640, 420);
 
       dockview.addPanel({
         id,
         component,
         title,
         renderer: 'always',
+        params,
         floating: floatingSize,
       });
     },

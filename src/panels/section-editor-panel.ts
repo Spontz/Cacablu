@@ -12,6 +12,7 @@ import type { UndoManager } from '../app/undo-manager';
 import { createPhoenixSectionClient } from '../phoenix/section-client';
 import { ProjectSectionSyncError, syncProjectBarToPhoenix, type ProjectSectionSyncIssue } from '../services/project-section-sync';
 import { createContentRenderer } from './base-panel';
+import { CACABLU_CODE_THEME, registerCacabluCodeTheme } from './code-editor-theme';
 
 const TEMPLATE_STORAGE_KEY = 'cacablu.sectionEditor.templates';
 const BAR_TYPE_STORAGE_KEY = 'cacablu.sectionEditor.barTypes';
@@ -112,6 +113,7 @@ export function createSectionEditorPanel(
   connection: ConnectionController,
   undoManager: UndoManager,
 ): IContentRenderer {
+  registerCacabluCodeTheme();
   return createContentRenderer((element) => {
     element.className = 'panel panel--section-editor';
 
@@ -311,7 +313,7 @@ export function createSectionEditorPanel(
       codeEditor = monaco.editor.create(code, {
         value: bar.script ?? '',
         language: 'cpp',
-        theme: 'vs-dark',
+        theme: CACABLU_CODE_THEME,
         automaticLayout: true,
         fontFamily: '"JetBrains Mono", monospace',
         fontSize: 10,

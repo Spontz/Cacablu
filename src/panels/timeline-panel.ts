@@ -217,7 +217,11 @@ export function createTimelinePanel(
   function getErroredSectionBarIds(): Set<number> {
     const ids = new Set<number>();
     for (const event of appState.getSnapshot().events) {
-      if (event.severity !== 'error' || event.source !== 'Phoenix section sync' || !event.subjectId) {
+      if (
+        event.severity !== 'error'
+        || (event.source !== 'Phoenix section sync' && event.source !== 'Phoenix asset impact')
+        || !event.subjectId
+      ) {
         continue;
       }
 
@@ -831,10 +835,9 @@ export function createTimelinePanel(
                         ${trackClips
                           .map((clip) => {
                             const left = clip.start * state.viewport.pixelsPerSecond * state.viewport.zoom;
-                            const width = Math.max(
-                              (clip.end - clip.start) * state.viewport.pixelsPerSecond * state.viewport.zoom,
-                              1,
-                            );
+                            const rawWidth = Math.max((clip.end - clip.start) * state.viewport.pixelsPerSecond * state.viewport.zoom, 0);
+                            const width = Math.max(rawWidth - 1, 1);
+                            const isCompact = rawWidth < 8;
                             const dbId = typeof clip.metadata?.dbId === 'number' ? clip.metadata.dbId : null;
                             const isBoxSelected = dbId !== null && boxSelectedBarIds.has(dbId);
                             const isSelected = dbId !== null && (selectedBarIds.has(dbId) || isBoxSelected);
@@ -853,7 +856,7 @@ export function createTimelinePanel(
                             const label = displayTimelineIds && dbId !== null && clip.label ? `${dbId} ${clip.label}` : clip.label;
 
                             return `
-                              <article class="timeline-panel__clip ${isActive ? 'is-active' : ''} ${isSelected ? 'is-selected' : ''} ${isBoxSelected ? 'is-box-selected' : ''} ${isMovable ? 'is-movable' : ''} ${hasError ? 'has-error' : ''} ${isDragging ? 'is-dragging' : ''} ${isBlocked ? 'is-blocked' : ''}" data-bar-id="${dbId ?? ''}" tabindex="0" style="left:${left}px;width:${width}px;border-color:${clip.color ?? CLIP_COLOR}">
+                              <article class="timeline-panel__clip ${isActive ? 'is-active' : ''} ${isCompact ? 'is-compact' : ''} ${isSelected ? 'is-selected' : ''} ${isBoxSelected ? 'is-box-selected' : ''} ${isMovable ? 'is-movable' : ''} ${hasError ? 'has-error' : ''} ${isDragging ? 'is-dragging' : ''} ${isBlocked ? 'is-blocked' : ''}" data-bar-id="${dbId ?? ''}" tabindex="0" style="left:${left}px;width:${width}px;border-color:${clip.color ?? CLIP_COLOR}">
                                 <span class="timeline-panel__clip-label">${label}</span>
                               </article>
                             `;

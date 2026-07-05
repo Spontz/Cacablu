@@ -370,18 +370,22 @@ async function sectionManifestMatches(
 
 function buildSectionContentFromPayload(section: PhoenixSectionPayload): string {
   const script = fromBase64(section.scriptBase64);
-  let content = [
+  const header = [
     `:::${section.type}`,
     `id ${section.id}`,
     `start ${formatNumber(section.startTime)}`,
     `end ${formatNumber(section.endTime)}`,
     `enabled ${section.enabled ? 1 : 0}`,
     `layer ${section.layer}`,
-    `blend ${section.srcBlending} ${section.dstBlending}`,
-    `blendequation ${section.blendingEQ}`,
-    '',
-    script,
-  ].join('\r\n');
+  ];
+  if (section.srcBlending.trim() !== '' && section.dstBlending.trim() !== '') {
+    header.push(`blend ${section.srcBlending} ${section.dstBlending}`);
+  }
+  if (section.blendingEQ.trim() !== '') {
+    header.push(`blendequation ${section.blendingEQ}`);
+  }
+
+  let content = [...header, '', script].join('\r\n');
   if (!content.endsWith('\n')) content += '\r\n';
   return content;
 }
