@@ -87,7 +87,8 @@ As a user, I want applying Demo Settings to update Phoenix and create `control.s
 - **FR-003**: The panel MUST contain a demo title text field.
 - **FR-004**: The panel MUST contain a `Loop demo` checkbox mapped to Phoenix `loop`.
 - **FR-005**: The panel MUST contain a `Sound` checkbox mapped to Phoenix `sound`.
-- **FR-006**: The panel MUST contain a `Debug grid` checkbox mapped to Phoenix `debugEnableGrid`.
+- **FR-006**: The panel MUST contain a `Debug grid` checkbox stored in the project DB as `debugEnableGrid`.
+- **FR-006a**: When Cacablu sends Demo Settings to Phoenix, it MUST map the DB `debugEnableGrid` value to the Phoenix API field `debugFloor`.
 - **FR-007**: The panel MUST contain a Log detail popup with values `0 None`, `1 Essential`, `2 Normal`, and `3 Verbose`.
 - **FR-008**: Cacablu MUST NOT expose or write `log_detail 4`.
 - **FR-009**: Cacablu MUST calculate `demoEnd` from the maximum end time of all timeline bars at apply time.

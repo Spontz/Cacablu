@@ -20,7 +20,7 @@ export function demoSettingsFromProject(db: Pick<ProjectDatabase, 'variables'> |
     demoName: readString(variables, ['demoName', 'demo_name'], 'Phoenix demo engine'),
     loop: readBoolean(variables, ['demoLoop', 'loop'], true),
     sound: readBoolean(variables, ['demoSound', 'sound'], true),
-    debugGrid: readBoolean(variables, ['debugEnableGrid', 'debugEnableFloor'], true),
+    debugGrid: readBoolean(variables, ['debugEnableGrid'], true),
     logDetail: readLogDetail(variables, ['logDetail', 'log_detail'], 1),
   };
 }
@@ -34,8 +34,11 @@ export function calculateDemoEnd(db: Pick<ProjectDatabase, 'bars'> | null): numb
 
 export function buildDemoSettingsPayload(draft: DemoSettingsDraft, demoEnd: number): DemoSettings {
   return {
-    ...draft,
     demoName: draft.demoName.trim(),
+    loop: draft.loop,
+    sound: draft.sound,
+    debugFloor: draft.debugGrid,
+    logDetail: draft.logDetail,
     demoEnd,
   };
 }

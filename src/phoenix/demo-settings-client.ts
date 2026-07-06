@@ -13,7 +13,7 @@ export interface DemoSettings {
   demoName: string;
   loop: boolean;
   sound: boolean;
-  debugGrid: boolean;
+  debugFloor: boolean;
   logDetail: LogDetail;
   demoStart?: number;
   demoEnd: number;
@@ -107,7 +107,7 @@ function normalizeDemoSettings(input: unknown): DemoSettings | null {
     typeof value.demoName !== 'string'
     || typeof value.loop !== 'boolean'
     || typeof value.sound !== 'boolean'
-    || typeof value.debugGrid !== 'boolean'
+    || typeof value.debugFloor !== 'boolean'
     || !isLogDetail(value.logDetail)
     || typeof value.demoEnd !== 'number'
   ) {
@@ -118,7 +118,7 @@ function normalizeDemoSettings(input: unknown): DemoSettings | null {
     demoName: value.demoName,
     loop: value.loop,
     sound: value.sound,
-    debugGrid: value.debugGrid,
+    debugFloor: value.debugFloor,
     logDetail: value.logDetail,
     demoStart: typeof value.demoStart === 'number' ? value.demoStart : 0,
     demoEnd: value.demoEnd,

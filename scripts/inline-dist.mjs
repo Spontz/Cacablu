@@ -28,12 +28,12 @@ if (styleMatch) {
   styleBlock = `<style>${styleSource}</style>`;
 }
 
-let nextHtml = html
-  .replace(styleMatch?.[0] ?? '', '')
-  .replace(scriptMatch[0], () => `<script type="module">${scriptSource}</script>`);
+let nextHtml = html.replace(styleMatch?.[0] ?? '', '');
 
 if (styleBlock) {
   nextHtml = nextHtml.replace('</head>', () => `${styleBlock}</head>`);
 }
+
+nextHtml = nextHtml.replace(scriptMatch[0], () => `<script type="module">${scriptSource}</script>`);
 
 await writeFile(htmlPath, nextHtml, 'utf8');

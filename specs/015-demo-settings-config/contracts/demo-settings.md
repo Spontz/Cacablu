@@ -13,7 +13,7 @@ Reads current Phoenix demo settings and supported log detail options.
     "demoName": "Phoenix demo engine",
     "loop": true,
     "sound": true,
-    "debugGrid": true,
+    "debugFloor": true,
     "logDetail": 1,
     "demoStart": 0,
     "demoEnd": 50,
@@ -41,7 +41,7 @@ Replaces Phoenix demo control settings. Phoenix applies them in memory and write
   "demoName": "My demo",
   "loop": true,
   "sound": true,
-  "debugGrid": true,
+  "debugFloor": true,
   "logDetail": 1,
   "demoEnd": 120
 }
@@ -57,7 +57,7 @@ Replaces Phoenix demo control settings. Phoenix applies them in memory and write
     "demoName": "My demo",
     "loop": true,
     "sound": true,
-    "debugGrid": true,
+    "debugFloor": true,
     "logDetail": 1,
     "demoStart": 0,
     "demoEnd": 120,
@@ -86,7 +86,7 @@ Phoenix writes:
 ```text
 demo_name <demoName>
 debug 1
-debugEnableGrid <0|1>
+debugEnableFloor <0|1>
 loop <0|1>
 sound <0|1>
 demo_start 0.0

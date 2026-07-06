@@ -9,7 +9,7 @@ Editable state held by the Demo Settings panel.
 | `demoName` | `string` | Required after trimming. Written as `demo_name`. |
 | `loop` | `boolean` | Written as `loop 1` or `loop 0`. |
 | `sound` | `boolean` | Written as `sound 1` or `sound 0`. |
-| `debugGrid` | `boolean` | Written as `debugEnableGrid 1` or `debugEnableGrid 0`. |
+| `debugGrid` | `boolean` | Read from and written to the project DB as `debugEnableGrid`. Sent to Phoenix as `debugFloor`. |
 | `logDetail` | `0 | 1 | 2 | 3` | Log detail option selected by the user. |
 
 ## TimelineDemoEnd
@@ -39,7 +39,7 @@ Network request body sent to Phoenix.
 | `demoName` | `string` | Trimmed demo title. |
 | `loop` | `boolean` | Loop flag. |
 | `sound` | `boolean` | Sound enabled flag. |
-| `debugGrid` | `boolean` | Debug grid flag. |
+| `debugFloor` | `boolean` | Phoenix API field populated from the DB `debugEnableGrid` value. |
 | `logDetail` | `0 | 1 | 2 | 3` | Supported log level only. |
 | `demoEnd` | `number` | Current maximum bar end time. |
 
