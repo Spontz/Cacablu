@@ -56,7 +56,8 @@ export function createPhoenixDemoSettingsClient(baseUrl = PHOENIX_HTTP_BASE): Ph
     const text = await response.text();
     const payload = text ? JSON.parse(text) as unknown : null;
     if (!response.ok) {
-      throw new Error(getErrorMessage(payload) ?? `Phoenix demo settings request failed with HTTP ${response.status}`);
+      const message = getErrorMessage(payload) ?? `Phoenix demo settings request failed with HTTP ${response.status}`;
+      throw new Error(`${message}: ${summarizePayload(payload)}`);
     }
     return payload;
   }
@@ -65,7 +66,7 @@ export function createPhoenixDemoSettingsClient(baseUrl = PHOENIX_HTTP_BASE): Ph
     async fetchSettings(signal): Promise<DemoSettingsResponse> {
       const payload = await requestJson('/api/demo-settings', { signal });
       const result = normalizeDemoSettingsResponse(payload);
-      if (!result) throw new Error('Phoenix returned an invalid demo settings response.');
+      if (!result) throw new Error(`Phoenix returned an invalid demo settings response: ${summarizePayload(payload)}`);
       return result;
     },
 
@@ -76,7 +77,7 @@ export function createPhoenixDemoSettingsClient(baseUrl = PHOENIX_HTTP_BASE): Ph
         body: JSON.stringify({ requestId: createRequestId(), ...settings }),
       });
       const result = normalizeDemoSettingsResponse(payload);
-      if (!result) throw new Error('Phoenix returned an invalid demo settings response.');
+      if (!result) throw new Error(`Phoenix returned an invalid demo settings response: ${summarizePayload(payload)}`);
       return result;
     },
   };
@@ -139,11 +140,32 @@ function isLogDetail(value: unknown): value is LogDetail {
 }
 
 function getErrorMessage(input: unknown): string | null {
-  return input && typeof input === 'object' && typeof (input as Record<string, unknown>).message === 'string'
-    ? (input as Record<string, string>).message
-    : null;
+  if (!input || typeof input !== 'object') return null;
+  const value = input as Record<string, unknown>;
+  if (typeof value.message !== 'string') return null;
+  const details = Array.isArray(value.details)
+    ? value.details
+      .flatMap((detail) => {
+        if (!detail || typeof detail !== 'object') return [];
+        const candidate = detail as Record<string, unknown>;
+        if (typeof candidate.path !== 'string' || typeof candidate.message !== 'string') return [];
+        return [`${candidate.path}: ${candidate.message}`];
+      })
+      .join('; ')
+    : '';
+  return details ? `${value.message} (${details})` : value.message;
 }
 
 function createRequestId(): string {
   return `demo-settings-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function summarizePayload(payload: unknown): string {
+  try {
+    const text = JSON.stringify(payload);
+    if (!text) return String(payload);
+    return text.length > 500 ? `${text.slice(0, 500)}...` : text;
+  } catch {
+    return String(payload);
+  }
 }

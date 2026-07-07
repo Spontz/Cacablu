@@ -738,6 +738,9 @@ export function createSectionEditorPanel(
       for (const barId of barIds) {
         try {
           const result = await syncProjectBarToPhoenix(session.data, barId, phoenixSections);
+          if (result.issues.length === 0) {
+            clearSectionErrors([barId]);
+          }
           recordSectionIssues(result.issues);
         } catch (err) {
           if (err instanceof ProjectSectionSyncError) {
@@ -752,6 +755,13 @@ export function createSectionEditorPanel(
           });
         }
       }
+    }
+
+    function clearSectionErrors(barIds: number[]): void {
+      state.clearEventsForSubjects(
+        barIds.map(String),
+        ['Phoenix section sync', 'Phoenix asset impact'],
+      );
     }
 
     function recordSectionIssues(issues: ProjectSectionSyncIssue[]): void {

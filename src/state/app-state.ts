@@ -13,6 +13,7 @@ export interface AppState {
   toggleDisplayTimelineIds(): void;
   addEvent(event: Omit<AppEvent, 'id' | 'timestamp'> & { id?: string; timestamp?: number }): void;
   addEvents(events: Array<Omit<AppEvent, 'id' | 'timestamp'> & { id?: string; timestamp?: number }>): void;
+  clearEventsForSubjects(subjectIds: string[], sources?: string[]): void;
   markEventsRead(): void;
   clearEvents(): void;
 }
@@ -123,6 +124,25 @@ export function createAppState(): AppState {
         ...snapshot,
         events: [...nextEvents, ...snapshot.events].slice(0, 200),
         unreadEventCount: snapshot.unreadEventCount + nextEvents.length,
+      };
+      publish();
+    },
+
+    clearEventsForSubjects(subjectIds, sources): void {
+      if (subjectIds.length === 0 || snapshot.events.length === 0) return;
+      const subjects = new Set(subjectIds);
+      const sourceSet = sources ? new Set(sources) : null;
+      const nextEvents = snapshot.events.filter((event) => (
+        !event.subjectId
+        || !subjects.has(event.subjectId)
+        || (sourceSet !== null && (!event.source || !sourceSet.has(event.source)))
+      ));
+      if (nextEvents.length === snapshot.events.length) return;
+      const removed = snapshot.events.length - nextEvents.length;
+      snapshot = {
+        ...snapshot,
+        events: nextEvents,
+        unreadEventCount: Math.max(0, snapshot.unreadEventCount - removed),
       };
       publish();
     },
