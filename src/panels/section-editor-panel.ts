@@ -1,6 +1,5 @@
 import type { IContentRenderer } from 'dockview-core';
 import * as monaco from 'monaco-editor/esm/vs/editor/editor.api.js';
-import 'monaco-editor/esm/vs/basic-languages/cpp/cpp.contribution.js';
 import 'monaco-editor/min/vs/editor/editor.main.css';
 
 import type { AppState } from '../state/app-state';
@@ -114,6 +113,7 @@ export function createSectionEditorPanel(
   undoManager: UndoManager,
 ): IContentRenderer {
   registerCacabluCodeTheme();
+  registerSectionIniLanguage();
   return createContentRenderer((element) => {
     element.className = 'panel panel--section-editor';
 
@@ -312,7 +312,7 @@ export function createSectionEditorPanel(
 
       codeEditor = monaco.editor.create(code, {
         value: bar.script ?? '',
-        language: 'cpp',
+        language: 'cacablu-section-ini',
         theme: CACABLU_CODE_THEME,
         automaticLayout: true,
         fontFamily: '"JetBrains Mono", monospace',
@@ -853,6 +853,72 @@ export function createSectionEditorPanel(
       unsubscribeState();
       unsubscribeDb();
     };
+  });
+}
+
+let sectionIniLanguageRegistered = false;
+
+export function registerSectionIniLanguage(): void {
+  if (sectionIniLanguageRegistered) return;
+  sectionIniLanguageRegistered = true;
+
+  if (!monaco.languages.getLanguages().some((language) => language.id === 'cacablu-section-ini')) {
+    monaco.languages.register({
+      id: 'cacablu-section-ini',
+      extensions: ['.ini', '.spo'],
+      aliases: ['Cacablu Section INI', 'INI'],
+      mimetypes: ['text/x-ini'],
+    });
+  }
+
+  monaco.languages.setLanguageConfiguration('cacablu-section-ini', {
+    comments: {
+      lineComment: ';',
+    },
+    brackets: [
+      ['[', ']'],
+    ],
+    autoClosingPairs: [
+      { open: '[', close: ']' },
+      { open: '"', close: '"' },
+      { open: "'", close: "'" },
+    ],
+    surroundingPairs: [
+      { open: '[', close: ']' },
+      { open: '"', close: '"' },
+      { open: "'", close: "'" },
+    ],
+  });
+
+  monaco.languages.setMonarchTokensProvider('cacablu-section-ini', {
+    defaultToken: '',
+    ignoreCase: true,
+    tokenizer: {
+      root: [
+        [/^\s*[;#].*$/, 'comment'],
+        [/^\s*\[[^\]]+\]/, 'section'],
+        [/^\s*[A-Za-z_][\w.-]*(?=\s*(?:=|:))/, 'key'],
+        [/^\s*[A-Za-z_][\w.-]*(?=\s+\S)/, 'key'],
+        [/[;#].*$/, 'comment'],
+        [/"([^"\\]|\\.)*$/, 'string.invalid'],
+        [/'([^'\\]|\\.)*$/, 'string.invalid'],
+        [/"/, 'string', '@stringDouble'],
+        [/'/, 'string', '@stringSingle'],
+        [/\b(?:true|false|yes|no|on|off|null)\b/, 'constant'],
+        [/[+-]?(?:\d+\.\d+|\d+|\.\d+)(?:e[+-]?\d+)?\b/, 'number'],
+        [/[=:+,]/, 'delimiter'],
+      ],
+      stringDouble: [
+        [/[^\\"]+/, 'string'],
+        [/\\./, 'string.escape'],
+        [/"/, 'string', '@pop'],
+      ],
+      stringSingle: [
+        [/[^\\']+/, 'string'],
+        [/\\./, 'string.escape'],
+        [/'/, 'string', '@pop'],
+      ],
+    },
   });
 }
 
