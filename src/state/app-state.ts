@@ -13,6 +13,9 @@ export interface AppState {
   toggleDisplayTimelineIds(): void;
   addEvent(event: Omit<AppEvent, 'id' | 'timestamp'> & { id?: string; timestamp?: number }): void;
   addEvents(events: Array<Omit<AppEvent, 'id' | 'timestamp'> & { id?: string; timestamp?: number }>): void;
+  markSectionErrors(ids: number[]): void;
+  clearSectionErrors(ids: number[]): void;
+  resetSectionErrors(): void;
   clearEventsForSubjects(subjectIds: string[], sources?: string[]): void;
   markEventsRead(): void;
   clearEvents(): void;
@@ -27,6 +30,7 @@ const INITIAL_SNAPSHOT: AppSnapshot = {
   events: [],
   unreadEventCount: 0,
   displayTimelineIds: false,
+  sectionErrorIds: [],
 };
 
 export function createAppState(): AppState {
@@ -124,6 +128,45 @@ export function createAppState(): AppState {
         ...snapshot,
         events: [...nextEvents, ...snapshot.events].slice(0, 200),
         unreadEventCount: snapshot.unreadEventCount + nextEvents.length,
+      };
+      publish();
+    },
+
+    markSectionErrors(ids): void {
+      const nextIds = ids.filter((id) => Number.isInteger(id));
+      if (nextIds.length === 0) return;
+      const merged = new Set([...snapshot.sectionErrorIds, ...nextIds]);
+      const sectionErrorIds = [...merged].sort((a, b) => a - b);
+      if (
+        sectionErrorIds.length === snapshot.sectionErrorIds.length
+        && sectionErrorIds.every((id, index) => id === snapshot.sectionErrorIds[index])
+      ) {
+        return;
+      }
+      snapshot = {
+        ...snapshot,
+        sectionErrorIds,
+      };
+      publish();
+    },
+
+    clearSectionErrors(ids): void {
+      if (ids.length === 0 || snapshot.sectionErrorIds.length === 0) return;
+      const clearIds = new Set(ids);
+      const sectionErrorIds = snapshot.sectionErrorIds.filter((id) => !clearIds.has(id));
+      if (sectionErrorIds.length === snapshot.sectionErrorIds.length) return;
+      snapshot = {
+        ...snapshot,
+        sectionErrorIds,
+      };
+      publish();
+    },
+
+    resetSectionErrors(): void {
+      if (snapshot.sectionErrorIds.length === 0) return;
+      snapshot = {
+        ...snapshot,
+        sectionErrorIds: [],
       };
       publish();
     },

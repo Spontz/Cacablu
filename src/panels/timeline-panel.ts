@@ -215,8 +215,9 @@ export function createTimelinePanel(
   }
 
   function getErroredSectionBarIds(): Set<number> {
-    const ids = new Set<number>();
-    for (const event of appState.getSnapshot().events) {
+    const snapshot = appState.getSnapshot();
+    const ids = new Set<number>(snapshot.sectionErrorIds);
+    for (const event of snapshot.events) {
       if (
         event.severity !== 'error'
         || (event.source !== 'Phoenix section sync' && event.source !== 'Phoenix asset impact')
@@ -611,6 +612,7 @@ export function createTimelinePanel(
         subjectId: String(barId),
         description: err instanceof Error ? err.message : 'Could not sync moved timeline bar to Phoenix.',
       });
+      appState.markSectionErrors([barId]);
     }
   }
 
@@ -658,6 +660,7 @@ export function createTimelinePanel(
 
   function recordSectionIssues(issues: ProjectSectionSyncError['issues']): void {
     if (issues.length === 0) return;
+    appState.markSectionErrors(issues.map((issue) => issue.barId));
     appState.addEvents(issues.map((issue) => ({
       severity: 'error',
       source: 'Phoenix section sync',
@@ -667,6 +670,7 @@ export function createTimelinePanel(
   }
 
   function clearSectionErrors(barIds: number[]): void {
+    appState.clearSectionErrors(barIds);
     appState.clearEventsForSubjects(
       barIds.map(String),
       ['Phoenix section sync', 'Phoenix asset impact'],
@@ -1013,9 +1017,21 @@ export function createTimelinePanel(
       requestAnimationFrame(tick);
     };
 
+    let lastDbStatus = dbState.getSnapshot().status;
+    let lastDbFileName = dbState.getSnapshot().fileName;
+    if (lastDbStatus === 'open') {
+      loadFromDb();
+    }
     dbState.subscribe((snapshot) => {
+      const previousStatus = lastDbStatus;
+      const fileChanged = snapshot.fileName !== lastDbFileName;
+      lastDbStatus = snapshot.status;
+      lastDbFileName = snapshot.fileName;
+
       if (snapshot.status === 'open') {
-        loadFromDb();
+        if (fileChanged || (previousStatus !== 'open' && previousStatus !== 'saving')) {
+          loadFromDb();
+        }
         render(true);
         return;
       } else if (!isProjectReady()) {

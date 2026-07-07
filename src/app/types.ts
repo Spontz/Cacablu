@@ -48,4 +48,5 @@ export interface AppSnapshot {
   events: AppEvent[];
   unreadEventCount: number;
   displayTimelineIds: boolean;
+  sectionErrorIds: number[];
 }

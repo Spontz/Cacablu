@@ -103,4 +103,21 @@ describe('createAppState', () => {
 
     expect(state.getSnapshot().unreadEventCount).toBe(0);
   });
+
+  it('tracks section error ids independently from events', () => {
+    const state = createAppState();
+
+    state.markSectionErrors([429, 433]);
+    state.clearSectionErrors([429]);
+
+    expect(state.getSnapshot().sectionErrorIds).toEqual([433]);
+
+    state.clearEvents();
+
+    expect(state.getSnapshot().sectionErrorIds).toEqual([433]);
+
+    state.resetSectionErrors();
+
+    expect(state.getSnapshot().sectionErrorIds).toEqual([]);
+  });
 });

@@ -218,10 +218,12 @@ export function createSectionEditorPanel(
 
       const startField = createField('Start Time');
       const startInput = createTimeInput(bar.startTime);
+      const initialStartInputValue = startInput.value;
       startField.append(startInput);
 
       const endField = createField('End Time');
       const endInput = createTimeInput(bar.endTime);
+      const initialEndInputValue = endInput.value;
       endField.append(endInput);
 
       timeRow.append(nameField, startField, endField);
@@ -458,18 +460,19 @@ export function createSectionEditorPanel(
         nameInput.value = nextName;
         const nextStartTime = parseEditorTime(startInput.value);
         const nextEndTime = parseEditorTime(endInput.value);
-        if (
-          nextStartTime === null
-          || nextEndTime === null
-          || !isValidTimeRange(current.id, current.layer, nextStartTime, nextEndTime)
-        ) {
+        const timeChanged = startInput.value.trim() !== initialStartInputValue
+          || endInput.value.trim() !== initialEndInputValue;
+        const canApplyTime = timeChanged
+          && nextStartTime !== null
+          && nextEndTime !== null
+          && isValidTimeRange(current.id, current.layer, nextStartTime, nextEndTime);
+        if (timeChanged && !canApplyTime) {
           state.addEvent({
             severity: 'warning',
             source: 'Bar Editor',
             subjectId: String(current.id),
-            description: `Bar ${current.id} has an invalid time range.`,
+            description: `Bar ${current.id} kept its previous time range because the edited range is invalid.`,
           });
-          return;
         }
 
         const next: BarSnapshot[] = [{
@@ -477,8 +480,8 @@ export function createSectionEditorPanel(
           name: nextName,
           type: nextType,
           script: nextScript,
-          startTime: nextStartTime,
-          endTime: nextEndTime,
+          startTime: canApplyTime ? nextStartTime : previous[0].startTime,
+          endTime: canApplyTime ? nextEndTime : previous[0].endTime,
           srcBlending: srcSelect.value,
           dstBlending: dstSelect.value,
           blendingEQ: equationSelect.value,
@@ -663,18 +666,10 @@ export function createSectionEditorPanel(
       const session = sessionRef.current;
       if (!session) return;
 
+      let changed = false;
       for (const snapshot of snapshots) {
         const bar = session.data.bars.find((candidate) => candidate.id === snapshot.id);
         if (!bar) continue;
-
-        session.updateCell('bars', snapshot.id, 'name', snapshot.name);
-        session.updateCell('bars', snapshot.id, 'type', snapshot.type);
-        session.updateCell('bars', snapshot.id, 'script', snapshot.script);
-        session.updateCell('bars', snapshot.id, 'startTime', snapshot.startTime);
-        session.updateCell('bars', snapshot.id, 'endTime', snapshot.endTime);
-        session.updateCell('bars', snapshot.id, 'srcBlending', snapshot.srcBlending);
-        session.updateCell('bars', snapshot.id, 'dstBlending', snapshot.dstBlending);
-        session.updateCell('bars', snapshot.id, 'blendingEQ', snapshot.blendingEQ);
 
         bar.name = snapshot.name;
         bar.type = snapshot.type;
@@ -684,7 +679,30 @@ export function createSectionEditorPanel(
         bar.srcBlending = snapshot.srcBlending;
         bar.dstBlending = snapshot.dstBlending;
         bar.blendingEQ = snapshot.blendingEQ;
+        changed = true;
+
+        try {
+          session.updateCell('bars', snapshot.id, 'name', snapshot.name);
+          session.updateCell('bars', snapshot.id, 'type', snapshot.type);
+          session.updateCell('bars', snapshot.id, 'script', snapshot.script);
+          session.updateCell('bars', snapshot.id, 'startTime', snapshot.startTime);
+          session.updateCell('bars', snapshot.id, 'endTime', snapshot.endTime);
+          session.updateCell('bars', snapshot.id, 'srcBlending', snapshot.srcBlending);
+          session.updateCell('bars', snapshot.id, 'dstBlending', snapshot.dstBlending);
+          session.updateCell('bars', snapshot.id, 'blendingEQ', snapshot.blendingEQ);
+        } catch (err) {
+          state.addEvent({
+            severity: 'error',
+            source: 'Bar Editor',
+            subjectId: String(snapshot.id),
+            description: err instanceof Error
+              ? `Bar ${snapshot.id} was updated in memory but could not be written to the project DB: ${err.message}`
+              : `Bar ${snapshot.id} was updated in memory but could not be written to the project DB.`,
+          });
+        }
       }
+
+      if (changed) dbState.setDirty();
     }
 
     function canApplyBarPlacements(nextBars: BarPlacement[]): boolean {
@@ -753,11 +771,13 @@ export function createSectionEditorPanel(
             subjectId: String(barId),
             description: err instanceof Error ? err.message : 'Could not sync edited timeline bar to Phoenix.',
           });
+          state.markSectionErrors([barId]);
         }
       }
     }
 
     function clearSectionErrors(barIds: number[]): void {
+      state.clearSectionErrors(barIds);
       state.clearEventsForSubjects(
         barIds.map(String),
         ['Phoenix section sync', 'Phoenix asset impact'],
@@ -766,6 +786,7 @@ export function createSectionEditorPanel(
 
     function recordSectionIssues(issues: ProjectSectionSyncIssue[]): void {
       if (issues.length === 0) return;
+      state.markSectionErrors(issues.map((issue) => issue.barId));
       state.addEvents(issues.map((issue) => ({
         severity: 'error',
         source: 'Phoenix section sync',
@@ -846,7 +867,14 @@ export function createSectionEditorPanel(
         render();
       }
     });
-    const unsubscribeDb = dbState.subscribe(render);
+    let lastDbStatus = dbState.getSnapshot().status;
+    let lastDbFileName = dbState.getSnapshot().fileName;
+    const unsubscribeDb = dbState.subscribe((snapshot) => {
+      if (snapshot.status === lastDbStatus && snapshot.fileName === lastDbFileName) return;
+      lastDbStatus = snapshot.status;
+      lastDbFileName = snapshot.fileName;
+      render();
+    });
 
     render();
     void refreshBarTypesFromGithub().then((nextTypes) => {

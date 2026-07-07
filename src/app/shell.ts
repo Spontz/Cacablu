@@ -206,6 +206,7 @@ export function createAppShell(root: HTMLElement): AppShell {
   async function openProjectHandle(handle: FileSystemFileHandle): Promise<void> {
     dbState.setOpening();
     state.clearResourceSelection();
+    state.resetSectionErrors();
     undoManager.clear();
     projectPhoenixSyncState = 'pending';
     workspace.closePanel('resources');
@@ -565,6 +566,7 @@ export function createAppShell(root: HTMLElement): AppShell {
 
   function recordSectionIssues(issues: ProjectSectionSyncError['issues']): void {
     if (issues.length === 0) return;
+    state.markSectionErrors(issues.map((issue) => issue.barId));
     state.addEvents(issues.map((issue) => ({
       severity: 'error',
       source: 'Phoenix section sync',
