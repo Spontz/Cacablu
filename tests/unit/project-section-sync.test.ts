@@ -88,6 +88,33 @@ describe('project section sync', () => {
     expect(result.issues).toEqual([]);
   });
 
+  it('orders sections by layer before sending them to Phoenix', () => {
+    const result = collectPhoenixSections({
+      bars: [
+        { ...makeDb().bars[0], id: 30, layer: 3, startTime: 1, endTime: 2 },
+        { ...makeDb().bars[0], id: 10, layer: 1, startTime: 5, endTime: 6 },
+        { ...makeDb().bars[0], id: 20, layer: 2, startTime: 3, endTime: 4 },
+        { ...makeDb().bars[0], id: 11, layer: 1, startTime: 2, endTime: 3 },
+      ],
+    });
+
+    expect(result.sections.map((section) => section.id)).toEqual(['11', '10', '20', '30']);
+  });
+
+  it('normalizes script line endings before sending sections to Phoenix', () => {
+    const result = collectPhoenixSections({
+      bars: [
+        {
+          ...makeDb().bars[0],
+          script: 'sModelFilePath /pool/model.3ds\rfEnableDepthBufferClearing 0\r[shader]\rpath /pool/shader.glsl\r',
+        },
+      ],
+    });
+
+    const script = decodeBase64(result.sections[0].scriptBase64);
+    expect(script).toBe('sModelFilePath /pool/model.3ds\r\nfEnableDepthBufferClearing 0\r\n[shader]\r\npath /pool/shader.glsl\r\n');
+  });
+
   it('replaces Phoenix sections when the manifest differs', async () => {
     const replaceAll = vi.fn().mockResolvedValue({
       requestId: 'sections-test',
@@ -223,4 +250,8 @@ function fnv1a(value: Uint8Array): string {
     hash = Math.imul(hash, 0x01000193) >>> 0;
   }
   return `fnv1a:${hash.toString(16).padStart(8, '0')}`;
+}
+
+function decodeBase64(value: string): string {
+  return new TextDecoder().decode(Uint8Array.from(atob(value), (char) => char.charCodeAt(0)));
 }

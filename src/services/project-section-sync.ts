@@ -253,7 +253,7 @@ async function buildExpectedSectionManifestEntries(
 }
 
 export function collectPhoenixSections(db: Pick<ProjectDatabase, 'bars'>): ProjectSectionCollection {
-  const bars = [...db.bars].filter((bar) => bar.enabled).sort((a, b) => a.id - b.id);
+  const bars = [...db.bars].filter((bar) => bar.enabled).sort(compareBarsForPhoenixLoad);
   const issues = bars
     .filter((bar) => bar.type.trim() !== '')
     .map((bar) => {
@@ -279,10 +279,22 @@ export function collectPhoenixSections(db: Pick<ProjectDatabase, 'bars'>): Proje
       srcBlending: bar.srcBlending,
       dstBlending: bar.dstBlending,
       blendingEQ: bar.blendingEQ,
-      scriptBase64: textToBase64(toText(bar.script)),
+      scriptBase64: textToBase64(normalizeSectionScriptLineEndings(toText(bar.script))),
     }));
 
   return { sections, issues };
+}
+
+function compareBarsForPhoenixLoad(
+  left: ProjectDatabase['bars'][number],
+  right: ProjectDatabase['bars'][number],
+): number {
+  return (
+    left.layer - right.layer ||
+    left.startTime - right.startTime ||
+    left.endTime - right.endTime ||
+    left.id - right.id
+  );
 }
 
 const SUPPORTED_PHOENIX_SECTION_TYPES = new Set([
@@ -405,6 +417,10 @@ function hashBytes(value: Uint8Array): string {
 
 function formatNumber(value: number): string {
   return Number.isInteger(value) ? String(value) : String(value);
+}
+
+function normalizeSectionScriptLineEndings(value: string): string {
+  return value.replace(/\r\n|\r|\n/g, '\r\n');
 }
 
 function throwIfAborted(signal?: AbortSignal): void {
