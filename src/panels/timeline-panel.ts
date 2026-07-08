@@ -24,6 +24,10 @@ const TRANSPORT_STEP_SECONDS = 1;
 const DRAG_THRESHOLD_PX = 3;
 const MOVE_SYNC_DELAY_MS = 850;
 const TRANSPORT_SYNC_GRACE_MS = 1200;
+const timelineScrollMemory = {
+  left: 0,
+  top: 0,
+};
 
 interface BarDragState {
   pointerId: number;
@@ -92,15 +96,14 @@ export function createTimelinePanel(
   });
 
   let lastTimestamp = 0;
-  let pendingPlayback: { playing: boolean; until: number } | null = null;
   let lastRenderedDuration = Number.NaN;
   let lastRenderedConnected = false;
   let lastRenderedSelectionSignature = '';
   let lastRenderedErrorSignature = '';
   let lastRenderedDisplayTimelineIds = false;
   let lastAppTimelineSignature = '';
-  let lastViewportScrollLeft = 0;
-  let lastViewportScrollTop = 0;
+  let lastViewportScrollLeft = timelineScrollMemory.left;
+  let lastViewportScrollTop = timelineScrollMemory.top;
   let runtimeAnchorTime = state.transport.currentTime;
   let runtimeAnchorTimestamp = performance.now();
   let dragState: BarDragState | null = null;
@@ -588,12 +591,8 @@ export function createTimelinePanel(
     try {
       await primePhoenixLogEvents(phoenixLogs);
       const result = await syncProjectBarToPhoenix(session.data, barId, phoenixSections);
-      if (result.issues.length === 0) {
-        clearSectionErrors([barId]);
-      }
-      if (result.issues.length > 0) {
-        await recordPhoenixLogsAsEvents(appState, phoenixLogs);
-      }
+      const logResult = await recordPhoenixLogsAsEvents(appState, phoenixLogs);
+      applySingleBarSyncErrorState(barId, result.issues, logResult);
       recordSectionIssues(result.issues);
     } catch (err) {
       if (err instanceof ProjectSectionSyncError) {
@@ -658,6 +657,29 @@ export function createTimelinePanel(
   function recordSectionIssues(issues: ProjectSectionSyncError['issues']): void {
     if (issues.length === 0) return;
     appState.markSectionErrors(issues.map((issue) => issue.barId));
+  }
+
+  function applySingleBarSyncErrorState(
+    barId: number,
+    issues: ProjectSectionSyncError['issues'],
+    logResult: Awaited<ReturnType<typeof recordPhoenixLogsAsEvents>>,
+  ): void {
+    const issueIds = new Set(issues.map((issue) => issue.barId));
+    const logErrorIds = new Set(logResult.errorSubjectIds);
+    if (logErrorIds.size > 0) {
+      appState.markSectionErrors([...logErrorIds]);
+    }
+
+    const currentBarFailed =
+      issueIds.has(barId) ||
+      logErrorIds.has(barId) ||
+      logResult.unassignedErrorCount > 0;
+
+    if (currentBarFailed) {
+      appState.markSectionErrors([barId]);
+    } else {
+      clearSectionErrors([barId]);
+    }
   }
 
   function clearSectionErrors(barIds: number[]): void {
@@ -913,11 +935,13 @@ export function createTimelinePanel(
         nextViewport.scrollTop = previousScrollTop;
         lastViewportScrollLeft = previousScrollLeft;
         lastViewportScrollTop = previousScrollTop;
+        timelineScrollMemory.left = previousScrollLeft;
+        timelineScrollMemory.top = previousScrollTop;
         requestAnimationFrame(() => {
           const refreshedViewport = element.querySelector<HTMLElement>('.timeline-panel__viewport');
           if (!refreshedViewport) return;
-          refreshedViewport.scrollLeft = lastViewportScrollLeft;
-          refreshedViewport.scrollTop = lastViewportScrollTop;
+          refreshedViewport.scrollLeft = timelineScrollMemory.left;
+          refreshedViewport.scrollTop = timelineScrollMemory.top;
         });
       }
       updatePlayhead();
@@ -935,8 +959,12 @@ export function createTimelinePanel(
 
       if (action === 'play') {
         const shouldPlay = !state.transport.isPlaying;
-        if (connection.send({ type: 'runtime.toggle' })) {
-          pendingPlayback = { playing: shouldPlay, until: Date.now() + 1000 };
+        if (connection.send({ type: shouldPlay ? 'runtime.play' : 'runtime.pause' })) {
+          state.transport.isPlaying = shouldPlay;
+          runtimeAnchorTime = state.transport.currentTime;
+          runtimeAnchorTimestamp = performance.now();
+          updatePlaybackVisualState();
+          updatePlayhead();
         }
         return;
       }
@@ -1049,18 +1077,6 @@ export function createTimelinePanel(
       runtimeAnchorTimestamp = performance.now();
 
       if (runtime.playing !== null) {
-        if (
-          pendingPlayback &&
-          runtime.playing !== pendingPlayback.playing &&
-          Date.now() < pendingPlayback.until
-        ) {
-          return;
-        }
-
-        if (pendingPlayback && runtime.playing === pendingPlayback.playing) {
-          pendingPlayback = null;
-        }
-
         state.transport.isPlaying = runtime.playing;
         if (!runtime.playing) {
           runtimeAnchorTime = state.transport.currentTime;
@@ -1494,11 +1510,71 @@ export function createTimelinePanel(
     };
     window.addEventListener('cacablu:timeline-bars-changed', handleBarsChanged);
 
+    const preserveTimelineScroll = (): void => {
+      const viewport = element.querySelector<HTMLElement>('.timeline-panel__viewport');
+      if (!viewport) return;
+      lastViewportScrollLeft = viewport.scrollLeft;
+      lastViewportScrollTop = viewport.scrollTop;
+      timelineScrollMemory.left = viewport.scrollLeft;
+      timelineScrollMemory.top = viewport.scrollTop;
+    };
+    window.addEventListener('cacablu:timeline-preserve-scroll', preserveTimelineScroll);
+
+    const revealBar = (barId: number): void => {
+      render(true);
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          const viewport = element.querySelector<HTMLElement>('.timeline-panel__viewport');
+          const clip = element.querySelector<HTMLElement>(`.timeline-panel__clip[data-bar-id="${barId}"]`);
+          if (!viewport || !clip) return;
+
+          const margin = 24;
+          const viewportRect = viewport.getBoundingClientRect();
+          const clipRect = clip.getBoundingClientRect();
+          let nextLeft = viewport.scrollLeft;
+          let nextTop = viewport.scrollTop;
+
+          if (clipRect.left < viewportRect.left + margin) {
+            nextLeft -= viewportRect.left + margin - clipRect.left;
+          } else if (clipRect.right > viewportRect.right - margin) {
+            nextLeft += clipRect.right - (viewportRect.right - margin);
+          }
+
+          if (clipRect.top < viewportRect.top + margin) {
+            nextTop -= viewportRect.top + margin - clipRect.top;
+          } else if (clipRect.bottom > viewportRect.bottom - margin) {
+            nextTop += clipRect.bottom - (viewportRect.bottom - margin);
+          }
+
+          nextLeft = Math.max(0, Math.min(nextLeft, viewport.scrollWidth - viewport.clientWidth));
+          nextTop = Math.max(0, Math.min(nextTop, viewport.scrollHeight - viewport.clientHeight));
+
+          viewport.scrollLeft = nextLeft;
+          viewport.scrollTop = nextTop;
+          lastViewportScrollLeft = nextLeft;
+          lastViewportScrollTop = nextTop;
+          timelineScrollMemory.left = nextLeft;
+          timelineScrollMemory.top = nextTop;
+          updatePlayhead();
+        });
+      });
+    };
+
+    const handleRevealBar = (event: Event): void => {
+      const detail = event instanceof CustomEvent ? event.detail as { barId?: unknown } : null;
+      const barId = Number(detail?.barId);
+      if (!Number.isInteger(barId)) return;
+      revealBar(barId);
+    };
+    window.addEventListener('cacablu:timeline-reveal-bar', handleRevealBar);
+
     const handleTimelineScroll = (event: Event): void => {
       if ((event.target as HTMLElement | null)?.classList.contains('timeline-panel__viewport')) {
         const viewport = event.target as HTMLElement;
         lastViewportScrollLeft = viewport.scrollLeft;
         lastViewportScrollTop = viewport.scrollTop;
+        timelineScrollMemory.left = viewport.scrollLeft;
+        timelineScrollMemory.top = viewport.scrollTop;
         updatePlayhead();
       }
     };
@@ -1573,6 +1649,10 @@ export function createTimelinePanel(
           refreshedViewport.scrollLeft =
             before * state.viewport.pixelsPerSecond * state.viewport.zoom -
             (event.clientX - refreshedViewport.getBoundingClientRect().left);
+          timelineScrollMemory.left = refreshedViewport.scrollLeft;
+          timelineScrollMemory.top = refreshedViewport.scrollTop;
+          lastViewportScrollLeft = refreshedViewport.scrollLeft;
+          lastViewportScrollTop = refreshedViewport.scrollTop;
         });
       },
       { passive: false },
@@ -1611,6 +1691,11 @@ export function createTimelinePanel(
     });
 
     return () => {
+      const viewport = element.querySelector<HTMLElement>('.timeline-panel__viewport');
+      if (viewport) {
+        timelineScrollMemory.left = viewport.scrollLeft;
+        timelineScrollMemory.top = viewport.scrollTop;
+      }
       if (moveSyncTimeout !== null) {
         window.clearTimeout(moveSyncTimeout);
         moveSyncTimeout = null;
@@ -1622,6 +1707,8 @@ export function createTimelinePanel(
       pendingMovedBarIds.clear();
       window.removeEventListener('cacablu:edit-delete', handleDeleteAction);
       window.removeEventListener('cacablu:timeline-bars-changed', handleBarsChanged);
+      window.removeEventListener('cacablu:timeline-preserve-scroll', preserveTimelineScroll);
+      window.removeEventListener('cacablu:timeline-reveal-bar', handleRevealBar);
       element.removeEventListener('scroll', handleTimelineScroll, true);
       renderTimeline = null;
     };

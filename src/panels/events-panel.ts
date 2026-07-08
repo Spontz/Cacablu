@@ -9,7 +9,6 @@ export function createEventsPanel(state: AppState): IContentRenderer {
     element.className = 'events-panel';
 
     let events: AppEvent[] = [];
-    let sectionErrorCount = 0;
     let query = '';
 
     const toolbar = document.createElement('div');
@@ -32,7 +31,6 @@ export function createEventsPanel(state: AppState): IContentRenderer {
     clearAll.textContent = 'Clear all';
     clearAll.addEventListener('click', () => {
       state.clearEvents();
-      state.resetSectionErrors();
     });
     toolbar.append(search, clearAll);
 
@@ -47,8 +45,7 @@ export function createEventsPanel(state: AppState): IContentRenderer {
     function render(): void {
       const snapshot = state.getSnapshot();
       events = snapshot.events;
-      sectionErrorCount = snapshot.sectionErrorIds.length;
-      clearAll.disabled = events.length === 0 && sectionErrorCount === 0;
+      clearAll.disabled = events.length === 0;
       renderList();
     }
 
@@ -67,7 +64,7 @@ export function createEventsPanel(state: AppState): IContentRenderer {
       }
 
       for (let index = 0; index < filteredEvents.length; index += 1) {
-        const item = createEventItem(filteredEvents[index], index, filteredEvents.length);
+        const item = createEventItem(filteredEvents[index], index, filteredEvents.length, state);
         list.append(item);
       }
     }
@@ -89,7 +86,7 @@ function filterEvents(events: AppEvent[], query: string): AppEvent[] {
   ].join(' ').toLowerCase().includes(query));
 }
 
-function createEventItem(event: AppEvent, index: number, total: number): HTMLElement {
+function createEventItem(event: AppEvent, index: number, total: number, state: AppState): HTMLElement {
   const item = document.createElement('div');
   item.className = 'events-listbox__item';
   item.dataset.severity = event.severity;
@@ -98,9 +95,27 @@ function createEventItem(event: AppEvent, index: number, total: number): HTMLEle
   item.setAttribute('aria-posinset', String(index + 1));
   item.setAttribute('aria-setsize', String(total));
 
-  const severity = document.createElement('span');
+  const problemBarId = inferProblemBarId(event);
+  const severity = problemBarId === null ? document.createElement('span') : document.createElement('button');
   severity.className = 'events-listbox__severity';
   severity.textContent = event.severity;
+  if (problemBarId !== null && severity instanceof HTMLButtonElement) {
+    severity.type = 'button';
+    severity.title = `Select bar ${problemBarId}`;
+    severity.setAttribute('aria-label', `Select bar ${problemBarId}`);
+    severity.addEventListener('click', (clickEvent) => {
+      clickEvent.preventDefault();
+      clickEvent.stopPropagation();
+      window.dispatchEvent(new CustomEvent('cacablu:open-timeline'));
+      state.setResourceSelection({ kind: 'bar', id: problemBarId });
+      requestAnimationFrame(() => {
+        window.dispatchEvent(new CustomEvent('cacablu:timeline-reveal-bar', {
+          detail: { barId: problemBarId },
+        }));
+      });
+      state.markEventsRead();
+    });
+  }
 
   const description = document.createElement('span');
   description.className = 'events-listbox__description';
@@ -116,4 +131,25 @@ function createEventItem(event: AppEvent, index: number, total: number): HTMLEle
   }
 
   return item;
+}
+
+function inferProblemBarId(event: AppEvent): number | null {
+  const subjectId = event.subjectId ? Number(event.subjectId) : Number.NaN;
+  if (Number.isInteger(subjectId)) return subjectId;
+
+  const description = event.description;
+  const patterns = [
+    /\[id:\s*(\d+)\b/i,
+    /\b[A-Za-z][A-Za-z0-9 _-]*\s+\[(\d+)\]\s*:/,
+    /\bSection\s+(\d+)\b/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = description.match(pattern);
+    if (!match) continue;
+    const id = Number(match[1]);
+    if (Number.isInteger(id)) return id;
+  }
+
+  return null;
 }

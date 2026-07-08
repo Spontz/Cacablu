@@ -346,6 +346,7 @@ export function createAppShell(root: HTMLElement): AppShell {
             .slice(0, newEventCount)
             .some((event) => event.severity === 'error');
           if (hasNewError) {
+            window.dispatchEvent(new CustomEvent('cacablu:timeline-preserve-scroll'));
             workspace.openPanel('events');
           }
         }
@@ -385,6 +386,10 @@ export function createAppShell(root: HTMLElement): AppShell {
           name,
           { fileId },
         );
+      });
+
+      window.addEventListener('cacablu:open-timeline', () => {
+        workspace.openPanel('timeline');
       });
 
       window.addEventListener('keydown', (event) => {
@@ -584,7 +589,10 @@ export function createAppShell(root: HTMLElement): AppShell {
   }
 
   async function recordRecentPhoenixLogs(signal?: AbortSignal): Promise<void> {
-    await recordPhoenixLogsAsEvents(state, phoenixLogs, signal);
+    const result = await recordPhoenixLogsAsEvents(state, phoenixLogs, signal);
+    if (result.errorSubjectIds.length > 0) {
+      state.markSectionErrors(result.errorSubjectIds);
+    }
   }
 }
 

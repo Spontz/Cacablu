@@ -491,7 +491,11 @@ export function createSectionEditorPanel(
           dstBlending: dstSelect.value,
           blendingEQ: equationSelect.value,
         }];
-        if (!barSnapshotsChanged(previous, next)) return;
+        if (!barSnapshotsChanged(previous, next)) {
+          void syncBarsToPhoenix([current.id]);
+          state.setResourceSelection({ kind: 'bar', id: current.id });
+          return;
+        }
 
         applyBarSnapshots(next);
         undoManager.push({
@@ -762,12 +766,8 @@ export function createSectionEditorPanel(
         try {
           await primePhoenixLogEvents(phoenixLogs);
           const result = await syncProjectBarToPhoenix(session.data, barId, phoenixSections);
-          if (result.issues.length === 0) {
-            clearSectionErrors([barId]);
-          }
-          if (result.issues.length > 0) {
-            await recordPhoenixLogsAsEvents(state, phoenixLogs);
-          }
+          const logResult = await recordPhoenixLogsAsEvents(state, phoenixLogs);
+          applySingleBarSyncErrorState(barId, result.issues, logResult);
           recordSectionIssues(result.issues);
         } catch (err) {
           if (err instanceof ProjectSectionSyncError) {
@@ -798,6 +798,29 @@ export function createSectionEditorPanel(
     function recordSectionIssues(issues: ProjectSectionSyncIssue[]): void {
       if (issues.length === 0) return;
       state.markSectionErrors(issues.map((issue) => issue.barId));
+    }
+
+    function applySingleBarSyncErrorState(
+      barId: number,
+      issues: ProjectSectionSyncIssue[],
+      logResult: Awaited<ReturnType<typeof recordPhoenixLogsAsEvents>>,
+    ): void {
+      const issueIds = new Set(issues.map((issue) => issue.barId));
+      const logErrorIds = new Set(logResult.errorSubjectIds);
+      if (logErrorIds.size > 0) {
+        state.markSectionErrors([...logErrorIds]);
+      }
+
+      const currentBarFailed =
+        issueIds.has(barId) ||
+        logErrorIds.has(barId) ||
+        logResult.unassignedErrorCount > 0;
+
+      if (currentBarFailed) {
+        state.markSectionErrors([barId]);
+      } else {
+        clearSectionErrors([barId]);
+      }
     }
 
     async function refreshScriptTemplates(
@@ -916,7 +939,7 @@ export function registerSectionIniLanguage(): void {
 
   monaco.languages.setLanguageConfiguration('cacablu-section-ini', {
     comments: {
-      lineComment: ';',
+      lineComment: '#',
     },
     brackets: [
       ['[', ']'],
@@ -940,16 +963,17 @@ export function registerSectionIniLanguage(): void {
       root: [
         [/^\s*[;#].*$/, 'comment'],
         [/^\s*\[[^\]]+\]/, 'section'],
+        [/\b[A-Za-z_][\w.-]*(?=\s*(?::=|=|:))/, 'key'],
         [/^\s*[A-Za-z_][\w.-]*(?=\s*(?:=|:))/, 'key'],
         [/^\s*[A-Za-z_][\w.-]*(?=\s+\S)/, 'key'],
-        [/[;#].*$/, 'comment'],
+        [/#.*$/, 'comment'],
         [/"([^"\\]|\\.)*$/, 'string.invalid'],
         [/'([^'\\]|\\.)*$/, 'string.invalid'],
         [/"/, 'string', '@stringDouble'],
         [/'/, 'string', '@stringSingle'],
         [/\b(?:true|false|yes|no|on|off|null)\b/, 'constant'],
         [/[+-]?(?:\d+\.\d+|\d+|\.\d+)(?:e[+-]?\d+)?\b/, 'number'],
-        [/[=:+,]/, 'delimiter'],
+        [/[=:+,;]/, 'delimiter'],
       ],
       stringDouble: [
         [/[^\\"]+/, 'string'],
