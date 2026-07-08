@@ -15,6 +15,15 @@ import { createPhoenixDemoSettingsClient } from '../phoenix/demo-settings-client
 import { createPhoenixLogClient } from '../phoenix/log-client';
 import { primePhoenixLogEvents, recordPhoenixLogsAsEvents } from '../phoenix/log-events';
 import { createUndoManager } from './undo-manager';
+import { getResourceSelectionSignature } from './selection-signature';
+import {
+  getSelectedExistingBars,
+  hasSelectedExistingBars,
+  restoreBarEnabledStates,
+  syncBarEnabledChangesToPhoenix,
+  toggleSelectedBarEnabledStates,
+  type BarEnableToggleResult,
+} from '../services/bar-enable-toggle';
 import {
   syncPublishedPoolFilesToPhoenix,
   type ProjectPoolSyncProgress,
@@ -64,6 +73,7 @@ export function createAppShell(root: HTMLElement): AppShell {
   let lastConnectionStatus = state.getSnapshot().connectionStatus;
   let lastEventCount = state.getSnapshot().events.length;
   let lastDisplayTimelineIds = state.getSnapshot().displayTimelineIds;
+  let lastResourceSelectionSignature = getResourceSelectionSignature(state.getSnapshot().resourceSelection);
   let projectPhoenixSyncState: 'pending' | 'synced' = 'pending';
   let phoenixProjectPromptOpen = false;
 
@@ -111,6 +121,9 @@ export function createAppShell(root: HTMLElement): AppShell {
           break;
         case 'select-all-bars':
           selectAllBars();
+          break;
+        case 'toggle-enable-bars':
+          void toggleSelectedBarsEnabled();
           break;
         case 'toggle-db-explorer':
           workspace.openFloating('db-explorer', 'db-explorer-panel', 'Database Explorer');
@@ -187,6 +200,10 @@ export function createAppShell(root: HTMLElement): AppShell {
     return event.key.toLowerCase() === 'a' && !event.shiftKey && !event.altKey && (event.ctrlKey || event.metaKey);
   }
 
+  function isToggleEnableBarsShortcut(event: KeyboardEvent): boolean {
+    return event.key.toLowerCase() === 'd' && !event.shiftKey && !event.altKey && (event.ctrlKey || event.metaKey);
+  }
+
   function isTextEditingTarget(target: EventTarget | null): boolean {
     if (!(target instanceof HTMLElement)) return false;
     return Boolean(target.closest('input, textarea, select, [contenteditable="true"], .monaco-editor'));
@@ -201,6 +218,61 @@ export function createAppShell(root: HTMLElement): AppShell {
     }
 
     state.setResourceSelection(ids.length === 1 ? { kind: 'bar', id: ids[0] } : { kind: 'bars', ids });
+  }
+
+  function getSelectedBarIds(): number[] {
+    if (!session) return [];
+    return getSelectedExistingBars(session.data, state.getSnapshot().resourceSelection).map((bar) => bar.id);
+  }
+
+  async function toggleSelectedBarsEnabled(): Promise<void> {
+    if (!session) return;
+    const selection = state.getSnapshot().resourceSelection;
+    const selectedIds = getSelectedBarIds();
+    if (selectedIds.length === 0) return;
+
+    const result = toggleSelectedBarEnabledStates(session, selection);
+    if (result.changed.length === 0) return;
+
+    state.setResourceSelection(selectedIds.length === 1 ? { kind: 'bar', id: selectedIds[0] } : { kind: 'bars', ids: selectedIds });
+    window.dispatchEvent(new CustomEvent('cacablu:timeline-bars-changed'));
+    undoManager.push({
+      label: `Toggle enable ${result.changed.length} bars`,
+      undo: async () => {
+        if (!session) return;
+        const undoResult = restoreBarEnabledStates(session, result.changed);
+        state.setResourceSelection(selectedIds.length === 1 ? { kind: 'bar', id: selectedIds[0] } : { kind: 'bars', ids: selectedIds });
+        window.dispatchEvent(new CustomEvent('cacablu:timeline-bars-changed'));
+        await syncBarEnableToggleResult(undoResult);
+      },
+    });
+
+    await syncBarEnableToggleResult(result);
+  }
+
+  async function syncBarEnableToggleResult(result: BarEnableToggleResult): Promise<void> {
+    if (!session || !connection.isConnected()) return;
+    try {
+      await primePhoenixLogEvents(phoenixLogs);
+      const syncResult = await syncBarEnabledChangesToPhoenix(session.data, result, connection, phoenixSections);
+      await recordRecentPhoenixLogs();
+      if (syncResult.deletedIds.length > 0) {
+        state.clearSectionErrors(syncResult.deletedIds);
+        state.clearEventsForSubjects(syncResult.deletedIds.map(String), ['Phoenix section sync']);
+      }
+      recordSectionIssues(syncResult.issues);
+    } catch (err) {
+      if (err instanceof ProjectSectionSyncError) {
+        recordSectionIssues(err.issues);
+        return;
+      }
+      state.addEvent({
+        severity: 'error',
+        source: 'Phoenix section sync',
+        description: err instanceof Error ? err.message : 'Could not sync bar enabled state to Phoenix.',
+      });
+      workspace.openPanel('events');
+    }
   }
 
   async function openProjectHandle(handle: FileSystemFileHandle): Promise<void> {
@@ -355,6 +427,11 @@ export function createAppShell(root: HTMLElement): AppShell {
           lastDisplayTimelineIds = snapshot.displayTimelineIds;
           syncMenuDisabled(dbState.getSnapshot());
         }
+        const resourceSelectionSignature = getResourceSelectionSignature(snapshot.resourceSelection);
+        if (resourceSelectionSignature !== lastResourceSelectionSignature) {
+          lastResourceSelectionSignature = resourceSelectionSignature;
+          syncMenuDisabled(dbState.getSnapshot());
+        }
       });
 
       dbState.subscribe((snapshot) => {
@@ -420,6 +497,16 @@ export function createAppShell(root: HTMLElement): AppShell {
         event.preventDefault();
         selectAllBars();
       });
+
+      window.addEventListener('keydown', (event) => {
+        if (!isToggleEnableBarsShortcut(event) || isTextEditingTarget(event.target)) {
+          return;
+        }
+
+        if (getSelectedBarIds().length === 0) return;
+        event.preventDefault();
+        void toggleSelectedBarsEnabled();
+      });
     },
   };
 
@@ -457,6 +544,12 @@ export function createAppShell(root: HTMLElement): AppShell {
       }
       if (action.id === 'select-all-bars') {
         return { ...action, disabled: !session || session.data.bars.length === 0 };
+      }
+      if (action.id === 'toggle-enable-bars') {
+        return {
+          ...action,
+          disabled: !hasSelectedExistingBars(session?.data ?? null, state.getSnapshot().resourceSelection),
+        };
       }
       if (fileActionDisabled) return { ...action, disabled: true };
       return action;

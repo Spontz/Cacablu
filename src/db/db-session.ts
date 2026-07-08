@@ -38,6 +38,7 @@ export interface DbSession {
   updateCell(tableName: DbTableName, rowKey: string | number, columnName: string, value: EditableDbValue): void;
   insertTimelineBar(input: NewTimelineBar): DbBar;
   deleteTimelineBars(ids: number[]): DbBar[];
+  setTimelineBarEnabled(barId: number, enabled: boolean): DbBar;
   upsertResourceFile(input: NewResourceFile): DbFile;
   insertResourceFolder(input: NewResourceFolder): DbFolder;
   moveResourceFile(fileId: number, parentId: number): DbFile;
@@ -158,6 +159,17 @@ function makeSession(handle: FileSystemFileHandle, db: SqlDatabase, data: Projec
       db.run(`DELETE FROM "BARS" WHERE "id" IN (${placeholders})`, deleted.map((bar) => bar.id));
       removeWhere(data.bars, (bar) => idSet.has(bar.id));
       return deleted;
+    },
+
+    setTimelineBarEnabled(barId, enabled): DbBar {
+      const bar = data.bars.find((candidate) => candidate.id === barId);
+      if (!bar) {
+        throw new Error(`Timeline bar ${barId} was not found.`);
+      }
+
+      db.run('UPDATE "BARS" SET "enabled" = ? WHERE "id" = ?', [enabled ? 1 : 0, barId]);
+      bar.enabled = enabled;
+      return bar;
     },
 
     upsertResourceFile(input): DbFile {

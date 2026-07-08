@@ -249,10 +249,7 @@ export function createResourcesPanel(
       treeEl.append(ul);
     }
 
-    function setSyncStatus(nextState: AssetOperationState, message: string): void {
-      if (nextState === 'error') {
-        console.warn(message);
-      }
+    function setSyncStatus(_nextState: AssetOperationState, _message: string): void {
     }
 
     render();

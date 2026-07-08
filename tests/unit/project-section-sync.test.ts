@@ -64,13 +64,28 @@ describe('project section sync', () => {
         barId: 17,
         sectionType: 'section',
         description: 'Bar 17 was not sent to Phoenix because "section" is not a supported Phoenix section type.',
+        kind: 'unsupported-type',
       },
       {
         barId: 18,
         sectionType: 'setVariable',
         description: 'Bar 18 was not sent to Phoenix because "setVariable" is not a supported Phoenix section type.',
+        kind: 'unsupported-type',
       },
     ]);
+  });
+
+  it('omits disabled bars and ignores unsupported disabled types', () => {
+    const result = collectPhoenixSections({
+      bars: [
+        { ...makeDb().bars[0], id: 16, type: 'drawImage', enabled: false },
+        { ...makeDb().bars[0], id: 17, type: 'setVariable', enabled: false },
+        { ...makeDb().bars[0], id: 18, type: 'drawImage', enabled: true },
+      ],
+    });
+
+    expect(result.sections.map((section) => section.id)).toEqual(['18']);
+    expect(result.issues).toEqual([]);
   });
 
   it('replaces Phoenix sections when the manifest differs', async () => {
@@ -187,6 +202,7 @@ describe('project section sync', () => {
       barId: 17,
       sectionType: 'drawImage',
       description: 'Section 17 was sent to Phoenix but did not load: Could not load section 17.',
+      kind: 'load-failed',
     }]);
   });
 

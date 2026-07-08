@@ -253,7 +253,7 @@ async function buildExpectedSectionManifestEntries(
 }
 
 export function collectPhoenixSections(db: Pick<ProjectDatabase, 'bars'>): ProjectSectionCollection {
-  const bars = [...db.bars].sort((a, b) => a.id - b.id);
+  const bars = [...db.bars].filter((bar) => bar.enabled).sort((a, b) => a.id - b.id);
   const issues = bars
     .filter((bar) => bar.type.trim() !== '')
     .map((bar) => {

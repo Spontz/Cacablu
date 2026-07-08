@@ -97,13 +97,11 @@ export function createConnectionController(state: AppState): ConnectionControlle
       try {
         parsed = JSON.parse(String(event.data));
       } catch {
-        console.warn('Ignoring malformed Phoenix WebSocket message.');
         return;
       }
 
       const message = normalizePhoenixMessage(parsed);
       if (!message) {
-        console.warn('Ignoring unsupported Phoenix WebSocket message.', parsed);
         return;
       }
 

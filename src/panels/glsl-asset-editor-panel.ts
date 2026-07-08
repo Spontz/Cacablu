@@ -84,7 +84,6 @@ export function createGlslAssetEditorPanel(
       monaco.editor.setModelLanguage(editorModel, 'glsl');
     }
     monaco.editor.setTheme(CACABLU_CODE_THEME);
-    verifyGlslTokenization();
 
     editor.addCommand(monaco.KeyMod.Shift | monaco.KeyCode.Enter, () => {
       if (!update.disabled) {
@@ -388,14 +387,6 @@ function getPanelFileId(params: { params?: unknown }): number | null {
   if (!rawParams || typeof rawParams !== 'object') return null;
   const fileId = (rawParams as Record<string, unknown>).fileId;
   return typeof fileId === 'number' && Number.isFinite(fileId) ? fileId : null;
-}
-
-function verifyGlslTokenization(): void {
-  const tokens = monaco.editor.tokenize('vec3 color = texture(sampler0, uv).rgb;', 'glsl')[0] ?? [];
-  const vecToken = tokens.find((token) => token.offset === 0);
-  if (vecToken && !vecToken.type.includes('type')) {
-    console.warn('GLSL highlighter did not classify vec3 as a type.', tokens);
-  }
 }
 
 function findAssetPath(db: Parameters<typeof buildResourceTree>[0], fileId: number): string | null {

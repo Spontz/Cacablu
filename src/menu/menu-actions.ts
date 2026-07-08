@@ -16,6 +16,7 @@ export function createDefaultMenuActions(): MenuActionDefinition[] {
     { id: 'edit-demo-settings', label: 'Demo Settings', menu: 'Edit' },
     { id: 'toggle-display-timeline-ids', label: 'Display IDs', menu: 'Bars' },
     { id: 'bars-separator-selection', label: '', menu: 'Bars', separator: true },
+    { id: 'toggle-enable-bars', label: 'Toggle Enable', menu: 'Bars', shortcut: { default: 'Ctrl+D', mac: '⌘D' } },
     { id: 'select-all-bars', label: 'Select All', menu: 'Bars', shortcut: { default: 'Ctrl+A', mac: '⌘A' } },
     { id: 'reset-layout', label: 'Close all panels', menu: 'Panels' },
     { id: 'panels-separator-close', label: '', menu: 'Panels', separator: true },

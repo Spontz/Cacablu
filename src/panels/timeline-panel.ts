@@ -167,6 +167,7 @@ export function createTimelinePanel(
         label: bar.name.trim(),
         start: bar.startTime,
         end: Math.max(bar.endTime, bar.startTime),
+        enabled: bar.enabled,
         metadata: { dbId: bar.id },
       }),
     );
@@ -866,6 +867,7 @@ export function createTimelinePanel(
                             const width = Math.max(rawWidth - 1, 1);
                             const isCompact = rawWidth < 8;
                             const dbId = typeof clip.metadata?.dbId === 'number' ? clip.metadata.dbId : null;
+                            const isEnabled = clip.enabled;
                             const isBoxSelected = dbId !== null && boxSelectedBarIds.has(dbId);
                             const isSelected = dbId !== null && (selectedBarIds.has(dbId) || isBoxSelected);
                             const isMovable = dbId !== null && (
@@ -875,6 +877,7 @@ export function createTimelinePanel(
                             const hasError = dbId !== null && erroredBarIds.has(dbId);
                             const isActive =
                               connected &&
+                              isEnabled &&
                               !hasError &&
                               state.transport.currentTime >= clip.start &&
                               state.transport.currentTime < clip.end;
@@ -883,7 +886,7 @@ export function createTimelinePanel(
                             const label = displayTimelineIds && dbId !== null && clip.label ? `${dbId} ${clip.label}` : clip.label;
 
                             return `
-                              <article class="timeline-panel__clip ${isActive ? 'is-active' : ''} ${isCompact ? 'is-compact' : ''} ${isSelected ? 'is-selected' : ''} ${isBoxSelected ? 'is-box-selected' : ''} ${isMovable ? 'is-movable' : ''} ${hasError ? 'has-error' : ''} ${isDragging ? 'is-dragging' : ''} ${isBlocked ? 'is-blocked' : ''}" data-bar-id="${dbId ?? ''}" tabindex="0" style="left:${left}px;width:${width}px;border-color:${clip.color ?? CLIP_COLOR}">
+                              <article class="timeline-panel__clip ${isActive ? 'is-active' : ''} ${isEnabled ? '' : 'is-disabled'} ${isCompact ? 'is-compact' : ''} ${isSelected ? 'is-selected' : ''} ${isBoxSelected ? 'is-box-selected' : ''} ${isMovable ? 'is-movable' : ''} ${hasError ? 'has-error' : ''} ${isDragging ? 'is-dragging' : ''} ${isBlocked ? 'is-blocked' : ''}" data-bar-id="${dbId ?? ''}" tabindex="0" style="left:${left}px;width:${width}px;border-color:${clip.color ?? CLIP_COLOR}">
                                 <span class="timeline-panel__clip-label">${label}</span>
                               </article>
                             `;
