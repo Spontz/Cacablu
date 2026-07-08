@@ -1,6 +1,7 @@
 const PHOENIX_HTTP_BASE = 'http://127.0.0.1:29100';
 
 export interface PhoenixLogEntry {
+  sequence?: number;
   severity: 'info' | 'warning' | 'error';
   message: string;
 }
@@ -43,6 +44,9 @@ function normalizePhoenixLogs(input: unknown): PhoenixLogEntry[] {
       : candidate.severity === 'warning'
         ? 'warning'
         : 'info';
-    return [{ severity, message: candidate.message.trim() }];
+    const sequence = typeof candidate.sequence === 'number' && Number.isFinite(candidate.sequence)
+      ? candidate.sequence
+      : undefined;
+    return [{ sequence, severity, message: candidate.message.trim() }];
   });
 }

@@ -100,6 +100,8 @@ As a user, I want Cacablu to publish the loaded project's bars to Phoenix as run
 4. **Given** section replacement succeeds, **When** Phoenix confirms the operation, **Then** Cacablu expects Phoenix to have created one `<id>.spo` file per received section directly under its active `data` folder.
 5. **Given** section replacement succeeds, **When** Phoenix confirms the operation, **Then** Cacablu completes project opening and the timeline/engine are considered aligned.
 6. **Given** the user cancels during bar/section sync, **When** cancellation is accepted, **Then** Cacablu aborts in-flight work where possible and leaves the project unopened.
+7. **Given** Phoenix is not connected, **When** the user opens a project, **Then** Cacablu skips pool, demo settings, and section sync without recording disconnected sync errors.
+8. **Given** a project is loaded with pending Phoenix sync, **When** Phoenix later connects, **Then** Cacablu asks the user whether to load that project into Phoenix.
 
 ### Edge Cases
 
@@ -149,7 +151,7 @@ As a user, I want Cacablu to publish the loaded project's bars to Phoenix as run
 - **FR-018**: The system MUST keep existing Phoenix time sync and preview behavior separate from asset sync state.
 - **FR-019**: On project open, after the initial pool sync completes or is skipped, the system MUST build an expected section snapshot from every database bar.
 - **FR-020**: The system MUST serialize each bar with id, type, start time, end time, enabled state, layer, source blend factor, destination blend factor, blend equation, and raw script text.
-- **FR-021**: The system MUST serialize empty or whitespace-only bar type as `section`.
+- **FR-021**: The system MUST treat empty or whitespace-only bar type as unconfigured and MUST NOT serialize it to Phoenix as a fallback type.
 - **FR-022**: The canonical serialized bar text MUST be equivalent to a Phoenix root `.spo` section containing `:::<type>`, `id`, `start`, `end`, `enabled`, `layer`, `blend`, `blendequation`, one blank line, and the script body.
 - **FR-023**: The system MUST request Phoenix's section manifest when Phoenix is connected and a loaded project is being opened.
 - **FR-024**: The system MUST compare expected project bars with Phoenix sections by id, type, start/end, enabled state, layer, blend metadata, and script content or canonical script hash.
@@ -160,6 +162,8 @@ As a user, I want Cacablu to publish the loaded project's bars to Phoenix as run
 - **FR-029**: After successful section replacement, Phoenix MUST persist every received section as `<id>.spo` directly under its active `data` folder.
 - **FR-030**: Persisted section files MUST use the canonical `.spo` format: `:::<type>`, `id`, `start`, `end`, `enabled`, `layer`, `blend`, `blendequation`, one blank line, and raw script body.
 - **FR-031**: When Phoenix deletes a section during full replacement or another editor section operation, Phoenix MUST delete the corresponding root `<id>.spo` file from its active `data` folder.
+- **FR-032**: If Phoenix is disconnected when a project opens, Cacablu MUST leave Phoenix sync pending without emitting section or asset sync failure Events.
+- **FR-033**: When Phoenix later connects while a project has pending sync, Cacablu MUST ask the user before starting pool, demo settings, or section synchronization for that project.
 
 ### Key Entities *(include if feature involves data)*
 

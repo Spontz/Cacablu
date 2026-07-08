@@ -4,10 +4,13 @@ export type EngineMessageType = 'status' | 'resource' | 'timeline' | 'event';
 
 export type ResourceSelection =
   | { kind: 'none' }
-  | { kind: 'folder'; id: number; name: string }
-  | { kind: 'file'; id: number; name: string; fileType: string }
   | { kind: 'bar'; id: number }
   | { kind: 'bars'; ids: number[] };
+
+export type AssetSelection =
+  | { kind: 'none' }
+  | { kind: 'folder'; id: number; name: string }
+  | { kind: 'file'; id: number; name: string; fileType: string };
 
 export type AppEventSeverity = 'info' | 'warning' | 'error';
 
@@ -45,6 +48,7 @@ export interface AppSnapshot {
   connectionLabel: string;
   lastError: string | null;
   resourceSelection: ResourceSelection;
+  assetSelection: AssetSelection;
   events: AppEvent[];
   unreadEventCount: number;
   displayTimelineIds: boolean;

@@ -167,7 +167,7 @@ export function createInspectorPanel(
         return;
       }
 
-      const selection = state.getSnapshot().resourceSelection;
+      const selection = state.getSnapshot().assetSelection;
       if (selection.kind === 'none') {
         renderEmpty();
         return;
@@ -175,11 +175,6 @@ export function createInspectorPanel(
 
       if (selection.kind === 'folder') {
         renderFolder(selection.name);
-        return;
-      }
-
-      if (selection.kind === 'bar' || selection.kind === 'bars') {
-        renderEmpty('Use Bar Editor to edit the selected timeline bar.');
         return;
       }
 

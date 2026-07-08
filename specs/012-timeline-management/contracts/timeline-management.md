@@ -26,7 +26,7 @@ Sync target:
 
 Failure behavior:
 
-- disconnected Phoenix: record an Event and keep local edit
+- disconnected Phoenix: do not send a request, do not record a synthetic sync failure, and keep the local edit
 - validation error: record an Event and keep local edit
 - Phoenix rejected section: record Events with affected bar ids when available and keep local edit
 
@@ -47,7 +47,7 @@ Timeline sync Events SHOULD include:
 - subject id: bar id when known
 - description: human-readable failure or status
 
-Known section sync errors MUST drive the timeline error style for matching bars until the Events collection is cleared.
+Known section sync errors MUST update a tracked section-error id set. Timeline error style is driven by that set and remains stable until the affected ids are cleared by successful resync or project reset.
 
 ## Bar Editor Controls
 
@@ -62,7 +62,9 @@ The Bar Editor MUST expose:
 - `Blend Equation` selector
 - `Apply` button
 
-`Apply` MUST persist script, source blend, destination blend, and blend equation to the active project session. Blend Equation user-facing values are `Add`, `Subtract`, and `Reverse subtract`; persisted values remain Phoenix-compatible.
+`Apply` MUST persist name, bar type, script, start time, end time, source blend, destination blend, and blend equation to the active project session. Blend Equation user-facing values are `Add`, `Subtract`, and `Reverse subtract`; persisted values remain Phoenix-compatible.
+
+If edited time fields are invalid, `Apply` MUST preserve the previous valid time range while still persisting valid non-time edits. Local edits MUST be kept in memory and in the active session even when Phoenix rejects the synchronized section.
 
 Single-clicking a timeline bar MUST open or reinitialize the Bar Editor on the right, including when the same selected bar is clicked again.
 
@@ -82,4 +84,5 @@ This feature SHOULD NOT add new Phoenix endpoints. It reuses:
 
 - section manifest
 - full section replacement
+- single-section update for committed bar moves or Bar Editor Apply
 - Phoenix WebSocket events/errors

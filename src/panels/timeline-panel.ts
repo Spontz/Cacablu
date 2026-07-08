@@ -13,6 +13,8 @@ import type { ConnectionController } from '../ws/connection';
 import type { DbBar } from '../db/db-schema';
 import type { UndoManager } from '../app/undo-manager';
 import { createPhoenixSectionClient } from '../phoenix/section-client';
+import { createPhoenixLogClient } from '../phoenix/log-client';
+import { primePhoenixLogEvents, recordPhoenixLogsAsEvents } from '../phoenix/log-events';
 import { ProjectSectionSyncError, syncProjectBarToPhoenix } from '../services/project-section-sync';
 import { createContentRenderer } from './base-panel';
 
@@ -96,6 +98,9 @@ export function createTimelinePanel(
   let lastRenderedSelectionSignature = '';
   let lastRenderedErrorSignature = '';
   let lastRenderedDisplayTimelineIds = false;
+  let lastAppTimelineSignature = '';
+  let lastViewportScrollLeft = 0;
+  let lastViewportScrollTop = 0;
   let runtimeAnchorTime = state.transport.currentTime;
   let runtimeAnchorTimestamp = performance.now();
   let dragState: BarDragState | null = null;
@@ -109,6 +114,7 @@ export function createTimelinePanel(
   let suppressUndoRegistration = false;
   let renderTimeline: ((force?: boolean) => void) | null = null;
   const phoenixSections = createPhoenixSectionClient();
+  const phoenixLogs = createPhoenixLogClient();
 
   function isProjectReady(): boolean {
     const status = dbState.getSnapshot().status;
@@ -216,22 +222,7 @@ export function createTimelinePanel(
 
   function getErroredSectionBarIds(): Set<number> {
     const snapshot = appState.getSnapshot();
-    const ids = new Set<number>(snapshot.sectionErrorIds);
-    for (const event of snapshot.events) {
-      if (
-        event.severity !== 'error'
-        || (event.source !== 'Phoenix section sync' && event.source !== 'Phoenix asset impact')
-        || !event.subjectId
-      ) {
-        continue;
-      }
-
-      const id = Number(event.subjectId);
-      if (Number.isInteger(id)) {
-        ids.add(id);
-      }
-    }
-    return ids;
+    return new Set<number>(snapshot.sectionErrorIds);
   }
 
   function findBar(barId: number): DbBar | null {
@@ -595,17 +586,23 @@ export function createTimelinePanel(
     }
 
     try {
+      await primePhoenixLogEvents(phoenixLogs);
       const result = await syncProjectBarToPhoenix(session.data, barId, phoenixSections);
       if (result.issues.length === 0) {
         clearSectionErrors([barId]);
       }
+      if (result.issues.length > 0) {
+        await recordPhoenixLogsAsEvents(appState, phoenixLogs);
+      }
       recordSectionIssues(result.issues);
     } catch (err) {
       if (err instanceof ProjectSectionSyncError) {
+        await recordPhoenixLogsAsEvents(appState, phoenixLogs);
         recordSectionIssues(err.issues);
         return;
       }
 
+      await recordPhoenixLogsAsEvents(appState, phoenixLogs);
       appState.addEvent({
         severity: 'error',
         source: 'Phoenix section sync',
@@ -661,12 +658,6 @@ export function createTimelinePanel(
   function recordSectionIssues(issues: ProjectSectionSyncError['issues']): void {
     if (issues.length === 0) return;
     appState.markSectionErrors(issues.map((issue) => issue.barId));
-    appState.addEvents(issues.map((issue) => ({
-      severity: 'error',
-      source: 'Phoenix section sync',
-      subjectId: String(issue.barId),
-      description: issue.description,
-    })));
   }
 
   function clearSectionErrors(barIds: number[]): void {
@@ -800,8 +791,8 @@ export function createTimelinePanel(
       const effectivePixelsPerSecond = state.viewport.pixelsPerSecond * state.viewport.zoom;
       const playTitle = state.transport.isPlaying ? 'Pause' : 'Play';
       const previousViewport = element.querySelector<HTMLElement>('.timeline-panel__viewport');
-      const previousScrollLeft = previousViewport?.scrollLeft ?? 0;
-      const previousScrollTop = previousViewport?.scrollTop ?? 0;
+      const previousScrollLeft = previousViewport?.scrollLeft ?? lastViewportScrollLeft;
+      const previousScrollTop = previousViewport?.scrollTop ?? lastViewportScrollTop;
       const viewportWidth = previousViewport?.clientWidth ?? element.clientWidth;
       const playheadLeft = state.transport.currentTime * effectivePixelsPerSecond;
       const timelineWidth = Math.max(state.transport.duration * effectivePixelsPerSecond, viewportWidth);
@@ -920,6 +911,14 @@ export function createTimelinePanel(
       if (nextViewport) {
         nextViewport.scrollLeft = previousScrollLeft;
         nextViewport.scrollTop = previousScrollTop;
+        lastViewportScrollLeft = previousScrollLeft;
+        lastViewportScrollTop = previousScrollTop;
+        requestAnimationFrame(() => {
+          const refreshedViewport = element.querySelector<HTMLElement>('.timeline-panel__viewport');
+          if (!refreshedViewport) return;
+          refreshedViewport.scrollLeft = lastViewportScrollLeft;
+          refreshedViewport.scrollTop = lastViewportScrollTop;
+        });
       }
       updatePlayhead();
       updateActiveClipStates();
@@ -1076,7 +1075,19 @@ export function createTimelinePanel(
       render();
     });
 
-    appState.subscribe(() => {
+    appState.subscribe((snapshot) => {
+      const nextSignature = [
+        snapshot.connectionStatus,
+        snapshot.displayTimelineIds ? 'ids' : 'no-ids',
+        snapshot.resourceSelection.kind === 'bar'
+          ? `bar:${snapshot.resourceSelection.id}`
+          : snapshot.resourceSelection.kind === 'bars'
+            ? `bars:${[...snapshot.resourceSelection.ids].sort((a, b) => a - b).join(',')}`
+            : 'none',
+        snapshot.sectionErrorIds.join(','),
+      ].join('|');
+      if (nextSignature === lastAppTimelineSignature) return;
+      lastAppTimelineSignature = nextSignature;
       render();
     });
 
@@ -1485,6 +1496,9 @@ export function createTimelinePanel(
 
     const handleTimelineScroll = (event: Event): void => {
       if ((event.target as HTMLElement | null)?.classList.contains('timeline-panel__viewport')) {
+        const viewport = event.target as HTMLElement;
+        lastViewportScrollLeft = viewport.scrollLeft;
+        lastViewportScrollTop = viewport.scrollTop;
         updatePlayhead();
       }
     };

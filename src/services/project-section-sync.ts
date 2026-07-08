@@ -25,6 +25,7 @@ export interface ProjectSectionSyncIssue {
   barId: number;
   sectionType: string;
   description: string;
+  kind: 'unsupported-type' | 'load-failed';
 }
 
 export class ProjectSectionSyncError extends Error {
@@ -106,6 +107,7 @@ export async function syncProjectBarsToPhoenix(
     barId: Number.parseInt(section.id, 10),
     sectionType: sections.find((candidate) => candidate.id === section.id)?.type ?? '(unknown)',
     description: `Section ${section.id} was sent to Phoenix but did not load: ${section.message}.`,
+    kind: 'load-failed',
   }));
   const allIssues = [...issues, ...loadIssues];
   onProgress({
@@ -145,6 +147,7 @@ export async function syncProjectBarToPhoenix(
     barId: Number.parseInt(section.id, 10),
     sectionType: sections[0].type,
     description: `Section ${section.id} was sent to Phoenix but did not load: ${section.message}.`,
+    kind: 'load-failed',
   }));
   const allIssues = [...issues, ...loadIssues];
   return {
@@ -259,6 +262,7 @@ export function collectPhoenixSections(db: Pick<ProjectDatabase, 'bars'>): Proje
         barId: bar.id,
         sectionType,
         description: `Bar ${bar.id} was not sent to Phoenix because "${sectionType}" is not a supported Phoenix section type.`,
+        kind: 'unsupported-type' as const,
       };
     })
     .filter((issue) => !isSupportedPhoenixSectionType(issue.sectionType));

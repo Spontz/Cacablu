@@ -9,6 +9,8 @@ import type { DbBar } from '../db/db-schema';
 import type { ConnectionController } from '../ws/connection';
 import type { UndoManager } from '../app/undo-manager';
 import { createPhoenixSectionClient } from '../phoenix/section-client';
+import { createPhoenixLogClient } from '../phoenix/log-client';
+import { primePhoenixLogEvents, recordPhoenixLogsAsEvents } from '../phoenix/log-events';
 import { ProjectSectionSyncError, syncProjectBarToPhoenix, type ProjectSectionSyncIssue } from '../services/project-section-sync';
 import { createContentRenderer } from './base-panel';
 import { CACABLU_CODE_THEME, registerCacabluCodeTheme } from './code-editor-theme';
@@ -127,6 +129,7 @@ export function createSectionEditorPanel(
     let templateContentRequestId = 0;
     let suppressTemplateMismatchClear = false;
     const phoenixSections = createPhoenixSectionClient();
+    const phoenixLogs = createPhoenixLogClient();
 
     function disposeCodeEditor(): void {
       templateContentRequestId += 1;
@@ -258,6 +261,7 @@ export function createSectionEditorPanel(
       activeBarTypeMenu = barTemplateMenu;
       barTemplateCombo.append(barTemplateInput, barTemplateMenu);
       barTemplateField.append(barTemplateCombo);
+      attachComboMenuScrollBehavior(barTemplateMenu);
       refreshActiveBarTypeCombo();
 
       const scriptTemplateField = createField('Script Template');
@@ -272,6 +276,7 @@ export function createSectionEditorPanel(
       scriptTemplateMenu.hidden = true;
       scriptTemplateCombo.append(scriptTemplateInput, scriptTemplateMenu);
       scriptTemplateField.append(scriptTemplateCombo);
+      attachComboMenuScrollBehavior(scriptTemplateMenu);
 
       const saveTemplate = document.createElement('button');
       saveTemplate.type = 'button';
@@ -755,16 +760,22 @@ export function createSectionEditorPanel(
 
       for (const barId of barIds) {
         try {
+          await primePhoenixLogEvents(phoenixLogs);
           const result = await syncProjectBarToPhoenix(session.data, barId, phoenixSections);
           if (result.issues.length === 0) {
             clearSectionErrors([barId]);
           }
+          if (result.issues.length > 0) {
+            await recordPhoenixLogsAsEvents(state, phoenixLogs);
+          }
           recordSectionIssues(result.issues);
         } catch (err) {
           if (err instanceof ProjectSectionSyncError) {
+            await recordPhoenixLogsAsEvents(state, phoenixLogs);
             recordSectionIssues(err.issues);
             continue;
           }
+          await recordPhoenixLogsAsEvents(state, phoenixLogs);
           state.addEvent({
             severity: 'error',
             source: 'Phoenix section sync',
@@ -787,12 +798,6 @@ export function createSectionEditorPanel(
     function recordSectionIssues(issues: ProjectSectionSyncIssue[]): void {
       if (issues.length === 0) return;
       state.markSectionErrors(issues.map((issue) => issue.barId));
-      state.addEvents(issues.map((issue) => ({
-        severity: 'error',
-        source: 'Phoenix section sync',
-        subjectId: String(issue.barId),
-        description: issue.description,
-      })));
     }
 
     async function refreshScriptTemplates(
@@ -1088,6 +1093,20 @@ function populateScriptTemplateMenu(
     });
     menu.append(option);
   }
+}
+
+function attachComboMenuScrollBehavior(menu: HTMLElement): void {
+  menu.addEventListener('mousedown', (event) => {
+    event.preventDefault();
+  });
+  menu.addEventListener('wheel', (event) => {
+    const canScroll = menu.scrollHeight > menu.clientHeight;
+    if (!canScroll) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    menu.scrollTop += event.deltaY;
+  }, { passive: false });
 }
 
 function populateStringOptionMenu(

@@ -87,12 +87,12 @@
 
 - [ ] T037 [US4] Add debounced timeline section sync scheduler
 - [x] T038 [US4] Use single-section sync for committed bar move edits
-- [ ] T039 [US4] Skip sync when Phoenix is disconnected and record an Event
+- [ ] T039 [US4] Skip sync when Phoenix is disconnected without recording synthetic sync-failure Events
 - [x] T040 [US4] Record Phoenix section sync errors as Events with bar ids when known
 - [x] T041 [US4] Mark timeline bars with known section sync errors in red
 - [x] T042 [US4] Ensure sync modal progress counters advance only for real processed units
 - [ ] T043 [US4] Prevent sync loops from runtime state updates
-- [ ] T044 [US4] Add tests for sync scheduling and disconnected behavior
+- [ ] T044 [US4] Add tests for sync scheduling, disconnected behavior, and persistent section-error id state
 - [ ] T045 [US4] Manually validate connected and disconnected edit sync flows
 
 ---

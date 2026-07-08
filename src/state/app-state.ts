@@ -1,4 +1,4 @@
-import type { AppEvent, AppSnapshot, ConnectionStatus, ResourceSelection } from '../app/types';
+import type { AppEvent, AppSnapshot, AssetSelection, ConnectionStatus, ResourceSelection } from '../app/types';
 
 type Listener = (snapshot: AppSnapshot) => void;
 
@@ -9,6 +9,8 @@ export interface AppState {
   setConnection(status: ConnectionStatus, label: string, error?: string | null): void;
   setResourceSelection(selection: ResourceSelection): void;
   clearResourceSelection(): void;
+  setAssetSelection(selection: AssetSelection): void;
+  clearAssetSelection(): void;
   setDisplayTimelineIds(display: boolean): void;
   toggleDisplayTimelineIds(): void;
   addEvent(event: Omit<AppEvent, 'id' | 'timestamp'> & { id?: string; timestamp?: number }): void;
@@ -27,6 +29,7 @@ const INITIAL_SNAPSHOT: AppSnapshot = {
   connectionLabel: 'Engine disconnected',
   lastError: null,
   resourceSelection: { kind: 'none' },
+  assetSelection: { kind: 'none' },
   events: [],
   unreadEventCount: 0,
   displayTimelineIds: false,
@@ -99,6 +102,22 @@ export function createAppState(): AppState {
       publish();
     },
 
+    setAssetSelection(selection: AssetSelection): void {
+      snapshot = {
+        ...snapshot,
+        assetSelection: selection,
+      };
+      publish();
+    },
+
+    clearAssetSelection(): void {
+      snapshot = {
+        ...snapshot,
+        assetSelection: { kind: 'none' },
+      };
+      publish();
+    },
+
     setDisplayTimelineIds(display): void {
       if (snapshot.displayTimelineIds === display) return;
       snapshot = {
@@ -126,7 +145,7 @@ export function createAppState(): AppState {
       }));
       snapshot = {
         ...snapshot,
-        events: [...nextEvents, ...snapshot.events].slice(0, 200),
+        events: [...nextEvents, ...snapshot.events].slice(0, 1000),
         unreadEventCount: snapshot.unreadEventCount + nextEvents.length,
       };
       publish();

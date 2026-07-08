@@ -163,7 +163,7 @@ export function createResourcesPanel(
 
     function renderNode(node: ResourceTreeNode, parent: HTMLElement): void {
       const li = document.createElement('li');
-      const selection = state.getSnapshot().resourceSelection;
+      const selection = state.getSnapshot().assetSelection;
 
       if (node.kind === 'folder') {
         li.className = 'resources__folder';
@@ -366,7 +366,7 @@ export function createResourcesPanel(
       const file = target.closest<HTMLElement>('[data-resource-kind="file"]');
       if (file?.dataset.resourceId) {
         const name = file.dataset.resourceName ?? '';
-        state.setResourceSelection({
+        state.setAssetSelection({
           kind: 'file',
           id: Number(file.dataset.resourceId),
           name,
@@ -389,7 +389,7 @@ export function createResourcesPanel(
       const folder = folderRow?.closest<HTMLElement>('[data-folder-id]');
       if (!folder?.dataset.folderId || !folderRow) return;
       const id = Number(folder.dataset.folderId);
-      state.setResourceSelection({
+      state.setAssetSelection({
         kind: 'folder',
         id,
         name: folderRow.querySelector<HTMLElement>('.resources__label')?.textContent ?? '',
@@ -407,7 +407,7 @@ export function createResourcesPanel(
       if (!name.toLowerCase().endsWith('.glsl')) return;
       event.preventDefault();
       event.stopPropagation();
-      state.setResourceSelection({
+      state.setAssetSelection({
         kind: 'file',
         id: Number(file.dataset.resourceId),
         name,

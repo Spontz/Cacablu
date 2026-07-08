@@ -102,7 +102,7 @@ export function createGlslAssetEditorPanel(
         return;
       }
 
-      const selection = state.getSnapshot().resourceSelection;
+      const selection = state.getSnapshot().assetSelection;
       const targetFileId = fixedFileId ?? (selection.kind === 'file' ? selection.id : null);
       if (targetFileId === null) {
         setEmpty('Select a GLSL asset.');
@@ -133,7 +133,7 @@ export function createGlslAssetEditorPanel(
     const unsubscribeState = state.subscribe(() => {
       syncUpdateDisabled();
       if (fixedFileId !== null) return;
-      const selection = state.getSnapshot().resourceSelection;
+      const selection = state.getSnapshot().assetSelection;
       const nextId = selection.kind === 'file' ? selection.id : null;
       if (nextId !== currentFileId) {
         loadCurrentSelection();

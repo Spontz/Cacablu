@@ -40,42 +40,44 @@ describe('createAppState', () => {
     const state = createAppState();
 
     expect(state.getSnapshot().resourceSelection).toEqual({ kind: 'none' });
+    expect(state.getSnapshot().assetSelection).toEqual({ kind: 'none' });
   });
 
-  it('updates and clears file resource selection', () => {
+  it('updates and clears file asset selection', () => {
     const state = createAppState();
 
-    state.setResourceSelection({
+    state.setAssetSelection({
       kind: 'file',
       id: 7,
       name: 'hero.png',
       fileType: 'image/png',
     });
 
-    expect(state.getSnapshot().resourceSelection).toEqual({
+    expect(state.getSnapshot().assetSelection).toEqual({
       kind: 'file',
       id: 7,
       name: 'hero.png',
       fileType: 'image/png',
     });
-
-    state.clearResourceSelection();
-
     expect(state.getSnapshot().resourceSelection).toEqual({ kind: 'none' });
+
+    state.clearAssetSelection();
+
+    expect(state.getSnapshot().assetSelection).toEqual({ kind: 'none' });
   });
 
-  it('keeps resource selections isolated per state instance', () => {
+  it('keeps asset selections isolated per state instance', () => {
     const first = createAppState();
     const second = createAppState();
 
-    first.setResourceSelection({ kind: 'folder', id: 3, name: 'Images' });
+    first.setAssetSelection({ kind: 'folder', id: 3, name: 'Images' });
 
-    expect(first.getSnapshot().resourceSelection).toEqual({
+    expect(first.getSnapshot().assetSelection).toEqual({
       kind: 'folder',
       id: 3,
       name: 'Images',
     });
-    expect(second.getSnapshot().resourceSelection).toEqual({ kind: 'none' });
+    expect(second.getSnapshot().assetSelection).toEqual({ kind: 'none' });
   });
 
   it('records application events', () => {

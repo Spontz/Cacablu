@@ -31,7 +31,7 @@ Reads current Phoenix demo settings and supported log detail options.
 
 ## PUT /api/demo-settings
 
-Replaces Phoenix demo control settings. Phoenix applies them in memory and writes `data/config/control.spo`.
+Replaces Phoenix demo control settings. Cacablu stores the UI value in the project DB variable `grid`, sends that value as Phoenix API field `debugFloor`, and Phoenix applies the settings in memory and writes `data/config/control.spo`.
 
 ### Request
 

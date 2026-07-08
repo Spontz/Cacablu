@@ -13,6 +13,7 @@ import { createPhoenixAssetClient } from '../phoenix/asset-client';
 import { createPhoenixSectionClient } from '../phoenix/section-client';
 import { createPhoenixDemoSettingsClient } from '../phoenix/demo-settings-client';
 import { createPhoenixLogClient } from '../phoenix/log-client';
+import { primePhoenixLogEvents, recordPhoenixLogsAsEvents } from '../phoenix/log-events';
 import { createUndoManager } from './undo-manager';
 import {
   syncPublishedPoolFilesToPhoenix,
@@ -55,7 +56,6 @@ export function createAppShell(root: HTMLElement): AppShell {
   const phoenixSections = createPhoenixSectionClient();
   const phoenixDemoSettings = createPhoenixDemoSettingsClient();
   const phoenixLogs = createPhoenixLogClient();
-  const recordedPhoenixLogs = new Set<string>();
 
   let session: DbSession | null = null;
   let poolSyncModal: PoolSyncModal | null = null;
@@ -320,10 +320,10 @@ export function createAppShell(root: HTMLElement): AppShell {
           promptToLoadProjectInPhoenix();
         }
         lastConnectionStatus = snapshot.connectionStatus;
-        if (snapshot.resourceSelection.kind === 'file' && snapshot.resourceSelection.id !== lastInspectorSelectionId) {
-          lastInspectorSelectionId = snapshot.resourceSelection.id;
+        if (snapshot.assetSelection.kind === 'file' && snapshot.assetSelection.id !== lastInspectorSelectionId) {
+          lastInspectorSelectionId = snapshot.assetSelection.id;
           workspace.openPanel('inspector', { widthRatio: SIDE_PANEL_WIDTH_RATIO });
-        } else if (snapshot.resourceSelection.kind !== 'file') {
+        } else if (snapshot.assetSelection.kind !== 'file') {
           lastInspectorSelectionId = null;
         }
         const sectionEditorSelectionId = snapshot.resourceSelection.kind === 'bar'
@@ -476,6 +476,7 @@ export function createAppShell(root: HTMLElement): AppShell {
       }, { signal: abortController.signal });
       let stopLogCapture: (() => void) | null = null;
       try {
+        await primePhoenixLogEvents(phoenixLogs, abortController.signal);
         stopLogCapture = startPhoenixLogCapture(abortController.signal);
         const sectionSync = await syncProjectBarsToPhoenix(openedSession.data, phoenixSections, (progress) => {
           poolSyncModal?.update(progress);
@@ -567,13 +568,6 @@ export function createAppShell(root: HTMLElement): AppShell {
   function recordSectionIssues(issues: ProjectSectionSyncError['issues']): void {
     if (issues.length === 0) return;
     state.markSectionErrors(issues.map((issue) => issue.barId));
-    state.addEvents(issues.map((issue) => ({
-      severity: 'error',
-      source: 'Phoenix section sync',
-      subjectId: String(issue.barId),
-      description: issue.description,
-    })));
-    workspace.openPanel('events');
   }
 
   function startPhoenixLogCapture(signal: AbortSignal): () => void {
@@ -583,8 +577,6 @@ export function createAppShell(root: HTMLElement): AppShell {
       void recordRecentPhoenixLogs(signal);
     }, 50);
 
-    void recordRecentPhoenixLogs(signal);
-
     return () => {
       stopped = true;
       window.clearInterval(timer);
@@ -592,28 +584,7 @@ export function createAppShell(root: HTMLElement): AppShell {
   }
 
   async function recordRecentPhoenixLogs(signal?: AbortSignal): Promise<void> {
-    try {
-      const logs = await phoenixLogs.fetchRecent(signal);
-      const next = logs
-        .filter((entry) => entry.severity !== 'info')
-        .filter((entry) => entry.message.trim() !== '')
-        .filter((entry) => {
-          const key = `${entry.severity}:${entry.message}`;
-          if (recordedPhoenixLogs.has(key)) return false;
-          recordedPhoenixLogs.add(key);
-          return true;
-        })
-        .map((entry) => ({
-          severity: entry.severity,
-          source: 'Phoenix log',
-          description: entry.message,
-        }));
-      if (next.length > 0) {
-        state.addEvents(next);
-      }
-    } catch (err) {
-      if (isAbortError(err)) throw err;
-    }
+    await recordPhoenixLogsAsEvents(state, phoenixLogs, signal);
   }
 }
 

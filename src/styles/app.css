@@ -824,27 +824,83 @@ body > .context-view {
   flex-direction: column;
 }
 
+.events-panel__toolbar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 2px 6px;
+}
+
+.events-panel__search {
+  min-width: 0;
+  flex: 1 1 auto;
+  height: 26px;
+  border: 1px solid rgba(116, 137, 166, 0.28);
+  border-radius: 4px;
+  background: rgba(10, 15, 22, 0.72);
+  color: #e6ebf2;
+  font: inherit;
+  font-size: 11px;
+  padding: 0 8px;
+}
+
+.events-panel__search::placeholder {
+  color: #7f8a9a;
+}
+
+.events-panel__search:focus {
+  border-color: rgba(126, 232, 255, 0.72);
+  outline: none;
+}
+
+.events-panel__clear {
+  flex: 0 0 auto;
+  border: 1px solid rgba(116, 137, 166, 0.28);
+  border-radius: 4px;
+  background: rgba(10, 15, 22, 0.72);
+  color: #d9e2ef;
+  font: inherit;
+  font-size: 11px;
+  line-height: 1;
+  padding: 5px 8px;
+  cursor: pointer;
+}
+
+.events-panel__clear:hover:not(:disabled),
+.events-panel__clear:focus-visible {
+  border-color: rgba(126, 232, 255, 0.72);
+  color: #ffffff;
+  outline: none;
+}
+
+.events-panel__clear:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
 .events-listbox {
   min-height: 0;
   flex: 1 1 auto;
   overflow: auto;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 3px;
   padding: 2px;
-  font-size: 12px;
+  font-size: 11px;
 }
 
 .events-listbox__item,
 .events-listbox__empty {
   display: grid;
   grid-template-columns: minmax(72px, max-content) minmax(0, 1fr);
-  gap: 6px 8px;
-  align-items: start;
-  padding: 6px 8px;
+  gap: 2px 7px;
+  align-items: center;
+  box-sizing: border-box;
+  padding: 3px 7px;
   border: 1px solid rgba(116, 137, 166, 0.18);
   background: rgba(10, 15, 22, 0.56);
-  border-radius: 6px;
+  border-radius: 4px;
 }
 
 .events-listbox__empty {
@@ -855,11 +911,11 @@ body > .context-view {
 .events-listbox__severity {
   justify-self: start;
   min-width: 64px;
-  padding: 2px 6px;
+  padding: 1px 5px;
   border-radius: 999px;
   text-transform: uppercase;
   font-size: 10px;
-  line-height: 1.4;
+  line-height: 1.25;
   font-weight: 700;
   color: #0a0f16;
   background: #8d98a8;
@@ -882,6 +938,7 @@ body > .context-view {
   min-width: 0;
   color: #e6ebf2;
   overflow-wrap: anywhere;
+  line-height: 1.28;
 }
 
 .events-listbox__meta {
@@ -1423,8 +1480,9 @@ body > .context-view {
   right: 0;
   z-index: 20;
   display: grid;
-  max-height: 180px;
+  max-height: min(280px, 42vh);
   overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 4px;
   border: 1px solid rgba(116, 137, 166, 0.32);
   border-radius: 6px;
