@@ -1506,16 +1506,6 @@ export function createTimelinePanel(
     };
     window.addEventListener('cacablu:timeline-bars-changed', handleBarsChanged);
 
-    const preserveTimelineScroll = (): void => {
-      const viewport = element.querySelector<HTMLElement>('.timeline-panel__viewport');
-      if (!viewport) return;
-      lastViewportScrollLeft = viewport.scrollLeft;
-      lastViewportScrollTop = viewport.scrollTop;
-      timelineScrollMemory.left = viewport.scrollLeft;
-      timelineScrollMemory.top = viewport.scrollTop;
-    };
-    window.addEventListener('cacablu:timeline-preserve-scroll', preserveTimelineScroll);
-
     const revealBar = (barId: number): void => {
       render(true);
       requestAnimationFrame(() => {
@@ -1703,7 +1693,6 @@ export function createTimelinePanel(
       pendingMovedBarIds.clear();
       window.removeEventListener('cacablu:edit-delete', handleDeleteAction);
       window.removeEventListener('cacablu:timeline-bars-changed', handleBarsChanged);
-      window.removeEventListener('cacablu:timeline-preserve-scroll', preserveTimelineScroll);
       window.removeEventListener('cacablu:timeline-reveal-bar', handleRevealBar);
       element.removeEventListener('scroll', handleTimelineScroll, true);
       renderTimeline = null;

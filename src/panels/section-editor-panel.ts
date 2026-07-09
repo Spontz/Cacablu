@@ -209,6 +209,12 @@ export function createSectionEditorPanel(
 
       const root = document.createElement('div');
       root.className = 'section-editor';
+      root.addEventListener('keydown', (event) => {
+        if (!isApplyShortcut(event) || isMonacoEventTarget(event.target)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        window.setTimeout(applyCurrentBarEdits, 0);
+      });
 
       const timeRow = document.createElement('div');
       timeRow.className = 'section-editor__row section-editor__row--bar-meta';
@@ -477,13 +483,13 @@ export function createSectionEditorPanel(
         const canApplyTime = timeChanged
           && nextStartTime !== null
           && nextEndTime !== null
-          && isValidTimeRange(current.id, current.layer, nextStartTime, nextEndTime);
+          && isValidEditorTimeRange(nextStartTime, nextEndTime);
         if (timeChanged && !canApplyTime) {
           state.addEvent({
             severity: 'warning',
             source: 'Bar Editor',
             subjectId: String(current.id),
-            description: `Bar ${current.id} kept its previous time range because the edited range is invalid.`,
+            description: `Bar ${current.id} kept its previous time range because the edited range is not valid.`,
           });
         }
 
@@ -500,10 +506,12 @@ export function createSectionEditorPanel(
         }];
         const appliedStartTime = next[0].startTime;
         const appliedEndTime = next[0].endTime;
-        appliedStartInputValue = formatEditorTime(appliedStartTime);
-        appliedEndInputValue = formatEditorTime(appliedEndTime);
-        startInput.value = appliedStartInputValue;
-        endInput.value = appliedEndInputValue;
+        if (!timeChanged || canApplyTime) {
+          appliedStartInputValue = formatEditorTime(appliedStartTime);
+          appliedEndInputValue = formatEditorTime(appliedEndTime);
+          startInput.value = appliedStartInputValue;
+          endInput.value = appliedEndInputValue;
+        }
 
         if (!barSnapshotsChanged(previous, next)) {
           void syncBarsToPhoenix([current.id]);
@@ -885,18 +893,8 @@ export function createSectionEditorPanel(
       }
     }
 
-    function isValidTimeRange(barId: number, layer: number, startTime: number, endTime: number): boolean {
-      if (!Number.isFinite(startTime) || !Number.isFinite(endTime) || endTime <= startTime) {
-        return false;
-      }
-
-      const bars = sessionRef.current?.data.bars ?? [];
-      return !bars.some((bar) => (
-        bar.id !== barId
-        && bar.layer === layer
-        && startTime < bar.endTime
-        && endTime > bar.startTime
-      ));
+    function isValidEditorTimeRange(startTime: number, endTime: number): boolean {
+      return Number.isFinite(startTime) && Number.isFinite(endTime) && endTime > startTime;
     }
 
     const unsubscribeState = state.subscribe((snapshot) => {
@@ -1041,6 +1039,15 @@ function formatEditorTime(value: number): string {
 
 function roundEditorTime(value: number): number {
   return Number.parseFloat(value.toFixed(3));
+}
+
+function isApplyShortcut(event: KeyboardEvent): boolean {
+  const key = event.key.toLowerCase();
+  return (event.ctrlKey || event.metaKey) && !event.shiftKey && !event.altKey && (key === 'enter' || key === 'return');
+}
+
+function isMonacoEventTarget(target: EventTarget | null): boolean {
+  return target instanceof HTMLElement && Boolean(target.closest('.monaco-editor'));
 }
 
 function createBlendSelect(value: string, options: { allowEmpty?: boolean } = {}): HTMLSelectElement {

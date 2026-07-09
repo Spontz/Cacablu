@@ -71,7 +71,6 @@ export function createAppShell(root: HTMLElement): AppShell {
   let lastInspectorSelectionId: number | null = null;
   let lastSectionEditorSelectionId: string | null = null;
   let lastConnectionStatus = state.getSnapshot().connectionStatus;
-  let lastEventCount = state.getSnapshot().events.length;
   let lastDisplayTimelineIds = state.getSnapshot().displayTimelineIds;
   let lastResourceSelectionSignature = getResourceSelectionSignature(state.getSnapshot().resourceSelection);
   let projectPhoenixSyncState: 'pending' | 'synced' = 'pending';
@@ -293,7 +292,6 @@ export function createAppShell(root: HTMLElement): AppShell {
         source: 'Phoenix section sync',
         description: err instanceof Error ? err.message : 'Could not sync bar enabled state to Phoenix.',
       });
-      workspace.openPanel('events');
     }
   }
 
@@ -434,17 +432,6 @@ export function createAppShell(root: HTMLElement): AppShell {
         } else if (sectionEditorSelectionId === null) {
           lastSectionEditorSelectionId = null;
         }
-        if (snapshot.events.length > lastEventCount) {
-          const newEventCount = snapshot.events.length - lastEventCount;
-          const hasNewError = snapshot.events
-            .slice(0, newEventCount)
-            .some((event) => event.severity === 'error');
-          if (hasNewError) {
-            window.dispatchEvent(new CustomEvent('cacablu:timeline-preserve-scroll'));
-            workspace.openPanel('events');
-          }
-        }
-        lastEventCount = snapshot.events.length;
         if (snapshot.displayTimelineIds !== lastDisplayTimelineIds) {
           lastDisplayTimelineIds = snapshot.displayTimelineIds;
           syncMenuDisabled(dbState.getSnapshot());
@@ -655,7 +642,6 @@ export function createAppShell(root: HTMLElement): AppShell {
               source: 'Phoenix section sync',
               description: err.message,
             });
-            workspace.openPanel('events');
           }
         }
       } finally {
@@ -677,7 +663,6 @@ export function createAppShell(root: HTMLElement): AppShell {
             source: 'Phoenix project sync',
             description: err.message,
           });
-          workspace.openPanel('events');
           poolSyncModal?.update({
             phase: 'error',
             current: 0,
