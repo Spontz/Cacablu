@@ -2,14 +2,14 @@ import type { MenuActionDefinition } from '../app/types';
 
 export function createDefaultMenuActions(): MenuActionDefinition[] {
   return [
-    { id: 'open-database', label: 'Abrir', menu: 'File' },
-    { id: 'save-database', label: 'Guardar', menu: 'File', disabled: true },
-    { id: 'save-database-as', label: 'Guardar como', menu: 'File', disabled: true },
+    { id: 'open-database', label: 'Abrir', menu: 'File', shortcut: { default: 'Ctrl+O', mac: 'Cmd+O' } },
+    { id: 'save-database', label: 'Guardar', menu: 'File', disabled: true, shortcut: { default: 'Ctrl+S', mac: 'Cmd+S' } },
+    { id: 'save-database-as', label: 'Guardar como', menu: 'File', disabled: true, shortcut: { default: 'Ctrl+Shift+S', mac: 'Cmd+Shift+S' } },
     { id: 'edit-undo', label: 'Undo', menu: 'Edit', shortcut: { default: 'Ctrl+Z', mac: '⌘Z' } },
     { id: 'edit-separator-clipboard', label: '', menu: 'Edit', separator: true },
-    { id: 'edit-cut', label: 'Cut', menu: 'Edit' },
-    { id: 'edit-copy', label: 'Copy', menu: 'Edit' },
-    { id: 'edit-paste', label: 'Paste', menu: 'Edit' },
+    { id: 'edit-cut', label: 'Cut', menu: 'Edit', shortcut: { default: 'Ctrl+X', mac: 'Cmd+X' } },
+    { id: 'edit-copy', label: 'Copy', menu: 'Edit', shortcut: { default: 'Ctrl+C', mac: 'Cmd+C' } },
+    { id: 'edit-paste', label: 'Paste', menu: 'Edit', shortcut: { default: 'Ctrl+V', mac: 'Cmd+V' } },
     { id: 'edit-delete', label: 'Delete', menu: 'Edit', shortcut: { default: 'Del' } },
     { id: 'edit-separator-graphics', label: '', menu: 'Edit', separator: true },
     { id: 'edit-graphics', label: 'Graphics', menu: 'Edit' },

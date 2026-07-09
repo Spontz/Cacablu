@@ -961,19 +961,7 @@ export function createTimelinePanel(
       }
 
       if (action === 'play') {
-        const runtimeState = connection.getRuntimeState();
-        const isPlaying = runtimeState?.playing ?? state.transport.isPlaying;
-        const shouldPlay = !isPlaying;
-        if (connection.send({ type: shouldPlay ? 'runtime.play' : 'runtime.pause' })) {
-          state.transport.isPlaying = shouldPlay;
-          if (runtimeState) {
-            state.transport.currentTime = Math.min(Math.max(runtimeState.time, 0), Math.max(state.transport.duration, 0));
-          }
-          runtimeAnchorTime = state.transport.currentTime;
-          runtimeAnchorTimestamp = performance.now();
-          updatePlaybackVisualState();
-          updatePlayhead();
-        }
+        connection.send({ type: 'runtime.toggle' });
         return;
       }
 

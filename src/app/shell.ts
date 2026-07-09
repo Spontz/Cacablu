@@ -192,6 +192,28 @@ export function createAppShell(root: HTMLElement): AppShell {
     return event.key.toLowerCase() === 'z' && !event.shiftKey && !event.altKey && (event.ctrlKey || event.metaKey);
   }
 
+  function isOpenShortcut(event: KeyboardEvent): boolean {
+    return event.key.toLowerCase() === 'o' && !event.shiftKey && !event.altKey && (event.ctrlKey || event.metaKey);
+  }
+
+  function isSaveShortcut(event: KeyboardEvent): boolean {
+    return event.key.toLowerCase() === 's' && !event.altKey && (event.ctrlKey || event.metaKey);
+  }
+
+  function getClipboardShortcutCommand(event: KeyboardEvent): 'cut' | 'copy' | 'paste' | null {
+    if (event.shiftKey || event.altKey || (!event.ctrlKey && !event.metaKey)) return null;
+    switch (event.key.toLowerCase()) {
+      case 'x':
+        return 'cut';
+      case 'c':
+        return 'copy';
+      case 'v':
+        return 'paste';
+      default:
+        return null;
+    }
+  }
+
   function isAppDeleteShortcut(event: KeyboardEvent): boolean {
     return (event.key === 'Delete' || event.key === 'Backspace') && !event.ctrlKey && !event.metaKey && !event.altKey;
   }
@@ -470,12 +492,48 @@ export function createAppShell(root: HTMLElement): AppShell {
       });
 
       window.addEventListener('keydown', (event) => {
+        if (!isOpenShortcut(event)) {
+          return;
+        }
+
+        event.preventDefault();
+        void handleOpen();
+      });
+
+      window.addEventListener('keydown', (event) => {
+        if (!isSaveShortcut(event) || !session) {
+          return;
+        }
+
+        event.preventDefault();
+        if (event.shiftKey) {
+          void handleSaveAs();
+        } else {
+          void handleSave();
+        }
+      });
+
+      window.addEventListener('keydown', (event) => {
         if (!isAppUndoShortcut(event) || isTextEditingTarget(event.target)) {
           return;
         }
 
         event.preventDefault();
         void handleUndo();
+      });
+
+      window.addEventListener('keydown', (event) => {
+        if (isTextEditingTarget(event.target)) {
+          return;
+        }
+
+        const command = getClipboardShortcutCommand(event);
+        if (!command) {
+          return;
+        }
+
+        event.preventDefault();
+        runEditCommand(command);
       });
 
       window.addEventListener('keydown', (event) => {
