@@ -221,12 +221,12 @@ export function createSectionEditorPanel(
 
       const startField = createField('Start Time');
       const startInput = createTimeInput(bar.startTime);
-      const initialStartInputValue = startInput.value;
+      let appliedStartInputValue = startInput.value;
       startField.append(startInput);
 
       const endField = createField('End Time');
       const endInput = createTimeInput(bar.endTime);
-      const initialEndInputValue = endInput.value;
+      let appliedEndInputValue = endInput.value;
       endField.append(endInput);
 
       timeRow.append(nameField, startField, endField);
@@ -345,6 +345,9 @@ export function createSectionEditorPanel(
         scriptTemplateInput.value = '';
         closeScriptTemplateMenu();
       });
+      codeEditor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => {
+        applyCurrentBarEdits();
+      });
       refreshScriptTemplateMenu();
       if (bar.type.trim()) {
         void refreshScriptTemplates(bar.type.trim(), (templates) => {
@@ -448,6 +451,10 @@ export function createSectionEditorPanel(
       });
 
       apply.addEventListener('click', () => {
+        applyCurrentBarEdits();
+      });
+
+      function applyCurrentBarEdits(): void {
         const current = getSelectedBar();
         if (!current || !sessionRef.current) {
           state.addEvent({
@@ -465,8 +472,8 @@ export function createSectionEditorPanel(
         nameInput.value = nextName;
         const nextStartTime = parseEditorTime(startInput.value);
         const nextEndTime = parseEditorTime(endInput.value);
-        const timeChanged = startInput.value.trim() !== initialStartInputValue
-          || endInput.value.trim() !== initialEndInputValue;
+        const timeChanged = startInput.value.trim() !== appliedStartInputValue
+          || endInput.value.trim() !== appliedEndInputValue;
         const canApplyTime = timeChanged
           && nextStartTime !== null
           && nextEndTime !== null
@@ -491,6 +498,13 @@ export function createSectionEditorPanel(
           dstBlending: dstSelect.value,
           blendingEQ: equationSelect.value,
         }];
+        const appliedStartTime = next[0].startTime;
+        const appliedEndTime = next[0].endTime;
+        appliedStartInputValue = formatEditorTime(appliedStartTime);
+        appliedEndInputValue = formatEditorTime(appliedEndTime);
+        startInput.value = appliedStartInputValue;
+        endInput.value = appliedEndInputValue;
+
         if (!barSnapshotsChanged(previous, next)) {
           void syncBarsToPhoenix([current.id]);
           state.setResourceSelection({ kind: 'bar', id: current.id });
@@ -518,7 +532,7 @@ export function createSectionEditorPanel(
         window.dispatchEvent(new CustomEvent('cacablu:timeline-bars-changed'));
         void syncBarsToPhoenix([current.id]);
         state.setResourceSelection({ kind: 'bar', id: current.id });
-      });
+      }
 
       function refreshScriptTemplateMenu(query = scriptTemplateInput.value): void {
         populateScriptTemplateMenu(
