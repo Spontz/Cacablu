@@ -16,6 +16,7 @@ import { createTimelinePanel } from './timeline-panel';
 import { createGraphicsSettingsPanel } from './graphics-settings-dialog';
 import { createGlslAssetEditorPanel } from './glsl-asset-editor-panel';
 import { createDemoSettingsPanel } from './demo-settings-dialog';
+import { createMarkersPanel } from './markers-panel';
 
 export interface PanelRegistry {
   create(name: string): IContentRenderer;
@@ -49,6 +50,8 @@ export function createPanelRegistry(
           return createGraphicsSettingsPanel(state, dbState, sessionRef);
         case 'demo-settings-panel':
           return createDemoSettingsPanel(state, dbState, sessionRef);
+        case 'markers-panel':
+          return createMarkersPanel(dbState, sessionRef, undoManager);
         case 'glsl-asset-editor-panel':
           return createGlslAssetEditorPanel(state, dbState, sessionRef, connection);
         default:

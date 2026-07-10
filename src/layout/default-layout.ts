@@ -32,6 +32,12 @@ export const DEFAULT_PANELS: PanelDefinition[] = [
     description: 'Edit the script and blend options for the selected timeline bar.',
   },
   {
+    id: 'markers',
+    title: 'Markers',
+    component: 'markers-panel',
+    description: 'Edit timeline loop marker labels and times.',
+  },
+  {
     id: 'events',
     title: 'Events',
     component: 'events-panel',

@@ -231,15 +231,18 @@ describe('exportEngineDataPool', () => {
       'gl_height 360',
       'gl_aspect 1.7777777777777777',
       'gl_vsync 1',
+      'gl_colorDepth ',
       '',
       'fbo_0_ratio 1',
       'fbo_0_format RGBA',
       'fbo_0_colorAttachments 2',
+      'fbo_0_useFilter 1',
       '',
       'fbo_20_width 512',
       'fbo_20_height 512',
       'fbo_20_format RGB',
       'fbo_20_colorAttachments 1',
+      'fbo_20_useFilter 1',
       '',
     ].join('\r\n'));
     expect(configDirectory?.files.get('loader.spo')).toBe([

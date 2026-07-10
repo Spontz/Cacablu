@@ -5,8 +5,7 @@ import type { DbSessionRef } from '../db/db-session';
 import type { ProjectDatabase } from '../db/db-schema';
 import { createContentRenderer } from './base-panel';
 
-const TABLE_NAMES = ['variables', 'bars', 'fbos', 'files', 'folders'] as const;
-type TableName = (typeof TABLE_NAMES)[number];
+type TableName = keyof ProjectDatabase;
 type EditableValue = string | number | boolean | null;
 
 export function createDbExplorerPanel(
@@ -166,7 +165,7 @@ export function createDbExplorerPanel(
 
       tableList.innerHTML = '';
       if (db) {
-        for (const name of TABLE_NAMES) {
+        for (const name of getTableNames(db)) {
           const li = document.createElement('li');
           li.className = 'db-explorer__table-item';
           if (name === selectedTable) li.classList.add('is-selected');
@@ -203,6 +202,13 @@ export function createDbExplorerPanel(
       selectedTable = item.dataset.table as TableName;
       render();
     });
+  });
+}
+
+function getTableNames(db: ProjectDatabase): TableName[] {
+  return Object.keys(db).filter((key): key is TableName => {
+    const value = db[key as keyof ProjectDatabase];
+    return value instanceof Map || Array.isArray(value);
   });
 }
 

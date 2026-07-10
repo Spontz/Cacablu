@@ -10,12 +10,14 @@ import type { AppState } from '../state/app-state';
 import type { DbState } from '../state/db-state';
 import type { DbSessionRef } from '../db/db-session';
 import type { ConnectionController } from '../ws/connection';
-import type { DbBar } from '../db/db-schema';
+import type { DbBar, DbMarker } from '../db/db-schema';
 import type { UndoManager } from '../app/undo-manager';
 import { createPhoenixSectionClient } from '../phoenix/section-client';
 import { createPhoenixLogClient } from '../phoenix/log-client';
+import { createPhoenixRuntimeLoopClient } from '../phoenix/runtime-loop-client';
 import { primePhoenixLogEvents, recordPhoenixLogsAsEvents } from '../phoenix/log-events';
 import { ProjectSectionSyncError, syncProjectBarToPhoenix } from '../services/project-section-sync';
+import { computeLoopIntervalFromMarkers } from '../services/timeline-loop-markers';
 import { createContentRenderer } from './base-panel';
 
 const CLIP_COLOR = '#5e86b8';
@@ -80,6 +82,15 @@ interface GroupBarDragState {
   blocked: boolean;
 }
 
+interface MarkerDragState {
+  pointerId: number;
+  markerId: number;
+  startClientX: number;
+  originTime: number;
+  currentTime: number;
+  hasMoved: boolean;
+}
+
 export function createTimelinePanel(
   appState: AppState,
   dbState: DbState,
@@ -101,6 +112,7 @@ export function createTimelinePanel(
   let lastRenderedSelectionSignature = '';
   let lastRenderedErrorSignature = '';
   let lastRenderedDisplayTimelineIds = false;
+  let lastRenderedMarkerSignature = '';
   let lastAppTimelineSignature = '';
   let lastViewportScrollLeft = timelineScrollMemory.left;
   let lastViewportScrollTop = timelineScrollMemory.top;
@@ -108,8 +120,10 @@ export function createTimelinePanel(
   let runtimeAnchorTimestamp = performance.now();
   let dragState: BarDragState | null = null;
   let groupDragState: GroupBarDragState | null = null;
+  let markerDragState: MarkerDragState | null = null;
   let boxSelectionState: BoxSelectionState | null = null;
   let emptyBarCreationState: EmptyBarCreationState | null = null;
+  let selectedMarkerId: number | null = null;
   let suppressNextClick = false;
   let suppressNextClickTimeout: number | null = null;
   let moveSyncTimeout: number | null = null;
@@ -118,6 +132,7 @@ export function createTimelinePanel(
   let renderTimeline: ((force?: boolean) => void) | null = null;
   const phoenixSections = createPhoenixSectionClient();
   const phoenixLogs = createPhoenixLogClient();
+  const phoenixLoop = createPhoenixRuntimeLoopClient();
 
   function isProjectReady(): boolean {
     const status = dbState.getSnapshot().status;
@@ -233,6 +248,10 @@ export function createTimelinePanel(
     return sessionRef.current?.data.bars.find((bar) => bar.id === barId) ?? null;
   }
 
+  function findMarker(markerId: number): DbMarker | null {
+    return sessionRef.current?.data.markers.find((marker) => marker.id === markerId) ?? null;
+  }
+
   function getLayerFromTrackId(trackId: string): number {
     const value = Number(trackId.replace(/^layer-/, ''));
     return Number.isFinite(value) ? value : 0;
@@ -263,12 +282,35 @@ export function createTimelinePanel(
     return [...ids].sort((a, b) => a - b).join(',');
   }
 
+  function getMarkerSignature(): string {
+    const markers = sessionRef.current?.data.markers ?? [];
+    return [
+      selectedMarkerId ?? 'none',
+      ...markers.map((marker) => `${marker.id}:${marker.time}:${marker.label}`),
+    ].join('|');
+  }
+
   function getTimelineContentPoint(viewport: HTMLElement, clientX: number, clientY: number): { x: number; y: number } {
     const rect = viewport.getBoundingClientRect();
     return {
       x: clientX - rect.left + viewport.scrollLeft,
       y: clientY - rect.top + viewport.scrollTop,
     };
+  }
+
+  function getTimelineTimeAtClientX(viewport: HTMLElement, clientX: number): number {
+    const bounds = viewport.getBoundingClientRect();
+    const x = clientX - bounds.left + viewport.scrollLeft;
+    const effectivePixelsPerSecond = state.viewport.pixelsPerSecond * state.viewport.zoom;
+    if (!Number.isFinite(effectivePixelsPerSecond) || effectivePixelsPerSecond <= 0) {
+      return 0;
+    }
+    return Math.min(Math.max(x / effectivePixelsPerSecond, 0), state.transport.duration);
+  }
+
+  function isLowerRulerZone(ruler: HTMLElement, clientY: number): boolean {
+    const rect = ruler.getBoundingClientRect();
+    return clientY >= rect.top + rect.height / 2;
   }
 
   function getBoxSelectionRect(selection = boxSelectionState): { left: number; top: number; right: number; bottom: number } | null {
@@ -435,6 +477,100 @@ export function createTimelinePanel(
     bar.startTime = startTime;
     bar.endTime = endTime;
     bar.layer = layer;
+  }
+
+  function notifyMarkersChanged(): void {
+    window.dispatchEvent(new CustomEvent('cacablu:timeline-markers-changed'));
+  }
+
+  function createMarkerAt(time: number): DbMarker | null {
+    const session = sessionRef.current;
+    if (!session || !Number.isFinite(time)) return null;
+    const marker = session.insertTimelineMarker({
+      time,
+      label: `Marker ${session.data.markers.length + 1}`,
+    });
+    selectedMarkerId = marker.id;
+    undoManager.push({
+      label: `Create marker ${marker.id}`,
+      undo: async () => {
+        const current = findMarker(marker.id);
+        if (!current) return;
+        session.deleteTimelineMarker(marker.id);
+        if (selectedMarkerId === marker.id) selectedMarkerId = null;
+        dbState.setDirty();
+        notifyMarkersChanged();
+        renderTimeline?.(true);
+      },
+    });
+    dbState.setDirty();
+    notifyMarkersChanged();
+    return marker;
+  }
+
+  function commitMarkerMove(next: MarkerDragState): boolean {
+    const session = sessionRef.current;
+    const marker = findMarker(next.markerId);
+    if (!session || !marker || marker.time === next.currentTime) return false;
+
+    const previous = { ...marker };
+    session.updateTimelineMarker(marker.id, { time: next.currentTime });
+    dbState.setDirty();
+    selectedMarkerId = marker.id;
+    undoManager.push({
+      label: `Move marker ${marker.id}`,
+      undo: async () => {
+        const current = findMarker(previous.id);
+        if (!current) return;
+        session.updateTimelineMarker(previous.id, { time: previous.time, label: previous.label });
+        selectedMarkerId = previous.id;
+        dbState.setDirty();
+        notifyMarkersChanged();
+        renderTimeline?.(true);
+      },
+    });
+    notifyMarkersChanged();
+    return true;
+  }
+
+  function deleteSelectedMarker(): boolean {
+    const session = sessionRef.current;
+    if (!session || selectedMarkerId === null) return false;
+    const deletedMarker = session.deleteTimelineMarker(selectedMarkerId);
+    dbState.setDirty();
+    selectedMarkerId = null;
+    undoManager.push({
+      label: `Delete marker ${deletedMarker.id}`,
+      undo: async () => {
+        session.restoreTimelineMarker(deletedMarker);
+        selectedMarkerId = deletedMarker.id;
+        dbState.setDirty();
+        notifyMarkersChanged();
+        renderTimeline?.(true);
+      },
+    });
+    notifyMarkersChanged();
+    renderTimeline?.(true);
+    return true;
+  }
+
+  async function applyActiveLoopFromTime(clickedTime: number): Promise<void> {
+    const markers = sessionRef.current?.data.markers ?? [];
+    const interval = computeLoopIntervalFromMarkers(markers, clickedTime, 0, state.transport.duration);
+    if (!interval) return;
+
+    state.transport.loop = { start: interval.startTime, end: interval.endTime };
+    renderTimeline?.(true);
+
+    try {
+      await phoenixLoop.putLoop(interval);
+    } catch (err) {
+      appState.addEvent({
+        severity: 'error',
+        source: 'Phoenix runtime loop',
+        description: err instanceof Error ? err.message : 'Could not update Phoenix runtime loop.',
+      });
+    }
   }
 
   function commitBarMove(next: BarDragState): boolean {
@@ -791,13 +927,15 @@ export function createTimelinePanel(
       const displayTimelineIds = snapshot.displayTimelineIds;
       const erroredBarIds = getErroredSectionBarIds();
       const errorSignature = [...erroredBarIds].sort((a, b) => a - b).join(',');
+      const markerSignature = getMarkerSignature();
       if (
         !force &&
         state.transport.duration === lastRenderedDuration &&
         connected === lastRenderedConnected &&
         selectionSignature === lastRenderedSelectionSignature &&
         errorSignature === lastRenderedErrorSignature &&
-        displayTimelineIds === lastRenderedDisplayTimelineIds
+        displayTimelineIds === lastRenderedDisplayTimelineIds &&
+        markerSignature === lastRenderedMarkerSignature
       ) {
         updatePlaybackVisualState();
         updatePlayhead();
@@ -810,8 +948,10 @@ export function createTimelinePanel(
       lastRenderedSelectionSignature = selectionSignature;
       lastRenderedErrorSignature = errorSignature;
       lastRenderedDisplayTimelineIds = displayTimelineIds;
+      lastRenderedMarkerSignature = markerSignature;
 
       const effectivePixelsPerSecond = state.viewport.pixelsPerSecond * state.viewport.zoom;
+      const markers = sessionRef.current?.data.markers ?? [];
       const playTitle = state.transport.isPlaying ? 'Pause' : 'Play';
       const previousViewport = element.querySelector<HTMLElement>('.timeline-panel__viewport');
       const previousScrollLeft = previousViewport?.scrollLeft ?? lastViewportScrollLeft;
@@ -821,16 +961,31 @@ export function createTimelinePanel(
       const timelineWidth = Math.max(state.transport.duration * effectivePixelsPerSecond, viewportWidth);
       const markerStep = getMarkerStep(effectivePixelsPerSecond);
       const markerCount = Math.floor(state.transport.duration / markerStep) + 1;
+      const activeLoop = state.transport.loop ? normalizeRange(state.transport.loop) : null;
+      const loopLeft = activeLoop ? activeLoop.start * effectivePixelsPerSecond : 0;
+      const loopWidth = activeLoop ? Math.max((activeLoop.end - activeLoop.start) * effectivePixelsPerSecond, 1) : 0;
 
       element.innerHTML = `
         <div class="timeline-panel ${state.transport.isPlaying ? 'is-playing' : ''}">
           <div class="timeline-panel__body">
             <div class="timeline-panel__viewport">
               <div class="timeline-panel__ruler" style="width:${timelineWidth}px">
+                ${activeLoop
+                  ? `<div class="timeline-panel__loop-range" style="left:${loopLeft}px;width:${loopWidth}px"></div>`
+                  : ''}
                 ${Array.from({ length: markerCount }, (_, index) => {
                   const time = index * markerStep;
                   const left = time * effectivePixelsPerSecond;
                   return `<span class="timeline-panel__marker" style="left:${left}px"><i>${formatTime(time)}s</i></span>`;
+                }).join('')}
+                ${markers.map((marker) => {
+                  const left = marker.time * effectivePixelsPerSecond;
+                  const title = marker.label.trim()
+                    ? `${marker.label.trim()} (${formatTime(marker.time)}s)`
+                    : `${formatTime(marker.time)}s`;
+                  const isSelected = selectedMarkerId === marker.id;
+                  const isDragging = markerDragState?.markerId === marker.id;
+                  return `<button type="button" class="timeline-panel__loop-marker ${isSelected ? 'is-selected' : ''} ${isDragging ? 'is-dragging' : ''}" data-marker-id="${marker.id}" style="left:${left}px" title="${escapeHtml(title)}" aria-label="${escapeHtml(title)}"></button>`;
                 }).join('')}
               </div>
 
@@ -1111,6 +1266,27 @@ export function createTimelinePanel(
         return;
       }
 
+      const markerElement = (event.target as HTMLElement | null)?.closest<HTMLElement>('[data-marker-id]');
+      if (markerElement?.dataset.markerId) {
+        const markerId = Number(markerElement.dataset.markerId);
+        const marker = Number.isInteger(markerId) ? findMarker(markerId) : null;
+        if (!marker) return;
+        markerDragState = {
+          pointerId: event.pointerId,
+          markerId,
+          startClientX: event.clientX,
+          originTime: marker.time,
+          currentTime: marker.time,
+          hasMoved: false,
+        };
+        selectedMarkerId = markerId;
+        markerElement.setPointerCapture(event.pointerId);
+        render(true);
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+
       const clip = (event.target as HTMLElement | null)?.closest<HTMLElement>('[data-bar-id]');
       if (!clip?.dataset.barId) {
         if (event.shiftKey) {
@@ -1223,6 +1399,11 @@ export function createTimelinePanel(
     }
 
     function updateDrag(event: PointerEvent): void {
+      if (markerDragState && event.pointerId === markerDragState.pointerId) {
+        updateMarkerDrag(event);
+        return;
+      }
+
       if (boxSelectionState && event.pointerId === boxSelectionState.pointerId) {
         updateBoxSelection(event);
         return;
@@ -1363,7 +1544,37 @@ export function createTimelinePanel(
       render(true);
     }
 
+    function updateMarkerDrag(event: PointerEvent): void {
+      if (!markerDragState) return;
+      const deltaX = event.clientX - markerDragState.startClientX;
+      if (!markerDragState.hasMoved && Math.abs(deltaX) < DRAG_THRESHOLD_PX) {
+        return;
+      }
+
+      const effectivePixelsPerSecond = state.viewport.pixelsPerSecond * state.viewport.zoom;
+      if (!Number.isFinite(effectivePixelsPerSecond) || effectivePixelsPerSecond <= 0) {
+        return;
+      }
+
+      markerDragState.hasMoved = true;
+      markerDragState.currentTime = Math.min(
+        Math.max(markerDragState.originTime + deltaX / effectivePixelsPerSecond, 0),
+        state.transport.duration,
+      );
+      const marker = findMarker(markerDragState.markerId);
+      if (marker) {
+        marker.time = markerDragState.currentTime;
+      }
+      event.preventDefault();
+      render(true);
+    }
+
     function endDrag(event: PointerEvent): void {
+      if (markerDragState && event.pointerId === markerDragState.pointerId) {
+        endMarkerDrag();
+        return;
+      }
+
       if (boxSelectionState && event.pointerId === boxSelectionState.pointerId) {
         endBoxSelection();
         return;
@@ -1394,6 +1605,24 @@ export function createTimelinePanel(
         restoreDragPreview(finishedDrag);
       }
       loadFromDb({ preserveTransport: true });
+      render(true);
+    }
+
+    function endMarkerDrag(): void {
+      const finishedDrag = markerDragState;
+      markerDragState = null;
+      if (!finishedDrag) return;
+
+      const marker = findMarker(finishedDrag.markerId);
+      if (!finishedDrag.hasMoved) {
+        if (marker) marker.time = finishedDrag.originTime;
+        render(true);
+        return;
+      }
+
+      if (marker) marker.time = finishedDrag.originTime;
+      suppressUpcomingClick();
+      commitMarkerMove(finishedDrag);
       render(true);
     }
 
@@ -1487,14 +1716,14 @@ export function createTimelinePanel(
     element.addEventListener('pointercancel', endDrag);
     element.addEventListener('keydown', (event) => {
       if (event.key !== 'Delete' && event.key !== 'Backspace') return;
-      if (deleteSelectedBars()) {
+      if (deleteSelectedMarker() || deleteSelectedBars()) {
         event.preventDefault();
         event.stopPropagation();
       }
     });
 
     const handleDeleteAction = (event: Event): void => {
-      if (deleteSelectedBars()) {
+      if (deleteSelectedMarker() || deleteSelectedBars()) {
         event.preventDefault();
       }
     };
@@ -1505,6 +1734,11 @@ export function createTimelinePanel(
       render(true);
     };
     window.addEventListener('cacablu:timeline-bars-changed', handleBarsChanged);
+
+    const handleMarkersChanged = (): void => {
+      render(true);
+    };
+    window.addEventListener('cacablu:timeline-markers-changed', handleMarkersChanged);
 
     const revealBar = (barId: number): void => {
       render(true);
@@ -1655,17 +1889,31 @@ export function createTimelinePanel(
         return;
       }
 
+      const markerElement = (event.target as HTMLElement | null)?.closest<HTMLElement>('[data-marker-id]');
+      if (markerElement?.dataset.markerId) {
+        const markerId = Number(markerElement.dataset.markerId);
+        if (Number.isInteger(markerId)) {
+          selectedMarkerId = markerId;
+          appState.clearResourceSelection();
+          render(true);
+        }
+        return;
+      }
+
       const viewport = element.querySelector<HTMLElement>('.timeline-panel__viewport');
       if (!viewport) {
         return;
       }
 
-      const bounds = viewport.getBoundingClientRect();
-      const x = event.clientX - bounds.left + viewport.scrollLeft;
-      const nextTime = Math.min(
-        Math.max(x / (state.viewport.pixelsPerSecond * state.viewport.zoom), 0),
-        state.transport.duration,
-      );
+      const nextTime = getTimelineTimeAtClientX(viewport, event.clientX);
+      if (isLowerRulerZone(ruler, event.clientY)) {
+        const marker = createMarkerAt(nextTime);
+        if (marker) {
+          appState.clearResourceSelection();
+          render(true);
+        }
+        return;
+      }
 
       state.transport.currentTime = nextTime;
       runtimeAnchorTime = nextTime;
@@ -1673,6 +1921,7 @@ export function createTimelinePanel(
       if (connection.isConnected()) {
         connection.send({ type: 'runtime.seek', time: nextTime });
       }
+      void applyActiveLoopFromTime(nextTime);
       render();
     });
 
@@ -1693,9 +1942,18 @@ export function createTimelinePanel(
       pendingMovedBarIds.clear();
       window.removeEventListener('cacablu:edit-delete', handleDeleteAction);
       window.removeEventListener('cacablu:timeline-bars-changed', handleBarsChanged);
+      window.removeEventListener('cacablu:timeline-markers-changed', handleMarkersChanged);
       window.removeEventListener('cacablu:timeline-reveal-bar', handleRevealBar);
       element.removeEventListener('scroll', handleTimelineScroll, true);
       renderTimeline = null;
     };
   });
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
 }

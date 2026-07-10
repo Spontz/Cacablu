@@ -142,6 +142,9 @@ export function createAppShell(root: HTMLElement): AppShell {
         case 'toggle-section-editor':
           workspace.openPanel('section-editor', { widthRatio: SECTION_EDITOR_WIDTH_RATIO });
           break;
+        case 'toggle-markers':
+          workspace.openPanel('markers', { widthRatio: SIDE_PANEL_WIDTH_RATIO });
+          break;
         case 'toggle-events':
           workspace.openPanel('events');
           break;

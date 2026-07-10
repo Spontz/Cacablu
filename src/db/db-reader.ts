@@ -1,5 +1,5 @@
 import type { SqlDatabase } from './sql-loader';
-import type { DbBar, DbFbo, DbFile, DbFolder, ProjectDatabase } from './db-schema';
+import type { DbBar, DbFbo, DbFile, DbFolder, DbMarker, ProjectDatabase } from './db-schema';
 
 type Row = (number | string | Uint8Array | null)[];
 type VariableColumnPair = {
@@ -76,7 +76,16 @@ export function readDatabase(db: SqlDatabase): ProjectDatabase {
     enabled: Boolean(r[3]),
   }));
 
-  return { variables, bars, fbos, files, folders };
+  const markers: DbMarker[] = queryRows(
+    db,
+    'SELECT id, time, label FROM markers ORDER BY time, id',
+  ).map((r) => ({
+    id: r[0] as number,
+    time: r[1] as number,
+    label: toText(r[2]),
+  }));
+
+  return { variables, bars, fbos, files, folders, markers };
 }
 
 function readVariableRows(db: SqlDatabase): Array<[string, string]> {

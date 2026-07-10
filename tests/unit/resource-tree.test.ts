@@ -8,6 +8,7 @@ function makeDb(partial: Pick<ProjectDatabase, 'folders' | 'files'>): ProjectDat
     variables: new Map(),
     bars: [],
     fbos: [],
+    markers: [],
     folders: partial.folders,
     files: partial.files,
   };

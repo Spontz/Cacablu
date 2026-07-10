@@ -12,6 +12,7 @@ function makeDb(): ProjectDatabase {
     variables: new Map(),
     bars: [],
     fbos: [],
+    markers: [],
     folders: [
       { id: 1, name: 'textures', parent: 0, enabled: true },
       { id: 2, name: 'unused', parent: 0, enabled: true },

@@ -43,10 +43,17 @@ export interface DbFolder {
   enabled: boolean;
 }
 
+export interface DbMarker {
+  id: number;
+  time: number;
+  label: string;
+}
+
 export interface ProjectDatabase {
   variables: Map<string, string>;
   bars: DbBar[];
   fbos: DbFbo[];
   files: DbFile[];
   folders: DbFolder[];
+  markers: DbMarker[];
 }

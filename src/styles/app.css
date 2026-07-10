@@ -959,6 +959,75 @@ button.events-listbox__severity:focus-visible {
   font-size: 11px;
 }
 
+.panel--markers {
+  background: #0f141a;
+  color: #dce5f2;
+  overflow: hidden;
+}
+
+.markers-panel__header,
+.markers-panel__row {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) 96px;
+  gap: 8px;
+  align-items: center;
+}
+
+.markers-panel__header {
+  padding: 10px 12px 8px;
+  color: #8ea0b8;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  border-bottom: 1px solid rgba(116, 137, 166, 0.12);
+}
+
+.markers-panel__list {
+  height: calc(100% - 38px);
+  overflow: auto;
+  padding: 8px;
+}
+
+.markers-panel__row {
+  padding: 4px;
+  border-radius: 6px;
+}
+
+.markers-panel__row:hover {
+  background: rgba(116, 137, 166, 0.08);
+}
+
+.markers-panel__input {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid rgba(116, 137, 166, 0.2);
+  border-radius: 5px;
+  background: #121922;
+  color: #e5edf7;
+  font: inherit;
+  font-size: 0.82rem;
+  padding: 5px 7px;
+}
+
+.markers-panel__input:focus {
+  outline: none;
+  border-color: #64d2ff;
+  box-shadow: 0 0 0 1px rgba(100, 210, 255, 0.18);
+}
+
+.markers-panel__input.is-invalid {
+  border-color: #ff6f6f;
+}
+
+.markers-panel__input--time {
+  text-align: right;
+}
+
+.markers-panel__empty {
+  padding: 16px 8px;
+  color: #718198;
+  font-size: 0.84rem;
+}
+
 .panel--preview {
   display: flex;
   flex-direction: column;
@@ -1151,6 +1220,53 @@ button.events-listbox__severity:focus-visible {
   color: #8ea0b8;
   font-size: 0.7rem;
   white-space: nowrap;
+}
+
+.timeline-panel__loop-range {
+  position: absolute;
+  top: 0;
+  height: 50%;
+  background: rgba(100, 210, 255, 0.14);
+  border-left: 1px solid rgba(100, 210, 255, 0.55);
+  border-right: 1px solid rgba(100, 210, 255, 0.55);
+  pointer-events: none;
+}
+
+.timeline-panel__loop-marker {
+  position: absolute;
+  left: 0;
+  bottom: 0.18rem;
+  width: 14px;
+  height: 12px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  transform: translateX(-50%);
+  cursor: grab;
+  z-index: 8;
+}
+
+.timeline-panel__loop-marker::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-left: 7px solid transparent;
+  border-right: 7px solid transparent;
+  border-top: 11px solid #e4b955;
+  filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.45));
+}
+
+.timeline-panel__loop-marker:hover::before,
+.timeline-panel__loop-marker:focus-visible::before {
+  border-top-color: #ffd56d;
+}
+
+.timeline-panel__loop-marker.is-selected::before {
+  border-top-color: #64d2ff;
+}
+
+.timeline-panel__loop-marker.is-dragging {
+  cursor: grabbing;
 }
 
 .timeline-panel__grid {

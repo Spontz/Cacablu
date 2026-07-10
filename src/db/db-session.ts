@@ -2,11 +2,12 @@ import { getSqlJs } from './sql-loader';
 import type { SqlDatabase } from './sql-loader';
 import { readDatabase } from './db-reader';
 import { serializeDatabase } from './db-writer';
-import type { DbBar, DbFbo, DbFile, DbFolder, ProjectDatabase } from './db-schema';
+import type { DbBar, DbFbo, DbFile, DbFolder, DbMarker, ProjectDatabase } from './db-schema';
 
 type EditableDbValue = string | number | boolean | null;
-type DbTableName = 'variables' | 'bars' | 'fbos' | 'files' | 'folders';
+type DbTableName = 'variables' | 'bars' | 'fbos' | 'files' | 'folders' | 'markers';
 type NewTimelineBar = Pick<DbBar, 'layer' | 'startTime' | 'endTime'> & Partial<Omit<DbBar, 'layer' | 'startTime' | 'endTime'>>;
+type NewTimelineMarker = Pick<DbMarker, 'time'> & Partial<Pick<DbMarker, 'id' | 'label'>>;
 type NewResourceFile = Pick<DbFile, 'name' | 'parent' | 'bytes' | 'type' | 'data' | 'format'> & Partial<Pick<DbFile, 'enabled'>>;
 type NewResourceFolder = Pick<DbFolder, 'name' | 'parent'> & Partial<Pick<DbFolder, 'enabled'>>;
 type GraphicsContextUpdate = {
@@ -39,6 +40,10 @@ export interface DbSession {
   insertTimelineBar(input: NewTimelineBar): DbBar;
   deleteTimelineBars(ids: number[]): DbBar[];
   setTimelineBarEnabled(barId: number, enabled: boolean): DbBar;
+  insertTimelineMarker(input: NewTimelineMarker): DbMarker;
+  updateTimelineMarker(markerId: number, input: Partial<Pick<DbMarker, 'time' | 'label'>>): DbMarker;
+  deleteTimelineMarker(markerId: number): DbMarker;
+  restoreTimelineMarker(marker: DbMarker): DbMarker;
   upsertResourceFile(input: NewResourceFile): DbFile;
   insertResourceFolder(input: NewResourceFolder): DbFolder;
   moveResourceFile(fileId: number, parentId: number): DbFile;
@@ -170,6 +175,60 @@ function makeSession(handle: FileSystemFileHandle, db: SqlDatabase, data: Projec
       db.run('UPDATE "BARS" SET "enabled" = ? WHERE "id" = ?', [enabled ? 1 : 0, barId]);
       bar.enabled = enabled;
       return bar;
+    },
+
+    insertTimelineMarker(input): DbMarker {
+      validateMarkerTime(input.time);
+      const label = input.label ?? '';
+      if (input.id !== undefined) {
+        db.run('INSERT INTO "markers" ("id", "time", "label") VALUES (?, ?, ?)', [input.id, input.time, label]);
+      } else {
+        db.run('INSERT INTO "markers" ("time", "label") VALUES (?, ?)', [input.time, label]);
+      }
+
+      const marker: DbMarker = {
+        id: input.id ?? lastInsertRowId(db),
+        time: input.time,
+        label,
+      };
+      data.markers.push(marker);
+      sortMarkers(data.markers);
+      return marker;
+    },
+
+    updateTimelineMarker(markerId, input): DbMarker {
+      const marker = data.markers.find((candidate) => candidate.id === markerId);
+      if (!marker) {
+        throw new Error(`Timeline marker ${markerId} was not found.`);
+      }
+
+      const nextTime = input.time ?? marker.time;
+      const nextLabel = input.label ?? marker.label;
+      validateMarkerTime(nextTime);
+      db.run('UPDATE "markers" SET "time" = ?, "label" = ? WHERE "id" = ?', [nextTime, nextLabel, markerId]);
+      marker.time = nextTime;
+      marker.label = nextLabel;
+      sortMarkers(data.markers);
+      return marker;
+    },
+
+    deleteTimelineMarker(markerId): DbMarker {
+      const index = data.markers.findIndex((candidate) => candidate.id === markerId);
+      if (index === -1) {
+        throw new Error(`Timeline marker ${markerId} was not found.`);
+      }
+
+      const [marker] = data.markers.splice(index, 1);
+      db.run('DELETE FROM "markers" WHERE "id" = ?', [markerId]);
+      return { ...marker };
+    },
+
+    restoreTimelineMarker(marker): DbMarker {
+      const existing = data.markers.find((candidate) => candidate.id === marker.id);
+      if (existing) {
+        throw new Error(`Timeline marker ${marker.id} already exists.`);
+      }
+      return this.insertTimelineMarker(marker);
     },
 
     upsertResourceFile(input): DbFile {
@@ -374,12 +433,12 @@ function makeSession(handle: FileSystemFileHandle, db: SqlDatabase, data: Projec
 
 function migrateDatabaseSchema(db: SqlDatabase): void {
   const columns = getTableColumnNames(db, 'BARS');
-  if (columns.length === 0 || columns.some((column) => column.toLowerCase() === 'name')) {
-    return;
+  if (columns.length > 0 && !columns.some((column) => column.toLowerCase() === 'name')) {
+    db.run('ALTER TABLE "BARS" ADD COLUMN "name" TEXT DEFAULT ""');
+    db.run('UPDATE "BARS" SET "name" = COALESCE("type", "") WHERE "name" IS NULL OR "name" = ""');
   }
 
-  db.run('ALTER TABLE "BARS" ADD COLUMN "name" TEXT DEFAULT ""');
-  db.run('UPDATE "BARS" SET "name" = COALESCE("type", "") WHERE "name" IS NULL OR "name" = ""');
+  db.run('CREATE TABLE IF NOT EXISTS "markers" ("id" INTEGER PRIMARY KEY, "time" REAL NOT NULL, "label" TEXT NOT NULL DEFAULT "")');
 }
 
 function getTableColumnNames(db: SqlDatabase, tableName: string): string[] {
@@ -404,6 +463,16 @@ function toSqlValue(value: EditableDbValue): string | number | null {
 function lastInsertRowId(db: SqlDatabase): number {
   const value = db.exec('SELECT last_insert_rowid()')[0]?.values[0]?.[0];
   return typeof value === 'number' ? value : 0;
+}
+
+function validateMarkerTime(time: number): void {
+  if (!Number.isFinite(time)) {
+    throw new Error('Timeline marker time must be finite.');
+  }
+}
+
+function sortMarkers(markers: DbMarker[]): void {
+  markers.sort((left, right) => left.time - right.time || left.id - right.id);
 }
 
 function upsertVariable(db: SqlDatabase, variables: Map<string, string>, key: string, value: string): void {
