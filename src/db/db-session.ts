@@ -5,7 +5,8 @@ import { serializeDatabase } from './db-writer';
 import type { DbBar, DbFbo, DbFile, DbFolder, DbMarker, ProjectDatabase } from './db-schema';
 
 type EditableDbValue = string | number | boolean | null;
-type DbTableName = 'variables' | 'bars' | 'fbos' | 'files' | 'folders' | 'markers';
+type DbTableName = string;
+type DbTableCellValue = string | number | boolean | Uint8Array | null;
 type NewTimelineBar = Pick<DbBar, 'layer' | 'startTime' | 'endTime'> & Partial<Omit<DbBar, 'layer' | 'startTime' | 'endTime'>>;
 type NewTimelineMarker = Pick<DbMarker, 'time'> & Partial<Pick<DbMarker, 'id' | 'label'>>;
 type NewResourceFile = Pick<DbFile, 'name' | 'parent' | 'bytes' | 'type' | 'data' | 'format'> & Partial<Pick<DbFile, 'enabled'>>;
@@ -37,6 +38,8 @@ export interface DbSession {
   readonly fileName: string;
   readonly data: ProjectDatabase;
   updateCell(tableName: DbTableName, rowKey: string | number, columnName: string, value: EditableDbValue): void;
+  getTableNames(): string[];
+  getTableSnapshot(tableName: string): DbTableSnapshot;
   insertTimelineBar(input: NewTimelineBar): DbBar;
   deleteTimelineBars(ids: number[]): DbBar[];
   setTimelineBarEnabled(barId: number, enabled: boolean): DbBar;
@@ -56,6 +59,12 @@ export interface DbSession {
   save(): Promise<void>;
   saveAs(handle: FileSystemFileHandle): Promise<DbSession>;
   close(): void;
+}
+
+export interface DbTableSnapshot {
+  name: string;
+  columns: string[];
+  rows: Array<Record<string, DbTableCellValue>>;
 }
 
 export interface DbSessionRef {
@@ -93,11 +102,20 @@ function makeSession(handle: FileSystemFileHandle, db: SqlDatabase, data: Projec
     },
 
     updateCell(tableName, rowKey, columnName, value): void {
-      const whereColumn = tableName === 'variables' ? 'variable' : 'id';
+      const whereColumn = tableName.toLowerCase() === 'variables' ? 'variable' : 'id';
       db.run(
         `UPDATE ${quoteIdentifier(tableName)} SET ${quoteIdentifier(columnName)} = ? WHERE ${quoteIdentifier(whereColumn)} = ?`,
         [toSqlValue(value), rowKey],
       );
+      syncProjectDataCell(data, tableName, rowKey, columnName, value);
+    },
+
+    getTableNames(): string[] {
+      return getDatabaseTableNames(db);
+    },
+
+    getTableSnapshot(tableName): DbTableSnapshot {
+      return getTableSnapshot(db, tableName);
     },
 
     insertTimelineBar(input): DbBar {
@@ -451,6 +469,33 @@ function getTableColumnNames(db: SqlDatabase, tableName: string): string[] {
   }
 }
 
+function getDatabaseTableNames(db: SqlDatabase): string[] {
+  return (db.exec(
+    'SELECT name FROM sqlite_master WHERE type = \'table\' AND name NOT LIKE \'sqlite_%\' ORDER BY name COLLATE NOCASE',
+  )[0]?.values ?? [])
+    .map((row) => row[0])
+    .filter((value): value is string => typeof value === 'string');
+}
+
+function getTableSnapshot(db: SqlDatabase, tableName: string): DbTableSnapshot {
+  const columns = getTableColumnNames(db, tableName);
+  const result = db.exec(`SELECT * FROM ${quoteIdentifier(tableName)}`)[0];
+  const resultColumns = result?.columns ?? columns;
+  const rows = (result?.values ?? []).map((values) => {
+    const row: Record<string, DbTableCellValue> = {};
+    resultColumns.forEach((column, index) => {
+      const value = values[index];
+      row[column] = typeof value === 'boolean' ? (value ? 1 : 0) : value;
+    });
+    return row;
+  });
+  return {
+    name: tableName,
+    columns: resultColumns,
+    rows,
+  };
+}
+
 function quoteIdentifier(identifier: string): string {
   return `"${identifier.replace(/"/g, '""')}"`;
 }
@@ -473,6 +518,44 @@ function validateMarkerTime(time: number): void {
 
 function sortMarkers(markers: DbMarker[]): void {
   markers.sort((left, right) => left.time - right.time || left.id - right.id);
+}
+
+function syncProjectDataCell(
+  data: ProjectDatabase,
+  tableName: string,
+  rowKey: string | number,
+  columnName: string,
+  value: EditableDbValue,
+): void {
+  const normalizedTableName = tableName.toLowerCase();
+  if (normalizedTableName === 'variables') {
+    data.variables.set(String(rowKey), String(value ?? ''));
+    return;
+  }
+
+  const rows = getKnownProjectRows(data, normalizedTableName);
+  if (!rows) return;
+
+  const row = rows.find((candidate) => candidate.id === rowKey);
+  if (!row) return;
+  row[columnName] = value;
+}
+
+function getKnownProjectRows(data: ProjectDatabase, normalizedTableName: string): Array<Record<string, unknown> & { id: number }> | null {
+  switch (normalizedTableName) {
+    case 'bars':
+      return data.bars as unknown as Array<Record<string, unknown> & { id: number }>;
+    case 'fbos':
+      return data.fbos as unknown as Array<Record<string, unknown> & { id: number }>;
+    case 'files':
+      return data.files as unknown as Array<Record<string, unknown> & { id: number }>;
+    case 'folders':
+      return data.folders as unknown as Array<Record<string, unknown> & { id: number }>;
+    case 'markers':
+      return data.markers as unknown as Array<Record<string, unknown> & { id: number }>;
+    default:
+      return null;
+  }
 }
 
 function upsertVariable(db: SqlDatabase, variables: Map<string, string>, key: string, value: string): void {

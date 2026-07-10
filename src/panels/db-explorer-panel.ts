@@ -1,11 +1,9 @@
 import type { IContentRenderer } from 'dockview-core';
 
+import type { DbSessionRef, DbTableSnapshot } from '../db/db-session';
 import type { DbState } from '../state/db-state';
-import type { DbSessionRef } from '../db/db-session';
-import type { ProjectDatabase } from '../db/db-schema';
 import { createContentRenderer } from './base-panel';
 
-type TableName = keyof ProjectDatabase;
 type EditableValue = string | number | boolean | null;
 
 export function createDbExplorerPanel(
@@ -31,32 +29,28 @@ export function createDbExplorerPanel(
     layout.append(tableList, dataArea);
     element.append(placeholder, layout);
 
-    let selectedTable: TableName | null = null;
+    let selectedTable: string | null = null;
 
-    function renderVariables(db: ProjectDatabase): void {
+    function renderTable(snapshot: DbTableSnapshot): void {
+      if (snapshot.columns.length === 0) {
+        const hint = document.createElement('p');
+        hint.className = 'db-explorer__hint';
+        hint.textContent = 'This table has no columns.';
+        dataArea.append(hint);
+        return;
+      }
+
       const table = document.createElement('table');
       table.className = 'db-explorer__grid';
       const hr = table.createTHead().insertRow();
-      for (const col of ['variable', 'value']) {
+      for (const col of snapshot.columns) {
         const th = document.createElement('th');
         th.textContent = col;
         hr.append(th);
       }
-      const tbody = table.createTBody();
-      for (const [k, v] of db.variables) {
-        const tr = tbody.insertRow();
-        tr.insertCell().textContent = k;
-        const valueCell = tr.insertCell();
-        renderEditableCell(valueCell, v, (nextValue) => {
-          sessionRef.current?.updateCell('variables', k, 'value', String(nextValue ?? ''));
-          db.variables.set(k, String(nextValue ?? ''));
-        });
-      }
-      dataArea.append(table);
-    }
 
-    function renderRows(tableName: Exclude<TableName, 'variables'>, rows: object[]): void {
-      if (rows.length === 0) {
+      if (snapshot.rows.length === 0) {
+        dataArea.append(table);
         const hint = document.createElement('p');
         hint.className = 'db-explorer__hint';
         hint.textContent = 'This table is empty.';
@@ -64,32 +58,23 @@ export function createDbExplorerPanel(
         return;
       }
 
-      const cols = Object.keys(rows[0]);
-      const table = document.createElement('table');
-      table.className = 'db-explorer__grid';
-      const hr = table.createTHead().insertRow();
-      for (const col of cols) {
-        const th = document.createElement('th');
-        th.textContent = col;
-        hr.append(th);
-      }
       const tbody = table.createTBody();
-      for (const row of rows) {
+      for (const row of snapshot.rows) {
         const tr = tbody.insertRow();
-        for (const col of cols) {
-          const val = (row as Record<string, unknown>)[col];
+        for (const col of snapshot.columns) {
+          const val = row[col];
           const td = tr.insertCell();
           if (val instanceof Uint8Array) {
             td.textContent = `[${val.byteLength} bytes]`;
             td.className = 'db-explorer__blob';
-          } else if (isReadOnlyColumn(col)) {
+          } else if (isReadOnlyColumn(col) || !canEditRow(snapshot, row)) {
             td.textContent = String(val ?? '');
           } else {
             renderEditableCell(td, val, (nextValue) => {
-              const rowId = (row as Record<string, unknown>).id;
-              if (typeof rowId !== 'number') throw new Error('Cannot edit a row without a numeric id.');
-              sessionRef.current?.updateCell(tableName, rowId, col, nextValue);
-              (row as Record<string, unknown>)[col] = nextValue;
+              const rowKey = getRowKey(snapshot, row);
+              if (rowKey === null) throw new Error('Cannot edit a row without a supported primary key.');
+              sessionRef.current?.updateCell(snapshot.name, rowKey, col, nextValue);
+              row[col] = nextValue;
             });
           }
         }
@@ -154,42 +139,39 @@ export function createDbExplorerPanel(
     }
 
     function render(): void {
-      const db = sessionRef.current?.data ?? null;
-      const hasDb = db !== null;
+      const session = sessionRef.current;
+      const hasDb = session !== null;
 
-      // Use style.display directly — CSS display rules override the hidden attribute
       placeholder.style.display = hasDb ? 'none' : 'flex';
       layout.style.display = hasDb ? 'grid' : 'none';
 
       if (!hasDb) selectedTable = null;
 
+      const tableNames = session?.getTableNames() ?? [];
+      if (selectedTable && !tableNames.includes(selectedTable)) {
+        selectedTable = null;
+      }
+
       tableList.innerHTML = '';
-      if (db) {
-        for (const name of getTableNames(db)) {
-          const li = document.createElement('li');
-          li.className = 'db-explorer__table-item';
-          if (name === selectedTable) li.classList.add('is-selected');
-          li.dataset.table = name;
-          li.textContent = name;
-          tableList.append(li);
-        }
+      for (const name of tableNames) {
+        const li = document.createElement('li');
+        li.className = 'db-explorer__table-item';
+        if (name === selectedTable) li.classList.add('is-selected');
+        li.dataset.table = name;
+        li.textContent = name;
+        tableList.append(li);
       }
 
       dataArea.innerHTML = '';
-      if (!db || !selectedTable) {
+      if (!session || !selectedTable) {
         const hint = document.createElement('p');
         hint.className = 'db-explorer__hint';
-        hint.textContent = db ? 'Select a table from the list.' : '';
+        hint.textContent = session ? 'Select a table from the list.' : '';
         dataArea.append(hint);
         return;
       }
 
-      if (selectedTable === 'variables') {
-        renderVariables(db);
-        return;
-      }
-
-      renderRows(selectedTable, db[selectedTable] as object[]);
+      renderTable(session.getTableSnapshot(selectedTable));
     }
 
     render();
@@ -199,21 +181,28 @@ export function createDbExplorerPanel(
     tableList.addEventListener('click', (event) => {
       const item = (event.target as HTMLElement).closest<HTMLElement>('[data-table]');
       if (!item?.dataset.table) return;
-      selectedTable = item.dataset.table as TableName;
+      selectedTable = item.dataset.table;
       render();
     });
   });
 }
 
-function getTableNames(db: ProjectDatabase): TableName[] {
-  return Object.keys(db).filter((key): key is TableName => {
-    const value = db[key as keyof ProjectDatabase];
-    return value instanceof Map || Array.isArray(value);
-  });
-}
-
 function isReadOnlyColumn(column: string): boolean {
   return column === 'id' || column === 'data';
+}
+
+function canEditRow(snapshot: DbTableSnapshot, row: Record<string, unknown>): boolean {
+  return getRowKey(snapshot, row) !== null;
+}
+
+function getRowKey(snapshot: DbTableSnapshot, row: Record<string, unknown>): string | number | null {
+  if (snapshot.name.toLowerCase() === 'variables') {
+    const key = row.variable;
+    return typeof key === 'string' || typeof key === 'number' ? key : null;
+  }
+
+  const id = row.id;
+  return typeof id === 'string' || typeof id === 'number' ? id : null;
 }
 
 function parseEditedValue(

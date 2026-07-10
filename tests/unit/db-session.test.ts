@@ -47,6 +47,12 @@ describe('DbSession markers', () => {
     let session = await openDbSession(handle);
 
     expect(session.data.markers).toEqual([]);
+    expect(session.getTableNames()).toContain('custom_debug');
+    expect(session.getTableSnapshot('custom_debug')).toEqual({
+      name: 'custom_debug',
+      columns: ['id', 'note'],
+      rows: [{ id: 1, note: 'visible' }],
+    });
 
     const later = session.insertTimelineMarker({ time: 20, label: 'Later' });
     const earlier = session.insertTimelineMarker({ time: 10, label: 'Earlier' });
@@ -88,6 +94,8 @@ async function createLegacyProjectBytes(): Promise<Uint8Array> {
   db.run('CREATE TABLE "FBOs" ("id" INTEGER PRIMARY KEY, "ratio" INTEGER, "width" INTEGER, "height" INTEGER, "format" TEXT, "colorAttachments" INTEGER, "filter" TEXT)');
   db.run('CREATE TABLE "FILES" ("id" INTEGER PRIMARY KEY, "name" TEXT, "parent" INTEGER, "bytes" INTEGER, "type" TEXT, "data" BLOB, "format" TEXT, "enabled" INTEGER)');
   db.run('CREATE TABLE "FOLDERS" ("id" INTEGER PRIMARY KEY, "name" TEXT, "parent" INTEGER, "enabled" INTEGER)');
+  db.run('CREATE TABLE "custom_debug" ("id" INTEGER PRIMARY KEY, "note" TEXT)');
+  db.run('INSERT INTO "custom_debug" ("note") VALUES (?)', ['visible']);
   const bytes = db.export();
   db.close();
   return bytes;
