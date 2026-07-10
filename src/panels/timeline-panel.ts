@@ -24,6 +24,7 @@ const CLIP_COLOR = '#5e86b8';
 const MIN_MARKER_LABEL_SPACING = 88;
 const TRANSPORT_STEP_SECONDS = 1;
 const DRAG_THRESHOLD_PX = 3;
+const MARKER_DOUBLE_CLICK_MS = 450;
 const MOVE_SYNC_DELAY_MS = 850;
 const TRANSPORT_SYNC_GRACE_MS = 1200;
 const timelineScrollMemory = {
@@ -121,6 +122,7 @@ export function createTimelinePanel(
   let dragState: BarDragState | null = null;
   let groupDragState: GroupBarDragState | null = null;
   let markerDragState: MarkerDragState | null = null;
+  let lastMarkerPointerDown: { markerId: number; timestamp: number } | null = null;
   let boxSelectionState: BoxSelectionState | null = null;
   let emptyBarCreationState: EmptyBarCreationState | null = null;
   let selectedMarkerId: number | null = null;
@@ -156,8 +158,7 @@ export function createTimelinePanel(
 
     if (!db) return;
 
-    const parsed = parseFloat(db.variables.get('endTime') ?? '');
-    state.transport.duration = isFinite(parsed) && parsed > 0 ? parsed : 30;
+    state.transport.duration = getProjectDuration(db);
     if (options.preserveTransport) {
       state.transport.currentTime = Math.min(
         Math.max(previousCurrentTime, 0),
@@ -198,6 +199,22 @@ export function createTimelinePanel(
     lastTimestamp = 0;
     runtimeAnchorTime = 0;
     runtimeAnchorTimestamp = performance.now();
+  }
+
+  function getProjectDuration(db: { variables: Map<string, string>; bars: DbBar[]; markers: DbMarker[] }): number {
+    const variableDuration = parseFloat(db.variables.get('endTime') ?? '');
+    const barDuration = db.bars.reduce((max, bar) => (
+      Number.isFinite(bar.endTime) && bar.endTime > max ? bar.endTime : max
+    ), 0);
+    const markerDuration = db.markers.reduce((max, marker) => (
+      Number.isFinite(marker.time) && marker.time > max ? marker.time : max
+    ), 0);
+    const duration = Math.max(
+      Number.isFinite(variableDuration) ? variableDuration : 0,
+      barDuration,
+      markerDuration,
+    );
+    return duration > 0 ? duration : 30;
   }
 
   function formatTime(value: number): string {
@@ -311,6 +328,11 @@ export function createTimelinePanel(
   function isLowerRulerZone(ruler: HTMLElement, clientY: number): boolean {
     const rect = ruler.getBoundingClientRect();
     return clientY >= rect.top + rect.height / 2;
+  }
+
+  function isEditableOrButtonTarget(target: EventTarget | null): boolean {
+    const elementTarget = target instanceof HTMLElement ? target : null;
+    return Boolean(elementTarget?.closest('input, textarea, select, button, [contenteditable="true"], [role="textbox"]'));
   }
 
   function getBoxSelectionRect(selection = boxSelectionState): { left: number; top: number; right: number; bottom: number } | null {
@@ -552,6 +574,12 @@ export function createTimelinePanel(
     notifyMarkersChanged();
     renderTimeline?.(true);
     return true;
+  }
+
+  function requestMarkersPanelSelection(markerId: number): void {
+    window.dispatchEvent(new CustomEvent('cacablu:open-markers-panel', {
+      detail: { markerId },
+    }));
   }
 
   async function applyActiveLoopFromTime(clickedTime: number): Promise<void> {
@@ -971,7 +999,7 @@ export function createTimelinePanel(
             <div class="timeline-panel__viewport">
               <div class="timeline-panel__ruler" style="width:${timelineWidth}px">
                 ${activeLoop
-                  ? `<div class="timeline-panel__loop-range" style="left:${loopLeft}px;width:${loopWidth}px"></div>`
+                  ? `<div class="timeline-panel__loop-range timeline-panel__loop-range--lower" style="left:${loopLeft}px;width:${loopWidth}px"></div>`
                   : ''}
                 ${Array.from({ length: markerCount }, (_, index) => {
                   const time = index * markerStep;
@@ -983,9 +1011,10 @@ export function createTimelinePanel(
                   const title = marker.label.trim()
                     ? `${marker.label.trim()} (${formatTime(marker.time)}s)`
                     : `${formatTime(marker.time)}s`;
+                  const label = marker.label.trim();
                   const isSelected = selectedMarkerId === marker.id;
                   const isDragging = markerDragState?.markerId === marker.id;
-                  return `<button type="button" class="timeline-panel__loop-marker ${isSelected ? 'is-selected' : ''} ${isDragging ? 'is-dragging' : ''}" data-marker-id="${marker.id}" style="left:${left}px" title="${escapeHtml(title)}" aria-label="${escapeHtml(title)}"></button>`;
+                  return `<button type="button" class="timeline-panel__loop-marker ${isSelected ? 'is-selected' : ''} ${isDragging ? 'is-dragging' : ''}" data-marker-id="${marker.id}" style="left:${left}px" title="${escapeHtml(title)}" aria-label="${escapeHtml(title)}">${label ? `<span>${escapeHtml(label)}</span>` : ''}</button>`;
                 }).join('')}
               </div>
 
@@ -993,6 +1022,11 @@ export function createTimelinePanel(
                 ${Array.from({ length: markerCount }, (_, index) => {
                   const left = index * markerStep * effectivePixelsPerSecond;
                   return `<span class="timeline-panel__grid-line" style="left:${left}px"></span>`;
+                }).join('')}
+                ${markers.map((marker) => {
+                  const left = marker.time * effectivePixelsPerSecond;
+                  const isSelected = selectedMarkerId === marker.id;
+                  return `<span class="timeline-panel__loop-guide ${isSelected ? 'is-selected' : ''}" data-marker-guide-id="${marker.id}" style="left:${left}px"></span>`;
                 }).join('')}
               </div>
 
@@ -1221,7 +1255,7 @@ export function createTimelinePanel(
     });
 
     connection.subscribeRuntime((runtime) => {
-      const duration = runtime.endTime !== null && runtime.endTime > 0 ? runtime.endTime : state.transport.duration;
+      const duration = state.transport.duration;
 
       state.transport.currentTime = Math.min(Math.max(runtime.time, 0), Math.max(duration, 0));
       runtimeAnchorTime = state.transport.currentTime;
@@ -1233,10 +1267,6 @@ export function createTimelinePanel(
           runtimeAnchorTime = state.transport.currentTime;
           runtimeAnchorTimestamp = performance.now();
         }
-      }
-
-      if (runtime.endTime !== null && runtime.endTime > 0) {
-        state.transport.duration = runtime.endTime;
       }
 
       render();
@@ -1271,6 +1301,19 @@ export function createTimelinePanel(
         const markerId = Number(markerElement.dataset.markerId);
         const marker = Number.isInteger(markerId) ? findMarker(markerId) : null;
         if (!marker) return;
+        const now = performance.now();
+        const isDoubleClick = lastMarkerPointerDown?.markerId === markerId
+          && now - lastMarkerPointerDown.timestamp <= MARKER_DOUBLE_CLICK_MS;
+        lastMarkerPointerDown = { markerId, timestamp: now };
+        if (isDoubleClick) {
+          selectedMarkerId = markerId;
+          appState.clearResourceSelection();
+          requestMarkersPanelSelection(markerId);
+          render(true);
+          event.preventDefault();
+          event.stopPropagation();
+          return;
+        }
         markerDragState = {
           pointerId: event.pointerId,
           markerId,
@@ -1715,6 +1758,20 @@ export function createTimelinePanel(
     element.addEventListener('pointerup', endDrag);
     element.addEventListener('pointercancel', endDrag);
     element.addEventListener('keydown', (event) => {
+      if (
+        (event.key === ' ' || event.key === 'Spacebar') &&
+        !event.ctrlKey &&
+        !event.metaKey &&
+        !event.altKey &&
+        !event.shiftKey &&
+        !isEditableOrButtonTarget(event.target)
+      ) {
+        event.preventDefault();
+        event.stopPropagation();
+        handleAction('play');
+        return;
+      }
+
       if (event.key !== 'Delete' && event.key !== 'Backspace') return;
       if (deleteSelectedMarker() || deleteSelectedBars()) {
         event.preventDefault();
@@ -1896,6 +1953,9 @@ export function createTimelinePanel(
           selectedMarkerId = markerId;
           appState.clearResourceSelection();
           render(true);
+          if (event.detail >= 2) {
+            requestMarkersPanelSelection(markerId);
+          }
         }
         return;
       }
@@ -1906,7 +1966,7 @@ export function createTimelinePanel(
       }
 
       const nextTime = getTimelineTimeAtClientX(viewport, event.clientX);
-      if (isLowerRulerZone(ruler, event.clientY)) {
+      if (event.shiftKey) {
         const marker = createMarkerAt(nextTime);
         if (marker) {
           appState.clearResourceSelection();
@@ -1921,8 +1981,29 @@ export function createTimelinePanel(
       if (connection.isConnected()) {
         connection.send({ type: 'runtime.seek', time: nextTime });
       }
-      void applyActiveLoopFromTime(nextTime);
+      if (isLowerRulerZone(ruler, event.clientY)) {
+        void applyActiveLoopFromTime(nextTime);
+      }
       render();
+    });
+
+    element.addEventListener('dblclick', (event) => {
+      const markerElement = (event.target as HTMLElement | null)?.closest<HTMLElement>('[data-marker-id]');
+      if (!markerElement?.dataset.markerId) {
+        return;
+      }
+
+      const markerId = Number(markerElement.dataset.markerId);
+      if (!Number.isInteger(markerId)) {
+        return;
+      }
+
+      selectedMarkerId = markerId;
+      appState.clearResourceSelection();
+      render(true);
+      requestMarkersPanelSelection(markerId);
+      event.preventDefault();
+      event.stopPropagation();
     });
 
     return () => {

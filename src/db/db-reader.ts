@@ -78,7 +78,7 @@ export function readDatabase(db: SqlDatabase): ProjectDatabase {
 
   const markers: DbMarker[] = queryRows(
     db,
-    'SELECT id, time, label FROM markers ORDER BY time, id',
+    'SELECT id, time, label FROM MARKERS ORDER BY time, id',
   ).map((r) => ({
     id: r[0] as number,
     time: r[1] as number,

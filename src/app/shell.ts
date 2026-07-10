@@ -481,6 +481,20 @@ export function createAppShell(root: HTMLElement): AppShell {
         workspace.openPanel('timeline');
       });
 
+      window.addEventListener('cacablu:open-markers-panel', (event) => {
+        const detail = event instanceof CustomEvent ? event.detail as { markerId?: unknown } : null;
+        const markerId = typeof detail?.markerId === 'number' && Number.isFinite(detail.markerId)
+          ? detail.markerId
+          : null;
+        workspace.openPanel('markers', { widthRatio: SIDE_PANEL_WIDTH_RATIO });
+        if (markerId === null) return;
+        requestAnimationFrame(() => {
+          window.dispatchEvent(new CustomEvent('cacablu:markers-panel-select', {
+            detail: { markerId },
+          }));
+        });
+      });
+
       window.addEventListener('keydown', (event) => {
         if (!isOpenShortcut(event)) {
           return;

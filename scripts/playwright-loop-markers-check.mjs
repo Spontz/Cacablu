@@ -25,14 +25,14 @@ try {
       { createUndoManager },
     ] = await Promise.all([
       import('/src/panels/timeline-panel.ts'),
-      import('/src/panels/markers-panel.ts'),
+      import('/src/panels/markers-panel.tsx'),
       import('/src/state/app-state.ts'),
       import('/src/state/db-state.ts'),
       import('/src/app/undo-manager.ts'),
     ]);
 
     const db = {
-      variables: new Map([['endTime', '12']]),
+      variables: new Map(),
       bars: [
         {
           id: 1,
@@ -52,10 +52,10 @@ try {
       fbos: [],
       files: [],
       folders: [],
-      markers: [],
+      markers: [{ id: 99, time: 40, label: 'Persisted' }],
     };
 
-    let nextMarkerId = 1;
+    let nextMarkerId = 100;
     const sortMarkers = () => db.markers.sort((left, right) => left.time - right.time || left.id - right.id);
     const clone = (marker) => ({ id: marker.id, time: marker.time, label: marker.label });
     const session = {
@@ -98,16 +98,35 @@ try {
     const dbState = createDbState();
     const undoManager = createUndoManager();
     const sessionRef = { current: session };
+    const runtimeListeners = new Set();
     const connection = {
-      isConnected: () => false,
-      subscribeRuntime: () => () => {},
+      isConnected: () => window.__markerFixture?.connected === true,
+      subscribeRuntime(listener) {
+        runtimeListeners.add(listener);
+        return () => runtimeListeners.delete(listener);
+      },
       subscribeAssets: () => () => {},
       send(message) {
         window.__markerFixture.sent.push(message);
       },
     };
 
-    window.__markerFixture = { db, undoManager, sent: [] };
+    window.__markerFixture = {
+      db,
+      undoManager,
+      sent: [],
+      connected: false,
+      openedMarkerId: null,
+      emitRuntime(runtime) {
+        for (const listener of runtimeListeners) listener(runtime);
+      },
+      resetForEditing() {
+        db.variables.set('endTime', '12');
+        db.markers.length = 0;
+        nextMarkerId = 1;
+        dbState.setOpen('fixture-reset.sqlite');
+      },
+    };
 
     const root = document.querySelector('#app');
     root.innerHTML = '';
@@ -120,19 +139,57 @@ try {
     root.append(timeline.element, markers.element);
     timeline.init({});
     markers.init({});
+    window.addEventListener('cacablu:open-markers-panel', (event) => {
+      const markerId = event.detail?.markerId;
+      window.__markerFixture.openedMarkerId = markerId;
+      window.dispatchEvent(new CustomEvent('cacablu:markers-panel-select', {
+        detail: { markerId },
+      }));
+    });
     dbState.setOpen('fixture.sqlite');
   });
 
   const ruler = page.locator('.timeline-panel__ruler');
   await ruler.waitFor();
 
-  async function clickRulerAt(time, zone) {
+  await page.waitForSelector('[data-marker-id="99"]');
+  const persistedMarker = await page.locator('.timeline-panel__loop-marker[data-marker-id="99"]').boundingBox();
+  const initialRuler = await ruler.boundingBox();
+  if (!persistedMarker || !initialRuler) {
+    throw new Error('Persisted marker did not render on initial load.');
+  }
+  const initialRulerWidth = await ruler.evaluate((node) => node.getBoundingClientRect().width);
+  if (initialRulerWidth < 40 * 88) {
+    throw new Error(`Initial timeline did not expand to persisted marker time: ${initialRulerWidth}`);
+  }
+
+  await page.evaluate(() => window.__markerFixture.resetForEditing());
+  await page.waitForFunction(() => window.__markerFixture.db.markers.length === 0);
+
+  async function clickRulerAt(time, zone, options = {}) {
     const box = await ruler.boundingBox();
     if (!box) throw new Error('Missing ruler box');
-    await page.mouse.click(box.x + time * 88, box.y + box.height * (zone === 'lower' ? 0.75 : 0.25));
+    const modifiers = options.modifiers ?? [];
+    for (const modifier of modifiers) {
+      await page.keyboard.down(modifier);
+    }
+    await page.mouse.click(
+      box.x + time * 88,
+      box.y + box.height * (zone === 'lower' ? 0.75 : 0.25),
+    );
+    for (const modifier of [...modifiers].reverse()) {
+      await page.keyboard.up(modifier);
+    }
   }
 
   await clickRulerAt(2, 'lower');
+  await page.waitForTimeout(100);
+  let markerCount = await page.evaluate(() => window.__markerFixture.db.markers.length);
+  if (markerCount !== 0) {
+    throw new Error(`Expected normal lower-zone click not to create a marker, got ${markerCount}`);
+  }
+
+  await clickRulerAt(2, 'lower', { modifiers: ['Shift'] });
   await page.waitForFunction(() => window.__markerFixture.db.markers.length === 1);
   let markers = await page.evaluate(() => window.__markerFixture.db.markers.map((marker) => ({ ...marker })));
   expectClose(markers[0].time, 2, 'created marker time');
@@ -154,35 +211,92 @@ try {
   expectClose(markers[0].time, 3, 'undo-restored marker time');
 
   await page.waitForTimeout(250);
-  await clickRulerAt(7, 'lower');
+  await clickRulerAt(7, 'upper', { modifiers: ['Shift'] });
   await page.waitForFunction(() => window.__markerFixture.db.markers.length === 2);
 
-  const firstTimeInput = page.locator('.markers-panel__input--time').first();
-  await firstTimeInput.fill('4');
-  await firstTimeInput.press('Enter');
+  await page.locator('.markers-panel__option[data-marker-option-id="1"]').click();
+
+  const timeInput = page.getByLabel('Time');
+  await timeInput.fill('4');
+  await timeInput.press('Enter');
   await page.waitForFunction(() => Math.abs(window.__markerFixture.db.markers[0].time - 4) < 0.001);
 
-  const firstLabelInput = page.locator('.markers-panel__row').first().locator('.markers-panel__input').first();
-  await firstLabelInput.fill('Loop A');
-  await firstLabelInput.press('Enter');
+  const labelInput = page.getByLabel('Label');
+  await labelInput.fill('Loop A');
+  await labelInput.press('Enter');
   await page.waitForFunction(() => window.__markerFixture.db.markers[0].label === 'Loop A');
 
-  await clickRulerAt(5, 'upper');
+  await page.getByPlaceholder('Search markers').fill('loop');
+  await page.waitForSelector('.markers-panel__option[data-marker-option-id="1"]');
+  const filteredOptionCount = await page.locator('.markers-panel__option').count();
+  if (filteredOptionCount !== 1) {
+    throw new Error(`Expected quick search to show one marker, got ${filteredOptionCount}`);
+  }
+  await page.getByPlaceholder('Search markers').fill('');
+
+  await page.locator('.timeline-panel__loop-marker[data-marker-id="1"]').dblclick();
+  await page.waitForFunction(() => window.__markerFixture.openedMarkerId === 1);
+  await page.waitForSelector('.markers-panel__option[data-combobox-active="true"][data-marker-option-id="1"]');
+  const focusedMarkerInput = await page.evaluate(() => document.activeElement?.closest('.markers-panel__editor') ? '1' : null);
+  if (focusedMarkerInput !== '1') {
+    throw new Error('Expected marker 1 editor to receive focus.');
+  }
+
+  await clickRulerAt(5, 'lower');
   await page.waitForSelector('.timeline-panel__loop-range');
-  const loop = await page.locator('.timeline-panel__loop-range').evaluate((node) => ({
+  const loopRangeCount = await page.locator('.timeline-panel__loop-range').count();
+  if (loopRangeCount !== 1) {
+    throw new Error(`Expected active loop to render one lower indicator, got ${loopRangeCount}`);
+  }
+  const lowerLoopRangeCount = await page.locator('.timeline-panel__loop-range--lower').count();
+  if (lowerLoopRangeCount !== 1) {
+    throw new Error(`Expected active loop indicator to be lower, got ${lowerLoopRangeCount}`);
+  }
+  const loop = await page.locator('.timeline-panel__loop-range').first().evaluate((node) => ({
     left: Number.parseFloat(node.style.left),
     width: Number.parseFloat(node.style.width),
   }));
-  expectClose(loop.left / 88, 4, 'upper-zone loop start');
-  expectClose((loop.left + loop.width) / 88, 7, 'upper-zone loop end');
+  expectClose(loop.left / 88, 4, 'lower-zone loop start');
+  expectClose((loop.left + loop.width) / 88, 7, 'lower-zone loop end');
 
-  await clickRulerAt(1, 'upper');
-  const fallback = await page.locator('.timeline-panel__loop-range').evaluate((node) => ({
+  await page.evaluate(() => {
+    window.__markerFixture.emitRuntime({
+      time: 5,
+      playing: false,
+      fps: 60,
+      startTime: 4,
+      endTime: 7,
+      receivedAt: Date.now(),
+    });
+  });
+  const widthAfterRuntimeLoop = await ruler.evaluate((node) => node.getBoundingClientRect().width);
+  if (widthAfterRuntimeLoop < 12 * 88) {
+    throw new Error(`Expected runtime loop state not to shrink timeline duration, got width ${widthAfterRuntimeLoop}`);
+  }
+
+  await clickRulerAt(8, 'lower');
+  const nextLoop = await page.locator('.timeline-panel__loop-range').first().evaluate((node) => ({
+    left: Number.parseFloat(node.style.left),
+    width: Number.parseFloat(node.style.width),
+  }));
+  expectClose(nextLoop.left / 88, 7, 'post-runtime-state loop start');
+  expectClose((nextLoop.left + nextLoop.width) / 88, 12, 'post-runtime-state loop end');
+
+  await clickRulerAt(1, 'lower');
+  const fallback = await page.locator('.timeline-panel__loop-range').first().evaluate((node) => ({
     left: Number.parseFloat(node.style.left),
     width: Number.parseFloat(node.style.width),
   }));
   expectClose(fallback.left / 88, 0, 'fallback loop start');
   expectClose((fallback.left + fallback.width) / 88, 4, 'fallback loop end');
+
+  await page.evaluate(() => {
+    window.__markerFixture.connected = true;
+    window.__markerFixture.sent.length = 0;
+  });
+  await page.locator('.panel--timeline').focus();
+  await page.keyboard.press('Space');
+  await page.waitForFunction(() => window.__markerFixture.sent.some((message) => message.type === 'runtime.toggle'));
 
   const result = await page.evaluate(() => ({
     markers: window.__markerFixture.db.markers,

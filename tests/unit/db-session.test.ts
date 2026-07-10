@@ -47,6 +47,8 @@ describe('DbSession markers', () => {
     let session = await openDbSession(handle);
 
     expect(session.data.markers).toEqual([]);
+    expect(session.getTableNames()).toContain('MARKERS');
+    expect(session.getTableNames()).not.toContain('markers');
     expect(session.getTableNames()).toContain('custom_debug');
     expect(session.getTableSnapshot('custom_debug')).toEqual({
       name: 'custom_debug',
@@ -84,6 +86,21 @@ describe('DbSession markers', () => {
     ]);
     session.close();
   });
+
+  it('renames lowercase marker tables to uppercase MARKERS while preserving rows', async () => {
+    const handle = new MemoryFileHandle(await createLowercaseMarkersProjectBytes()) as unknown as FileSystemFileHandle;
+    const session = await openDbSession(handle);
+
+    expect(session.getTableNames()).toContain('MARKERS');
+    expect(session.getTableNames()).not.toContain('markers');
+    expect(session.getTableSnapshot('MARKERS')).toEqual({
+      name: 'MARKERS',
+      columns: ['id', 'time', 'label'],
+      rows: [{ id: 1, time: 12.5, label: 'legacy' }],
+    });
+    expect(session.data.markers).toEqual([{ id: 1, time: 12.5, label: 'legacy' }]);
+    session.close();
+  });
 });
 
 async function createLegacyProjectBytes(): Promise<Uint8Array> {
@@ -96,6 +113,21 @@ async function createLegacyProjectBytes(): Promise<Uint8Array> {
   db.run('CREATE TABLE "FOLDERS" ("id" INTEGER PRIMARY KEY, "name" TEXT, "parent" INTEGER, "enabled" INTEGER)');
   db.run('CREATE TABLE "custom_debug" ("id" INTEGER PRIMARY KEY, "note" TEXT)');
   db.run('INSERT INTO "custom_debug" ("note") VALUES (?)', ['visible']);
+  const bytes = db.export();
+  db.close();
+  return bytes;
+}
+
+async function createLowercaseMarkersProjectBytes(): Promise<Uint8Array> {
+  const SQL = await getSqlJs();
+  const db = new SQL.Database();
+  db.run('CREATE TABLE "variables" ("variable" TEXT PRIMARY KEY, "value" TEXT)');
+  db.run('CREATE TABLE "BARS" ("id" INTEGER PRIMARY KEY, "name" TEXT, "type" TEXT, "layer" INTEGER, "startTime" REAL, "endTime" REAL, "enabled" INTEGER, "selected" INTEGER, "script" TEXT, "srcBlending" TEXT, "dstBlending" TEXT, "blendingEQ" TEXT, "srcAlpha" TEXT, "dstAlpha" TEXT)');
+  db.run('CREATE TABLE "FBOs" ("id" INTEGER PRIMARY KEY, "ratio" INTEGER, "width" INTEGER, "height" INTEGER, "format" TEXT, "colorAttachments" INTEGER, "filter" TEXT)');
+  db.run('CREATE TABLE "FILES" ("id" INTEGER PRIMARY KEY, "name" TEXT, "parent" INTEGER, "bytes" INTEGER, "type" TEXT, "data" BLOB, "format" TEXT, "enabled" INTEGER)');
+  db.run('CREATE TABLE "FOLDERS" ("id" INTEGER PRIMARY KEY, "name" TEXT, "parent" INTEGER, "enabled" INTEGER)');
+  db.run('CREATE TABLE "markers" ("id" INTEGER PRIMARY KEY, "time" REAL NOT NULL, "label" TEXT NOT NULL DEFAULT "")');
+  db.run('INSERT INTO "markers" ("time", "label") VALUES (?, ?)', [12.5, 'legacy']);
   const bytes = db.export();
   db.close();
   return bytes;

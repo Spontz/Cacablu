@@ -199,9 +199,9 @@ function makeSession(handle: FileSystemFileHandle, db: SqlDatabase, data: Projec
       validateMarkerTime(input.time);
       const label = input.label ?? '';
       if (input.id !== undefined) {
-        db.run('INSERT INTO "markers" ("id", "time", "label") VALUES (?, ?, ?)', [input.id, input.time, label]);
+        db.run('INSERT INTO "MARKERS" ("id", "time", "label") VALUES (?, ?, ?)', [input.id, input.time, label]);
       } else {
-        db.run('INSERT INTO "markers" ("time", "label") VALUES (?, ?)', [input.time, label]);
+        db.run('INSERT INTO "MARKERS" ("time", "label") VALUES (?, ?)', [input.time, label]);
       }
 
       const marker: DbMarker = {
@@ -223,7 +223,7 @@ function makeSession(handle: FileSystemFileHandle, db: SqlDatabase, data: Projec
       const nextTime = input.time ?? marker.time;
       const nextLabel = input.label ?? marker.label;
       validateMarkerTime(nextTime);
-      db.run('UPDATE "markers" SET "time" = ?, "label" = ? WHERE "id" = ?', [nextTime, nextLabel, markerId]);
+      db.run('UPDATE "MARKERS" SET "time" = ?, "label" = ? WHERE "id" = ?', [nextTime, nextLabel, markerId]);
       marker.time = nextTime;
       marker.label = nextLabel;
       sortMarkers(data.markers);
@@ -237,7 +237,7 @@ function makeSession(handle: FileSystemFileHandle, db: SqlDatabase, data: Projec
       }
 
       const [marker] = data.markers.splice(index, 1);
-      db.run('DELETE FROM "markers" WHERE "id" = ?', [markerId]);
+      db.run('DELETE FROM "MARKERS" WHERE "id" = ?', [markerId]);
       return { ...marker };
     },
 
@@ -456,7 +456,31 @@ function migrateDatabaseSchema(db: SqlDatabase): void {
     db.run('UPDATE "BARS" SET "name" = COALESCE("type", "") WHERE "name" IS NULL OR "name" = ""');
   }
 
-  db.run('CREATE TABLE IF NOT EXISTS "markers" ("id" INTEGER PRIMARY KEY, "time" REAL NOT NULL, "label" TEXT NOT NULL DEFAULT "")');
+  migrateMarkersTableName(db);
+}
+
+function migrateMarkersTableName(db: SqlDatabase): void {
+  const existingName = getDatabaseTableNames(db).find((name) => name.toLowerCase() === 'markers');
+  if (!existingName) {
+    createMarkersTable(db);
+    return;
+  }
+
+  if (existingName === 'MARKERS') {
+    return;
+  }
+
+  const temporaryName = '__cacablu_markers_migration';
+  db.run(`ALTER TABLE ${quoteIdentifier(existingName)} RENAME TO ${quoteIdentifier(temporaryName)}`);
+  createMarkersTable(db);
+  db.run(
+    `INSERT INTO "MARKERS" ("id", "time", "label") SELECT "id", "time", "label" FROM ${quoteIdentifier(temporaryName)}`,
+  );
+  db.run(`DROP TABLE ${quoteIdentifier(temporaryName)}`);
+}
+
+function createMarkersTable(db: SqlDatabase): void {
+  db.run('CREATE TABLE IF NOT EXISTS "MARKERS" ("id" INTEGER PRIMARY KEY, "time" REAL NOT NULL, "label" TEXT NOT NULL DEFAULT "")');
 }
 
 function getTableColumnNames(db: SqlDatabase, tableName: string): string[] {
