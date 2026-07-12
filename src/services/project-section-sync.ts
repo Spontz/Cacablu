@@ -47,6 +47,7 @@ type ProgressListener = (progress: ProjectSectionSyncProgress) => void;
 
 export interface ProjectSectionSyncOptions {
   signal?: AbortSignal;
+  forceReplace?: boolean;
 }
 
 export async function syncProjectBarsToPhoenix(
@@ -61,30 +62,32 @@ export async function syncProjectBarsToPhoenix(
     throw new ProjectSectionSyncError(issues);
   }
 
-  const expected = await buildExpectedSectionManifestEntries(sections, onProgress, options.signal);
+  if (!options.forceReplace) {
+    const expected = await buildExpectedSectionManifestEntries(sections, onProgress, options.signal);
 
-  onProgress({
-    phase: 'sections',
-    current: 0,
-    total: 0,
-    copied: 0,
-    skipped: 0,
-    failed: 0,
-    message: 'Checking Phoenix sections...',
-  });
-
-  const manifest = await client.fetchManifest(options.signal);
-  if (await sectionManifestMatches(manifest.entries, expected, onProgress, options.signal)) {
     onProgress({
-      phase: 'complete',
-      current: sections.length,
-      total: sections.length,
+      phase: 'sections',
+      current: 0,
+      total: 0,
       copied: 0,
-      skipped: sections.length,
+      skipped: 0,
       failed: 0,
-      message: `Phoenix sections already match (${sections.length}/${sections.length}).`,
+      message: 'Checking Phoenix sections...',
     });
-    return { total: sections.length + issues.length, valid: sections.length, invalid: issues.length, replaced: false, skipped: sections.length, issues };
+
+    const manifest = await client.fetchManifest(options.signal);
+    if (await sectionManifestMatches(manifest.entries, expected, onProgress, options.signal)) {
+      onProgress({
+        phase: 'complete',
+        current: sections.length,
+        total: sections.length,
+        copied: 0,
+        skipped: sections.length,
+        failed: 0,
+        message: `Phoenix sections already match (${sections.length}/${sections.length}).`,
+      });
+      return { total: sections.length + issues.length, valid: sections.length, invalid: issues.length, replaced: false, skipped: sections.length, issues };
+    }
   }
 
   throwIfAborted(options.signal);

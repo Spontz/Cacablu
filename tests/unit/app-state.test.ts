@@ -122,4 +122,14 @@ describe('createAppState', () => {
 
     expect(state.getSnapshot().sectionErrorIds).toEqual([]);
   });
+
+  it('stores and clears the selected runtime loop', () => {
+    const state = createAppState();
+
+    state.setActiveLoop({ startTime: 10, endTime: 20 });
+    expect(state.getSnapshot().activeLoop).toEqual({ startTime: 10, endTime: 20 });
+
+    state.setActiveLoop(null);
+    expect(state.getSnapshot().activeLoop).toBeNull();
+  });
 });

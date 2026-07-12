@@ -12,6 +12,8 @@ import type { DbSession } from '../db/db-session';
 import { createPhoenixAssetClient } from '../phoenix/asset-client';
 import { createPhoenixSectionClient } from '../phoenix/section-client';
 import { createPhoenixDemoSettingsClient } from '../phoenix/demo-settings-client';
+import { createPhoenixGraphicsClient } from '../phoenix/graphics-client';
+import { createPhoenixRuntimeLoopClient } from '../phoenix/runtime-loop-client';
 import { createPhoenixLogClient } from '../phoenix/log-client';
 import { primePhoenixLogEvents, recordPhoenixLogsAsEvents } from '../phoenix/log-events';
 import { createUndoManager } from './undo-manager';
@@ -30,6 +32,8 @@ import {
 } from '../services/project-pool-sync';
 import { syncProjectDemoSettingsToPhoenix, type ProjectDemoSettingsSyncProgress } from '../services/project-demo-settings-sync';
 import { ProjectSectionSyncError, syncProjectBarsToPhoenix, type ProjectSectionSyncProgress } from '../services/project-section-sync';
+import { createProjectSyncCoordinator } from '../services/project-sync-coordinator';
+import { graphicsConfigFromProject } from '../services/graphics-config';
 
 export interface AppShell {
   mount(): void;
@@ -64,6 +68,8 @@ export function createAppShell(root: HTMLElement): AppShell {
   const phoenixAssets = createPhoenixAssetClient();
   const phoenixSections = createPhoenixSectionClient();
   const phoenixDemoSettings = createPhoenixDemoSettingsClient();
+  const phoenixGraphics = createPhoenixGraphicsClient();
+  const phoenixLoop = createPhoenixRuntimeLoopClient();
   const phoenixLogs = createPhoenixLogClient();
 
   let session: DbSession | null = null;
@@ -73,8 +79,18 @@ export function createAppShell(root: HTMLElement): AppShell {
   let lastConnectionStatus = state.getSnapshot().connectionStatus;
   let lastDisplayTimelineIds = state.getSnapshot().displayTimelineIds;
   let lastResourceSelectionSignature = getResourceSelectionSignature(state.getSnapshot().resourceSelection);
-  let projectPhoenixSyncState: 'pending' | 'synced' = 'pending';
-  let phoenixProjectPromptOpen = false;
+  const projectSyncCoordinator = createProjectSyncCoordinator<DbSession>(
+    async (openedSession, signal) => {
+      await syncOpenedProjectPool(openedSession, { signal, forceSections: true });
+    },
+    (error) => {
+      state.addEvent({
+        severity: 'error',
+        source: 'Phoenix project sync',
+        description: error instanceof Error ? error.message : 'Could not resynchronize the project after Phoenix reconnected.',
+      });
+    },
+  );
 
   const fsSupported = isFileSystemAccessSupported();
 
@@ -302,8 +318,9 @@ export function createAppShell(root: HTMLElement): AppShell {
     dbState.setOpening();
     state.clearResourceSelection();
     state.resetSectionErrors();
+    state.setActiveLoop(null);
     undoManager.clear();
-    projectPhoenixSyncState = 'pending';
+    projectSyncCoordinator.setSession(null);
     workspace.closePanel('resources');
     workspace.closePanel('inspector');
     workspace.closePanel('section-editor');
@@ -320,9 +337,7 @@ export function createAppShell(root: HTMLElement): AppShell {
       }
       session = nextSession;
       sessionRef.current = session;
-      if (!connection.isConnected()) {
-        projectPhoenixSyncState = 'pending';
-      }
+      projectSyncCoordinator.setSession(session, connection.isConnected());
       dbState.setOpen(session.fileName);
       workspace.closePanel('inspector');
       workspace.openPanel('timeline');
@@ -331,6 +346,7 @@ export function createAppShell(root: HTMLElement): AppShell {
       nextSession?.close();
       session = null;
       sessionRef.current = null;
+      projectSyncCoordinator.setSession(null);
       state.clearResourceSelection();
       dbState.clear();
       if (!isAbortError(err)) {
@@ -412,7 +428,9 @@ export function createAppShell(root: HTMLElement): AppShell {
           if (workspace.isPanelOpen('preview')) {
             enablePhoenixPreview();
           }
-          promptToLoadProjectInPhoenix();
+          void projectSyncCoordinator.onConnected();
+        } else if (snapshot.connectionStatus !== 'connected' && lastConnectionStatus === 'connected') {
+          projectSyncCoordinator.onDisconnected();
         }
         lastConnectionStatus = snapshot.connectionStatus;
         if (snapshot.assetSelection.kind === 'file' && snapshot.assetSelection.id !== lastInspectorSelectionId) {
@@ -618,109 +636,76 @@ export function createAppShell(root: HTMLElement): AppShell {
     });
   }
 
-  async function syncOpenedProjectPool(openedSession: DbSession): Promise<void> {
+  async function syncOpenedProjectPool(
+    openedSession: DbSession,
+    options: { signal?: AbortSignal; forceSections?: boolean } = {},
+  ): Promise<void> {
     if (!connection.isConnected()) {
-      projectPhoenixSyncState = 'pending';
-      return;
+      throw new Error('Could not connect to Phoenix.');
     }
 
     const abortController = new AbortController();
+    const abortFromParent = () => abortController.abort(options.signal?.reason);
+    if (options.signal?.aborted) abortFromParent();
+    else options.signal?.addEventListener('abort', abortFromParent, { once: true });
+    const signal = abortController.signal;
     poolSyncModal?.show(abortController);
-    let wentOfflineDuringSync = false;
     try {
       await syncPublishedPoolFilesToPhoenix(openedSession.data, phoenixAssets, (progress) => {
         poolSyncModal?.update(progress);
-      }, { signal: abortController.signal });
+      }, { signal });
       await syncProjectDemoSettingsToPhoenix(openedSession.data, phoenixDemoSettings, (progress) => {
         poolSyncModal?.update(progress);
-      }, { signal: abortController.signal });
+      }, { signal });
+      const graphicsResult = await phoenixGraphics.putConfig(graphicsConfigFromProject(openedSession.data), signal);
+      for (const warning of graphicsResult.warnings) {
+        state.addEvent({ severity: 'warning', source: 'Graphics', description: warning.message });
+      }
       let stopLogCapture: (() => void) | null = null;
       try {
-        await primePhoenixLogEvents(phoenixLogs, abortController.signal);
-        stopLogCapture = startPhoenixLogCapture(abortController.signal);
+        await primePhoenixLogEvents(phoenixLogs, signal);
+        stopLogCapture = startPhoenixLogCapture(signal);
         const sectionSync = await syncProjectBarsToPhoenix(openedSession.data, phoenixSections, (progress) => {
           poolSyncModal?.update(progress);
-        }, { signal: abortController.signal });
-        await recordRecentPhoenixLogs(abortController.signal);
+        }, { signal, forceReplace: options.forceSections });
+        await recordRecentPhoenixLogs(signal);
         recordSectionIssues(sectionSync.issues);
+        const activeLoop = state.getSnapshot().activeLoop;
+        if (activeLoop) await phoenixLoop.putLoop(activeLoop, signal);
       } catch (err) {
         if (isAbortError(err)) throw err;
-        await recordRecentPhoenixLogs(abortController.signal);
+        await recordRecentPhoenixLogs(signal);
         if (err instanceof ProjectSectionSyncError) {
           recordSectionIssues(err.issues);
         } else if (err instanceof Error) {
-          const isPhoenixOffline = err.message.includes('Could not connect to Phoenix');
-          if (isPhoenixOffline) {
-            wentOfflineDuringSync = true;
-            projectPhoenixSyncState = 'pending';
-          } else {
-            state.addEvent({
-              severity: 'error',
-              source: 'Phoenix section sync',
-              description: err.message,
-            });
-          }
+          state.addEvent({
+            severity: 'error',
+            source: 'Phoenix section sync',
+            description: err.message,
+          });
+          throw err;
         }
       } finally {
         stopLogCapture?.();
       }
-      if (!wentOfflineDuringSync) {
-        projectPhoenixSyncState = 'synced';
-      }
     } catch (err) {
       if (isAbortError(err)) throw err;
       if (err instanceof Error) {
-        const isPhoenixOffline = err.message.includes('Could not connect to Phoenix');
-        if (isPhoenixOffline) {
-          wentOfflineDuringSync = true;
-          projectPhoenixSyncState = 'pending';
-        } else {
-          state.addEvent({
-            severity: 'error',
-            source: 'Phoenix project sync',
-            description: err.message,
-          });
-          poolSyncModal?.update({
-            phase: 'error',
-            current: 0,
-            total: 0,
-            copied: 0,
-            skipped: 0,
-            failed: 0,
-            message: `Phoenix pool sync failed: ${err.message}`,
-          });
-          throw err;
-        }
+        poolSyncModal?.update({
+          phase: 'error',
+          current: 0,
+          total: 0,
+          copied: 0,
+          skipped: 0,
+          failed: 0,
+          message: `Phoenix project sync failed: ${err.message}`,
+        });
       }
+      throw err;
     } finally {
+      options.signal?.removeEventListener('abort', abortFromParent);
       poolSyncModal?.hide();
     }
-  }
-
-  function promptToLoadProjectInPhoenix(): void {
-    if (!session || projectPhoenixSyncState === 'synced' || phoenixProjectPromptOpen) {
-      return;
-    }
-
-    phoenixProjectPromptOpen = true;
-    window.setTimeout(() => {
-      try {
-        if (!session || !connection.isConnected() || projectPhoenixSyncState === 'synced') {
-          return;
-        }
-
-        const shouldLoad = window.confirm(
-          `Phoenix is connected. Do you want to load "${session.fileName}" in Phoenix now?`,
-        );
-        if (!shouldLoad) {
-          return;
-        }
-
-        void syncOpenedProjectPool(session);
-      } finally {
-        phoenixProjectPromptOpen = false;
-      }
-    }, 0);
   }
 
   function recordSectionIssues(issues: ProjectSectionSyncError['issues']): void {

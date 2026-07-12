@@ -18,6 +18,7 @@ export interface AppState {
   markSectionErrors(ids: number[]): void;
   clearSectionErrors(ids: number[]): void;
   resetSectionErrors(): void;
+  setActiveLoop(loop: { startTime: number; endTime: number } | null): void;
   clearEventsForSubjects(subjectIds: string[], sources?: string[]): void;
   markEventsRead(): void;
   clearEvents(): void;
@@ -34,6 +35,7 @@ const INITIAL_SNAPSHOT: AppSnapshot = {
   unreadEventCount: 0,
   displayTimelineIds: false,
   sectionErrorIds: [],
+  activeLoop: null,
 };
 
 export function createAppState(): AppState {
@@ -187,6 +189,15 @@ export function createAppState(): AppState {
         ...snapshot,
         sectionErrorIds: [],
       };
+      publish();
+    },
+
+    setActiveLoop(loop): void {
+      if (
+        snapshot.activeLoop?.startTime === loop?.startTime
+        && snapshot.activeLoop?.endTime === loop?.endTime
+      ) return;
+      snapshot = { ...snapshot, activeLoop: loop };
       publish();
     },
 

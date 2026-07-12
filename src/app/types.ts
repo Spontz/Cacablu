@@ -53,4 +53,5 @@ export interface AppSnapshot {
   unreadEventCount: number;
   displayTimelineIds: boolean;
   sectionErrorIds: number[];
+  activeLoop: { startTime: number; endTime: number } | null;
 }

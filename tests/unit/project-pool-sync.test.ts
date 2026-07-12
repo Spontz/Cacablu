@@ -108,8 +108,8 @@ describe('project pool sync', () => {
         generatedAt: new Date().toISOString(),
         errors: [],
         entries: [
-          { path: 'pool/root.txt', kind: 'file', size: 1 },
-          { path: 'pool/textures/hero.png', kind: 'file', size: 3 },
+          { path: 'pool/root.txt', kind: 'file', size: 1, hash: fnv1a(new Uint8Array([6])) },
+          { path: 'pool/textures/hero.png', kind: 'file', size: 3, hash: fnv1a(new Uint8Array([1, 2, 3])) },
           { path: 'resources/keep.frag', kind: 'file', size: 99 },
         ],
       }),
@@ -122,6 +122,30 @@ describe('project pool sync', () => {
     expect(deleteDirectory).not.toHaveBeenCalled();
     expect(createDirectory).not.toHaveBeenCalled();
     expect(writeFile).not.toHaveBeenCalled();
+  });
+
+  it('rebuilds the pool when a same-size file has different content', async () => {
+    const createDirectory = vi.fn().mockResolvedValue({ ok: true, operation: 'create-directory' });
+    const deleteDirectory = vi.fn().mockResolvedValue({ ok: true, operation: 'delete-directory' });
+    const writeFile = vi.fn().mockResolvedValue({ ok: true, operation: 'write-file' });
+
+    await syncPublishedPoolFilesToPhoenix(makeDb(), {
+      fetchManifest: async () => ({
+        root: 'phoenix-engine',
+        generatedAt: new Date().toISOString(),
+        errors: [],
+        entries: [
+          { path: 'pool/root.txt', kind: 'file', size: 1, hash: fnv1a(new Uint8Array([9])) },
+          { path: 'pool/textures/hero.png', kind: 'file', size: 3, hash: fnv1a(new Uint8Array([1, 2, 3])) },
+        ],
+      }),
+      createDirectory,
+      deleteDirectory,
+      writeFile,
+    }, () => {});
+
+    expect(deleteDirectory).toHaveBeenCalledWith('pool', true, undefined);
+    expect(writeFile).toHaveBeenCalledTimes(2);
   });
 
   it('clears Phoenix pool when it has extra files', async () => {
@@ -231,3 +255,12 @@ describe('project pool sync', () => {
     expect(writeFile).not.toHaveBeenCalled();
   });
 });
+
+function fnv1a(value: Uint8Array): string {
+  let hash = 0x811c9dc5;
+  for (const byte of value) {
+    hash ^= byte;
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return `fnv1a:${hash.toString(16).padStart(8, '0')}`;
+}

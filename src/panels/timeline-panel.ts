@@ -99,15 +99,15 @@ export function createTimelinePanel(
   connection: ConnectionController,
   undoManager: UndoManager,
 ): IContentRenderer {
+  const initialActiveLoop = appState.getSnapshot().activeLoop;
   const state = createTimelineState({
     duration: 0,
     currentTime: 0,
-    loop: null,
+    loop: initialActiveLoop ? { start: initialActiveLoop.startTime, end: initialActiveLoop.endTime } : null,
     pixelsPerSecond: 88,
     zoom: 1,
   });
 
-  let lastTimestamp = 0;
   let lastRenderedDuration = Number.NaN;
   let lastRenderedConnected = false;
   let lastRenderedSelectionSignature = '';
@@ -151,7 +151,6 @@ export function createTimelinePanel(
     if (!options.preserveTransport) {
       state.transport.currentTime = 0;
       state.transport.isPlaying = false;
-      lastTimestamp = 0;
       runtimeAnchorTime = 0;
       runtimeAnchorTimestamp = performance.now();
     }
@@ -165,7 +164,6 @@ export function createTimelinePanel(
         Math.max(state.transport.duration, 0),
       );
       state.transport.isPlaying = previousIsPlaying;
-      lastTimestamp = 0;
       runtimeAnchorTime = state.transport.currentTime;
       runtimeAnchorTimestamp = performance.now();
     }
@@ -196,7 +194,6 @@ export function createTimelinePanel(
     state.transport.currentTime = 0;
     state.transport.isPlaying = false;
     state.transport.loop = null;
-    lastTimestamp = 0;
     runtimeAnchorTime = 0;
     runtimeAnchorTimestamp = performance.now();
   }
@@ -237,23 +234,6 @@ export function createTimelinePanel(
     }
 
     return 10 * magnitude;
-  }
-
-  function normalizeTime(time: number): number {
-    const range = state.transport.loop ? normalizeRange(state.transport.loop) : null;
-
-    if (!range) {
-      return Math.min(Math.max(time, 0), state.transport.duration);
-    }
-
-    const span = range.end - range.start;
-
-    if (span <= 0) {
-      return range.start;
-    }
-
-    const relative = (time - range.start) % span;
-    return range.start + (relative < 0 ? relative + span : relative);
   }
 
   function getErroredSectionBarIds(): Set<number> {
@@ -588,10 +568,17 @@ export function createTimelinePanel(
     if (!interval) return;
 
     state.transport.loop = { start: interval.startTime, end: interval.endTime };
+    appState.setActiveLoop(interval);
+    state.transport.currentTime = interval.startTime;
+    runtimeAnchorTime = interval.startTime;
+    runtimeAnchorTimestamp = performance.now();
     renderTimeline?.(true);
 
     try {
       await phoenixLoop.putLoop(interval);
+      if (connection.isConnected()) {
+        connection.send({ type: 'runtime.seek', time: interval.startTime });
+      }
     } catch (err) {
       appState.addEvent({
         severity: 'error',
@@ -1192,7 +1179,7 @@ export function createTimelinePanel(
       }
     };
 
-    const tick = (timestamp: number): void => {
+    const tick = (): void => {
       if (connection.isConnected()) {
         if (state.transport.isPlaying) {
           const elapsedSeconds = (performance.now() - runtimeAnchorTimestamp) / 1000;
@@ -1203,29 +1190,16 @@ export function createTimelinePanel(
           updatePlayhead();
         }
 
-        lastTimestamp = 0;
         requestAnimationFrame(tick);
         return;
       }
 
-      if (!state.transport.isPlaying) {
-        lastTimestamp = 0;
-        requestAnimationFrame(tick);
-        return;
+      if (state.transport.isPlaying) {
+        state.transport.isPlaying = false;
+        runtimeAnchorTime = state.transport.currentTime;
+        runtimeAnchorTimestamp = performance.now();
+        render();
       }
-
-      if (!lastTimestamp) {
-        lastTimestamp = timestamp;
-      }
-
-      const elapsedSeconds = (timestamp - lastTimestamp) / 1000;
-      lastTimestamp = timestamp;
-
-      state.transport.currentTime = normalizeTime(
-        state.transport.currentTime + elapsedSeconds * state.transport.playbackRate,
-      );
-
-      render();
       requestAnimationFrame(tick);
     };
 
@@ -1273,6 +1247,14 @@ export function createTimelinePanel(
     });
 
     appState.subscribe((snapshot) => {
+      state.transport.loop = snapshot.activeLoop
+        ? { start: snapshot.activeLoop.startTime, end: snapshot.activeLoop.endTime }
+        : null;
+      if (snapshot.connectionStatus !== 'connected' && state.transport.isPlaying) {
+        state.transport.isPlaying = false;
+        runtimeAnchorTime = state.transport.currentTime;
+        runtimeAnchorTimestamp = performance.now();
+      }
       const nextSignature = [
         snapshot.connectionStatus,
         snapshot.displayTimelineIds ? 'ids' : 'no-ids',
@@ -1282,6 +1264,7 @@ export function createTimelinePanel(
             ? `bars:${[...snapshot.resourceSelection.ids].sort((a, b) => a - b).join(',')}`
             : 'none',
         snapshot.sectionErrorIds.join(','),
+        snapshot.activeLoop ? `loop:${snapshot.activeLoop.startTime}:${snapshot.activeLoop.endTime}` : 'no-loop',
       ].join('|');
       if (nextSignature === lastAppTimelineSignature) return;
       lastAppTimelineSignature = nextSignature;
@@ -1975,14 +1958,16 @@ export function createTimelinePanel(
         return;
       }
 
+      if (isLowerRulerZone(ruler, event.clientY)) {
+        void applyActiveLoopFromTime(nextTime);
+        return;
+      }
+
       state.transport.currentTime = nextTime;
       runtimeAnchorTime = nextTime;
       runtimeAnchorTimestamp = performance.now();
       if (connection.isConnected()) {
         connection.send({ type: 'runtime.seek', time: nextTime });
-      }
-      if (isLowerRulerZone(ruler, event.clientY)) {
-        void applyActiveLoopFromTime(nextTime);
       }
       render();
     });

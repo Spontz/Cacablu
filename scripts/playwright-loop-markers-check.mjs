@@ -14,6 +14,23 @@ function expectClose(actual, expected, label, tolerance = 0.15) {
 }
 
 try {
+  await page.route('http://127.0.0.1:29100/api/runtime/loop', async (route) => {
+    const body = route.request().postDataJSON();
+    await route.fulfill({
+      status: 200,
+      headers: {
+        'Access-Control-Allow-Origin': '*',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        requestId: typeof body?.requestId === 'string' ? body.requestId : '',
+        ok: true,
+        startTime: body?.startTime,
+        endTime: body?.endTime,
+      }),
+    });
+  });
+
   await page.goto(baseUrl, { waitUntil: 'networkidle' });
 
   await page.evaluate(async () => {
@@ -242,8 +259,15 @@ try {
     throw new Error('Expected marker 1 editor to receive focus.');
   }
 
+  await page.evaluate(() => {
+    window.__markerFixture.connected = true;
+    window.__markerFixture.sent.length = 0;
+  });
   await clickRulerAt(5, 'lower');
   await page.waitForSelector('.timeline-panel__loop-range');
+  await page.waitForFunction(() => window.__markerFixture.sent.some((message) => (
+    message.type === 'runtime.seek' && Math.abs(message.time - 4) < 0.001
+  )));
   const loopRangeCount = await page.locator('.timeline-panel__loop-range').count();
   if (loopRangeCount !== 1) {
     throw new Error(`Expected active loop to render one lower indicator, got ${loopRangeCount}`);
@@ -274,7 +298,13 @@ try {
     throw new Error(`Expected runtime loop state not to shrink timeline duration, got width ${widthAfterRuntimeLoop}`);
   }
 
+  await page.evaluate(() => {
+    window.__markerFixture.sent.length = 0;
+  });
   await clickRulerAt(8, 'lower');
+  await page.waitForFunction(() => window.__markerFixture.sent.some((message) => (
+    message.type === 'runtime.seek' && Math.abs(message.time - 7) < 0.001
+  )));
   const nextLoop = await page.locator('.timeline-panel__loop-range').first().evaluate((node) => ({
     left: Number.parseFloat(node.style.left),
     width: Number.parseFloat(node.style.width),
@@ -291,7 +321,6 @@ try {
   expectClose((fallback.left + fallback.width) / 88, 4, 'fallback loop end');
 
   await page.evaluate(() => {
-    window.__markerFixture.connected = true;
     window.__markerFixture.sent.length = 0;
   });
   await page.locator('.panel--timeline').focus();

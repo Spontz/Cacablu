@@ -24,6 +24,7 @@ export interface ProjectPoolSyncResult {
 export interface PublishedPoolFile {
   path: string;
   bytes: number;
+  hash: string;
   data: Uint8Array;
 }
 
@@ -53,6 +54,7 @@ export async function syncPublishedPoolFilesToPhoenix(
 
   throwIfAborted(options.signal);
   const manifest = await client.fetchManifest(options.signal);
+  // Cacablu owns the published pool snapshot; resources and bootstrap files remain Phoenix-owned here.
   let phoenixFiles = new Map(
     manifest.entries
       .filter((entry) => entry.kind === 'file' && entry.path.startsWith('pool/'))
@@ -85,7 +87,7 @@ export async function syncPublishedPoolFilesToPhoenix(
     const current = index + 1;
     const existing = phoenixFiles.get(file.path);
 
-    if (existing?.size === file.bytes) {
+    if (existing?.size === file.bytes && existing.hash === file.hash) {
       skipped += 1;
       onProgress({
         phase: 'copying',
@@ -150,14 +152,14 @@ function throwIfAborted(signal?: AbortSignal): void {
 }
 
 function poolManifestMatchesPublishedFiles(
-  phoenixFiles: Map<string, { size?: number }>,
+  phoenixFiles: Map<string, { size?: number; hash?: string }>,
   files: PublishedPoolFile[],
 ): boolean {
   if (phoenixFiles.size !== files.length) return false;
 
   for (const file of files) {
     const existing = phoenixFiles.get(file.path);
-    if (existing?.size !== file.bytes) return false;
+    if (existing?.size !== file.bytes || existing.hash !== file.hash) return false;
   }
 
   return true;
@@ -181,6 +183,7 @@ export function collectPublishedPoolFiles(db: ProjectDatabase): PublishedPoolFil
     published.push({
       path: `pool/${node.path}`,
       bytes: file.bytes,
+      hash: hashBytes(file.data),
       data: file.data,
     });
   }
@@ -188,4 +191,13 @@ export function collectPublishedPoolFiles(db: ProjectDatabase): PublishedPoolFil
   for (const node of buildResourceTree(db)) visit(node);
   published.sort((a, b) => a.path.localeCompare(b.path));
   return published;
+}
+
+function hashBytes(bytes: Uint8Array): string {
+  let hash = 0x811c9dc5;
+  for (const byte of bytes) {
+    hash ^= byte;
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return `fnv1a:${hash.toString(16).padStart(8, '0')}`;
 }

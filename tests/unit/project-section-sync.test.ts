@@ -180,6 +180,34 @@ describe('project section sync', () => {
     expect(result).toEqual({ total: 1, valid: 1, invalid: 0, replaced: false, skipped: 1, issues: [] });
   });
 
+  it('forces full replacement without fetching an equal manifest', async () => {
+    const replaceAll = vi.fn().mockResolvedValue({
+      requestId: 'sections-test',
+      ok: true,
+      operation: 'replace-all',
+      received: 1,
+      loaded: 1,
+      failed: 0,
+      writtenFiles: 1,
+      deletedFiles: [],
+      failedSections: [],
+    });
+    const fetchManifest = vi.fn();
+
+    const result = await syncProjectBarsToPhoenix(makeDb(), {
+      fetchManifest,
+      replaceAll,
+    }, () => {}, { forceReplace: true });
+
+    expect(fetchManifest).not.toHaveBeenCalled();
+    expect(replaceAll).toHaveBeenCalledWith(
+      [expect.objectContaining({ id: '17', enabled: true })],
+      undefined,
+      expect.stringMatching(/^sections-/),
+    );
+    expect(result.replaced).toBe(true);
+  });
+
   it('sends valid sections while reporting invalid bars', async () => {
     const replaceAll = vi.fn().mockResolvedValue({
       requestId: 'sections-test',
