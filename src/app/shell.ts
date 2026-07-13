@@ -36,6 +36,7 @@ import { createProjectSyncCoordinator } from '../services/project-sync-coordinat
 import { graphicsConfigFromProject } from '../services/graphics-config';
 import { hasNewSectionErrors, shouldDeferEventsOpen, shouldOpenEventsForNewError } from './event-notifications';
 import { createAssetClipboard } from '../resources/asset-clipboard';
+import { isNativeTextWriteInProgress } from '../resources/system-clipboard';
 import {
   installPhoenixConnectionIndicator,
   updatePhoenixConnectionIndicator,
@@ -221,6 +222,12 @@ export function createAppShell(root: HTMLElement): AppShell {
       return;
     }
     if (command === 'cut' || command === 'copy') {
+      if (command === 'cut' && state.getSnapshot().activePanelId === 'resources') {
+        window.dispatchEvent(new CustomEvent('cacablu:asset-clipboard-command', {
+          cancelable: true,
+          detail: { command },
+        }));
+      }
       runEditCommand(command);
       return;
     }
@@ -476,6 +483,9 @@ export function createAppShell(root: HTMLElement): AppShell {
       });
 
       const handleNativeCopyOrCut = (event: ClipboardEvent) => {
+        // Publishing a Pool path uses an internal copy event. It must not turn
+        // an already captured Cut operation back into Copy.
+        if (event.type === 'copy' && isNativeTextWriteInProgress()) return;
         if (isTextEditingTarget(event.target)) {
           assetClipboard.clear();
           return;
@@ -529,7 +539,10 @@ export function createAppShell(root: HTMLElement): AppShell {
         lastConnectionStatus = snapshot.connectionStatus;
         if (snapshot.assetSelection.kind === 'file' && snapshot.assetSelection.id !== lastInspectorSelectionId) {
           lastInspectorSelectionId = snapshot.assetSelection.id;
-          workspace.openPanel('inspector', { widthRatio: SIDE_PANEL_WIDTH_RATIO });
+          workspace.openPanel('inspector', {
+            widthRatio: SIDE_PANEL_WIDTH_RATIO,
+            preserveActivePanel: true,
+          });
         } else if (snapshot.assetSelection.kind !== 'file') {
           lastInspectorSelectionId = null;
         }
@@ -654,9 +667,16 @@ export function createAppShell(root: HTMLElement): AppShell {
           return;
         }
 
-        // Copy and Cut are handled by their native clipboard events so the Pool
-        // can write text directly to the operating-system data transfer.
-        if (command === 'copy' || command === 'cut') return;
+        // Native events publish Pool text synchronously. Cut also records its
+        // move intent here because some non-editable targets emit no cut event.
+        if (command === 'cut') {
+          window.dispatchEvent(new CustomEvent('cacablu:asset-clipboard-command', {
+            cancelable: true,
+            detail: { command },
+          }));
+          return;
+        }
+        if (command === 'copy') return;
 
         event.preventDefault();
         runClipboardCommand(command);

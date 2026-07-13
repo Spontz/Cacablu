@@ -1,4 +1,4 @@
-/* global process, console, document, navigator, window, TextEncoder, DataTransfer */
+/* global process, console, document, navigator, window, TextEncoder, DataTransfer, CustomEvent, File */
 
 import { chromium } from 'playwright';
 
@@ -91,8 +91,19 @@ try {
           files: [{ file, oldPath: source.path, newPath: `/pool/${file.name}` }],
         };
       },
-      moveResourceItems() {
-        throw new Error('Unexpected cut operation.');
+      moveResourceItems(roots, parentId) {
+        const source = roots[0];
+        if (!source || source.kind !== 'file') throw new Error('Expected a cut file.');
+        const file = db.files.find((candidate) => candidate.id === source.id);
+        if (!file) throw new Error('Missing cut file.');
+        const oldPath = file.parent === 1 ? `/pool/shaders/${file.name}` : `/pool/${file.name}`;
+        file.parent = parentId;
+        const newPath = parentId === 1 ? `/pool/shaders/${file.name}` : `/pool/${file.name}`;
+        return {
+          operation: 'move',
+          roots: [{ kind: 'file', id: file.id }],
+          files: [{ file, oldPath, newPath }],
+        };
       },
       moveResourceFile(fileId, parentId) {
         const file = db.files.find((candidate) => candidate.id === fileId);
@@ -171,11 +182,31 @@ try {
   await page.waitForFunction(() => document.querySelector('[data-resource-kind="file"][data-pool-path="pool/scene.glsl"]'));
 
   const moveFile = page.locator('[data-resource-kind="file"]', { hasText: 'move.txt' });
-  const moveTransfer = await page.evaluateHandle(() => new DataTransfer());
-  await moveFile.dispatchEvent('dragstart', { dataTransfer: moveTransfer });
-  await poolRoot.dispatchEvent('dragover', { dataTransfer: moveTransfer });
-  await poolRoot.dispatchEvent('drop', { dataTransfer: moveTransfer });
-  await moveFile.dispatchEvent('dragend', { dataTransfer: moveTransfer });
+  await moveFile.click();
+  await page.evaluate(() => {
+    // Reproduce browsers that deliver Ctrl+X keydown but omit native `cut`.
+    window.addEventListener('cut', (event) => event.stopImmediatePropagation(), { capture: true, once: true });
+  });
+  await page.keyboard.press('Control+X');
+  await page.waitForFunction(() => window.__poolClipboardFixture.clipboard.getSnapshot()?.operation === 'cut');
+  const cutSnapshot = await page.evaluate(() => ({
+    operation: window.__poolClipboardFixture.clipboard.getSnapshot()?.operation,
+    pendingOpacity: window.getComputedStyle(document.querySelector('[data-resource-id="11"]')).opacity,
+  }));
+  if (cutSnapshot.operation !== 'cut' || cutSnapshot.pendingOpacity !== '0.5') {
+    throw new Error(`Pool cut fallback was not retained: ${JSON.stringify({ cutSnapshot })}`);
+  }
+  await poolRoot.click();
+  await page.keyboard.press('Control+V');
+  await page.waitForFunction(() => window.__poolClipboardFixture.db.files.find((file) => file.id === 11)?.parent === 0);
+  const cutResult = await page.evaluate(() => ({
+    operation: window.__poolClipboardFixture.clipboard.getSnapshot()?.operation ?? null,
+    matchingFiles: window.__poolClipboardFixture.db.files.filter((file) => file.name === 'move.txt').map((file) => ({ id: file.id, parent: file.parent })),
+  }));
+  if (cutSnapshot.operation !== 'cut' || cutResult.operation !== null || cutResult.matchingFiles.length !== 1
+    || cutResult.matchingFiles[0].id !== 11 || cutResult.matchingFiles[0].parent !== 0) {
+    throw new Error(`Pool cut/paste did not move the source: ${JSON.stringify({ cutSnapshot, cutResult })}`);
+  }
 
   const externalTransfer = await page.evaluateHandle(() => {
     const transfer = new DataTransfer();
@@ -255,6 +286,7 @@ try {
     rootSnapshot,
     menuCopyAccepted,
     rejectedSelfCopy,
+    cutResult,
   }, null, 2));
 } finally {
   await browser.close();

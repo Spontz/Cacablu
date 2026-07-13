@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { writeSystemClipboardText } from '../../src/resources/system-clipboard';
+import { isNativeTextWriteInProgress, writeSystemClipboardText } from '../../src/resources/system-clipboard';
 
 describe('system clipboard text', () => {
   it('writes text through the synchronous native copy event', async () => {
@@ -10,6 +10,7 @@ describe('system clipboard text', () => {
       addEventListener: (_type: string, listener: (event: ClipboardEvent) => void) => listeners.add(listener),
       removeEventListener: (_type: string, listener: (event: ClipboardEvent) => void) => listeners.delete(listener),
       execCommand: vi.fn(() => {
+        expect(isNativeTextWriteInProgress()).toBe(true);
         const event = {
           clipboardData,
           preventDefault: vi.fn(),
@@ -27,6 +28,7 @@ describe('system clipboard text', () => {
 
     expect(clipboardData.setData).toHaveBeenCalledWith('text/plain', '/pool/shaders/scene.glsl');
     expect(asyncWrite).not.toHaveBeenCalled();
+    expect(isNativeTextWriteInProgress()).toBe(false);
     expect(listeners.size).toBe(0);
     vi.unstubAllGlobals();
   });

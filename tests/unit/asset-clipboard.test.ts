@@ -90,9 +90,14 @@ describe('asset clipboard', () => {
     const listener = vi.fn();
     clipboard.subscribe(listener);
 
+    clipboard.capture('copy', session, db, [
+      { kind: 'file', id: 3, name: 'hero.png', fileType: 'image/png' },
+    ]);
+
     const snapshot = clipboard.capture('cut', session, db, [
       { kind: 'folder', id: 1, name: 'textures' },
     ]);
+    expect(snapshot.operation).toBe('cut');
     expect(pendingCutKeys(snapshot)).toEqual(new Set(['folder:1']));
     expect(clipboard.revalidateText(snapshot.text)).toBe(true);
     expect(clipboard.revalidateText('/pool/other.txt')).toBe(false);

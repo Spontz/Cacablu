@@ -26,11 +26,15 @@ export interface AssetOperationResult {
   message?: string;
 }
 
+export interface AssetWriteOptions {
+  reloadSections?: boolean;
+}
+
 export interface PhoenixAssetClient {
   fetchManifest(signal?: AbortSignal): Promise<AssetManifest>;
   createDirectory(path: string, signal?: AbortSignal): Promise<AssetOperationResult>;
   previewFile(path: string, content: string, signal?: AbortSignal): Promise<AssetOperationResult>;
-  writeFile(path: string, bytes: Uint8Array, signal?: AbortSignal): Promise<AssetOperationResult>;
+  writeFile(path: string, bytes: Uint8Array, signal?: AbortSignal, options?: AssetWriteOptions): Promise<AssetOperationResult>;
   deleteFile(path: string, signal?: AbortSignal): Promise<AssetOperationResult>;
   deleteDirectory(path: string, recursive: boolean, signal?: AbortSignal): Promise<AssetOperationResult>;
 }
@@ -102,7 +106,7 @@ export function createPhoenixAssetClient(baseUrl = PHOENIX_HTTP_BASE): PhoenixAs
       }), 'preview-asset');
     },
 
-    async writeFile(path, bytes, signal): Promise<AssetOperationResult> {
+    async writeFile(path, bytes, signal, options): Promise<AssetOperationResult> {
       return normalizeOperationResult(await requestJson('/api/assets/file', {
         method: 'PUT',
         signal,
@@ -111,6 +115,7 @@ export function createPhoenixAssetClient(baseUrl = PHOENIX_HTTP_BASE): PhoenixAs
           path: requirePath(path),
           encoding: 'base64',
           content: bytesToBase64(bytes),
+          reloadSections: options?.reloadSections ?? true,
         }),
       }), 'write-file');
     },

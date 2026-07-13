@@ -81,8 +81,8 @@ describe('project pool sync', () => {
     expect(deleteDirectory).toHaveBeenCalledWith('pool', true, undefined);
     expect(createDirectory).toHaveBeenCalledWith('pool', undefined);
     expect(writeFile).toHaveBeenCalledTimes(2);
-    expect(writeFile).toHaveBeenCalledWith('pool/root.txt', new Uint8Array([6]), undefined);
-    expect(writeFile).toHaveBeenCalledWith('pool/textures/hero.png', new Uint8Array([1, 2, 3]), undefined);
+    expect(writeFile).toHaveBeenCalledWith('pool/root.txt', new Uint8Array([6]), undefined, { reloadSections: false });
+    expect(writeFile).toHaveBeenCalledWith('pool/textures/hero.png', new Uint8Array([1, 2, 3]), undefined, { reloadSections: false });
     expect(progress.at(-1)).toMatchObject({
       phase: 'complete',
       current: 2,
@@ -183,24 +183,32 @@ describe('project pool sync', () => {
     expect(writeFile).not.toHaveBeenCalled();
   });
 
-  it('continues copying remaining files when one Phoenix write fails', async () => {
+  it('continues copying remaining files but rejects the generation when one Phoenix write fails', async () => {
     const createDirectory = vi.fn().mockResolvedValue({ ok: true, operation: 'create-directory' });
     const deleteDirectory = vi.fn().mockResolvedValue({ ok: true, operation: 'delete-directory' });
     const writeFile = vi.fn()
       .mockRejectedValueOnce(new Error('network hiccup'))
       .mockResolvedValue({ ok: true, operation: 'write-file' });
 
-    const result = await syncPublishedPoolFilesToPhoenix(makeDb(), {
+    const progress: ProjectPoolSyncProgress[] = [];
+    await expect(syncPublishedPoolFilesToPhoenix(makeDb(), {
       fetchManifest: convergingFetch([]),
       createDirectory,
       deleteDirectory,
       writeFile,
-    }, () => {});
+    }, (next) => progress.push(next))).rejects.toThrow(
+      'Could not complete Phoenix pool sync; pool/root.txt: network hiccup',
+    );
 
-    expect(result).toEqual({ total: 2, copied: 1, skipped: 0, failed: 1 });
     expect(deleteDirectory).toHaveBeenCalledWith('pool', true, undefined);
     expect(createDirectory).toHaveBeenCalledWith('pool', undefined);
     expect(writeFile).toHaveBeenCalledTimes(2);
+    expect(progress.at(-1)).toMatchObject({
+      phase: 'error',
+      copied: 1,
+      failed: 1,
+      path: 'pool/root.txt',
+    });
   });
 
   it('stops before uploading when files remain after Phoenix accepts pool cleanup', async () => {

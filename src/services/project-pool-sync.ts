@@ -99,6 +99,7 @@ export async function syncPublishedPoolFilesToPhoenix(
   let copied = 0;
   let skipped = 0;
   let failed = 0;
+  let firstFailure: { path: string; message: string } | null = null;
   for (const [index, file] of files.entries()) {
     throwIfAborted(options.signal);
     const current = index + 1;
@@ -130,12 +131,17 @@ export async function syncPublishedPoolFilesToPhoenix(
       message: `Copying ${file.path} to Phoenix...`,
     });
     try {
-      const writeResult = await client.writeFile(file.path, file.data, options.signal);
+      // Sections are replaced after the complete pool snapshot is present; reloading them per file can observe partial data.
+      const writeResult = await client.writeFile(file.path, file.data, options.signal, { reloadSections: false });
       requireSuccessfulOperation(writeResult, `copy ${file.path}`);
       copied += 1;
-    } catch {
+    } catch (error) {
       throwIfAborted(options.signal);
       failed += 1;
+      firstFailure ??= {
+        path: file.path,
+        message: error instanceof Error ? error.message : 'Unknown Phoenix write error.',
+      };
       onProgress({
         phase: 'copying',
         current,
@@ -149,14 +155,26 @@ export async function syncPublishedPoolFilesToPhoenix(
     }
   }
 
-  if (failed === 0) {
-    throwIfAborted(options.signal);
-    const rebuiltManifest = await client.fetchManifest(options.signal);
-    const rebuiltFiles = poolFilesFromManifest(rebuiltManifest.entries);
-    const remainingDifference = describeFirstPoolDifference(rebuiltFiles, files);
-    if (remainingDifference) {
-      throw new Error(`Phoenix pool rebuild did not converge: ${remainingDifference}`);
-    }
+  if (firstFailure) {
+    onProgress({
+      phase: 'error',
+      current: files.length,
+      total: files.length,
+      copied,
+      skipped,
+      failed,
+      path: firstFailure.path,
+      message: `Phoenix pool sync failed: ${firstFailure.path}: ${firstFailure.message}`,
+    });
+    throw new Error(`Could not complete Phoenix pool sync; ${firstFailure.path}: ${firstFailure.message}`);
+  }
+
+  throwIfAborted(options.signal);
+  const rebuiltManifest = await client.fetchManifest(options.signal);
+  const rebuiltFiles = poolFilesFromManifest(rebuiltManifest.entries);
+  const remainingDifference = describeFirstPoolDifference(rebuiltFiles, files);
+  if (remainingDifference) {
+    throw new Error(`Phoenix pool rebuild did not converge: ${remainingDifference}`);
   }
 
   const result = { total: files.length, copied, skipped, failed };

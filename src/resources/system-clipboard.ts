@@ -1,3 +1,9 @@
+let nativeTextWriteInProgress = false;
+
+export function isNativeTextWriteInProgress(): boolean {
+  return nativeTextWriteInProgress;
+}
+
 export async function writeSystemClipboardText(text: string): Promise<void> {
   let wroteNativeClipboard = false;
   const handleCopy = (event: ClipboardEvent): void => {
@@ -11,8 +17,10 @@ export async function writeSystemClipboardText(text: string): Promise<void> {
   // gesture is still active. This keeps Monaco's later native paste reliable.
   document.addEventListener('copy', handleCopy);
   try {
+    nativeTextWriteInProgress = true;
     document.execCommand('copy');
   } finally {
+    nativeTextWriteInProgress = false;
     document.removeEventListener('copy', handleCopy);
   }
 

@@ -25,6 +25,7 @@ export interface DockviewWorkspace {
 interface OpenPanelOptions {
   widthRatio?: number;
   activate?: boolean;
+  preserveActivePanel?: boolean;
 }
 
 export function createDockviewWorkspace(options: WorkspaceOptions): DockviewWorkspace {
@@ -36,6 +37,7 @@ export function createDockviewWorkspace(options: WorkspaceOptions): DockviewWork
       return;
     }
 
+    const previousActivePanel = panelOptions.preserveActivePanel ? dockview.activePanel : undefined;
     const position = getRestorePosition(panel.id);
     const initialWidth = getInitialWidth(panelOptions);
     const addedPanel = dockview.addPanel({
@@ -51,7 +53,12 @@ export function createDockviewWorkspace(options: WorkspaceOptions): DockviewWork
 
     if (panelOptions.activate !== false) {
       dockview.setActivePanel(addedPanel);
-      addedPanel.focus();
+      if (previousActivePanel && previousActivePanel !== addedPanel) {
+        dockview.setActivePanel(previousActivePanel);
+        previousActivePanel.focus();
+      } else {
+        addedPanel.focus();
+      }
     }
   }
 
@@ -133,8 +140,14 @@ export function createDockviewWorkspace(options: WorkspaceOptions): DockviewWork
       const panel = dockview.getGroupPanel(panelId);
       if (panel) {
         if (panelOptions.activate !== false) {
+          const previousActivePanel = panelOptions.preserveActivePanel ? dockview.activePanel : undefined;
           dockview.setActivePanel(panel);
-          panel.focus();
+          if (previousActivePanel && previousActivePanel !== panel) {
+            dockview.setActivePanel(previousActivePanel);
+            previousActivePanel.focus();
+          } else {
+            panel.focus();
+          }
         }
         return;
       }
