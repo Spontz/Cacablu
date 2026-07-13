@@ -178,6 +178,11 @@ export function createInspectorPanel(
         return;
       }
 
+      if (selection.kind === 'multiple') {
+        renderEmpty('Multiple Pool items selected.');
+        return;
+      }
+
       const file = findSelectedFile(selection.id);
       if (!file) {
         renderUnavailable(selection.name, 'Preview unavailable because the selected file is not in the current project.');

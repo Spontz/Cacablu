@@ -1,3 +1,5 @@
+import { phoenixFetch } from './activity';
+
 const PHOENIX_HTTP_BASE = 'http://127.0.0.1:29100';
 
 export interface PhoenixLogEntry {
@@ -17,7 +19,7 @@ export function createPhoenixLogClient(baseUrl = PHOENIX_HTTP_BASE): PhoenixLogC
     async fetchRecent(signal): Promise<PhoenixLogEntry[]> {
       let response: Response;
       try {
-        response = await fetch(`${base}/api/logs/recent`, { signal });
+        response = await phoenixFetch(`${base}/api/logs/recent`, { signal });
       } catch (error) {
         if (error instanceof DOMException && error.name === 'AbortError') throw error;
         return [];

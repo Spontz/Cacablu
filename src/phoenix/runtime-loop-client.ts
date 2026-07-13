@@ -1,3 +1,5 @@
+import { phoenixFetch } from './activity';
+
 const PHOENIX_HTTP_BASE = 'http://127.0.0.1:29100';
 
 export interface RuntimeLoopInterval {
@@ -23,7 +25,7 @@ export function createPhoenixRuntimeLoopClient(baseUrl = PHOENIX_HTTP_BASE): Pho
     async putLoop(interval, signal): Promise<RuntimeLoopResponse> {
       let response: Response;
       try {
-        response = await fetch(`${base}/api/runtime/loop`, {
+        response = await phoenixFetch(`${base}/api/runtime/loop`, {
           method: 'PUT',
           signal,
           headers: { 'Content-Type': 'application/json' },

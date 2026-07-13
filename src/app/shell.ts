@@ -35,6 +35,11 @@ import { ProjectSectionSyncError, syncProjectBarsToPhoenix, type ProjectSectionS
 import { createProjectSyncCoordinator } from '../services/project-sync-coordinator';
 import { graphicsConfigFromProject } from '../services/graphics-config';
 import { hasNewSectionErrors, shouldDeferEventsOpen, shouldOpenEventsForNewError } from './event-notifications';
+import { createAssetClipboard } from '../resources/asset-clipboard';
+import {
+  installPhoenixConnectionIndicator,
+  updatePhoenixConnectionIndicator,
+} from './phoenix-connection-indicator';
 
 export interface AppShell {
   mount(): void;
@@ -48,7 +53,8 @@ export function createAppShell(root: HTMLElement): AppShell {
   const sessionRef = createDbSessionRef();
   const connection = createConnectionController(state);
   const undoManager = createUndoManager();
-  const panels = createPanelRegistry(state, dbState, sessionRef, connection, undoManager);
+  const assetClipboard = createAssetClipboard();
+  const panels = createPanelRegistry(state, dbState, sessionRef, connection, undoManager, assetClipboard);
   const workspace = createDockviewWorkspace({
     state,
     panels,
@@ -83,6 +89,9 @@ export function createAppShell(root: HTMLElement): AppShell {
   let pendingEventsOpen = false;
   let lastDisplayTimelineIds = state.getSnapshot().displayTimelineIds;
   let lastResourceSelectionSignature = getResourceSelectionSignature(state.getSnapshot().resourceSelection);
+  let lastAssetSelectionSignature = JSON.stringify(state.getSnapshot().assetSelection);
+  let lastActivePanelId = state.getSnapshot().activePanelId;
+  let lastTextEditingTarget: HTMLElement | null = null;
   const projectSyncCoordinator = createProjectSyncCoordinator<DbSession>(
     async (openedSession, signal) => {
       await syncOpenedProjectPool(openedSession, { signal, forceSections: true });
@@ -115,13 +124,13 @@ export function createAppShell(root: HTMLElement): AppShell {
           void handleUndo();
           break;
         case 'edit-cut':
-          runEditCommand('cut');
+          runClipboardCommand('cut', true);
           break;
         case 'edit-copy':
-          runEditCommand('copy');
+          runClipboardCommand('copy', true);
           break;
         case 'edit-paste':
-          runEditCommand('paste');
+          runClipboardCommand('paste', true);
           break;
         case 'edit-delete':
           runDeleteAction();
@@ -173,6 +182,7 @@ export function createAppShell(root: HTMLElement): AppShell {
       }
     },
   });
+  assetClipboard.subscribe(() => syncMenuDisabled(dbState.getSnapshot()));
 
   async function handleOpen(): Promise<void> {
     if (!fsSupported) {
@@ -202,6 +212,23 @@ export function createAppShell(root: HTMLElement): AppShell {
 
   function runEditCommand(command: 'undo' | 'cut' | 'copy' | 'paste' | 'delete'): void {
     document.execCommand(command);
+  }
+
+  function runClipboardCommand(command: 'cut' | 'copy' | 'paste', fromMenu = false): void {
+    if (fromMenu && state.getSnapshot().activePanelId !== 'resources' && lastTextEditingTarget?.isConnected) {
+      lastTextEditingTarget.focus();
+      runEditCommand(command);
+      return;
+    }
+    if (command === 'cut' || command === 'copy') {
+      runEditCommand(command);
+      return;
+    }
+    const clipboardEvent = new CustomEvent('cacablu:asset-clipboard-command', {
+      cancelable: true,
+      detail: { command },
+    });
+    if (window.dispatchEvent(clipboardEvent)) runEditCommand(command);
   }
 
   function runDeleteAction(): void {
@@ -321,6 +348,8 @@ export function createAppShell(root: HTMLElement): AppShell {
   async function openProjectHandle(handle: FileSystemFileHandle): Promise<void> {
     dbState.setOpening();
     state.clearResourceSelection();
+    state.clearAssetSelection();
+    assetClipboard.invalidateSession(null);
     state.resetSectionErrors();
     state.setActiveLoop(null);
     undoManager.clear();
@@ -341,6 +370,7 @@ export function createAppShell(root: HTMLElement): AppShell {
       }
       session = nextSession;
       sessionRef.current = session;
+      assetClipboard.invalidateSession(session);
       projectSyncCoordinator.setSession(session, connection.isConnected());
       dbState.setOpen(session.fileName);
       workspace.closePanel('inspector');
@@ -351,6 +381,7 @@ export function createAppShell(root: HTMLElement): AppShell {
       nextSession?.close();
       session = null;
       sessionRef.current = null;
+      assetClipboard.invalidateSession(null);
       projectSyncCoordinator.setSession(null);
       state.clearResourceSelection();
       dbState.clear();
@@ -391,6 +422,7 @@ export function createAppShell(root: HTMLElement): AppShell {
     try {
       session = await session.saveAs(handle);
       sessionRef.current = session;
+      assetClipboard.invalidateSession(session);
       dbState.setOpen(session.fileName);
     } catch (err) {
       dbState.setError(err instanceof Error ? err.message : 'Save failed.');
@@ -413,7 +445,9 @@ export function createAppShell(root: HTMLElement): AppShell {
       rightBadges.className = 'app-shell__badges';
 
       const dbBadge = createDbBadge(dbState.getSnapshot());
-      rightBadges.append(dbBadge, createStatusBadge(state));
+      const connectionBadge = createStatusBadge(state);
+      installPhoenixConnectionIndicator(connectionBadge);
+      rightBadges.append(dbBadge, connectionBadge);
 
       topBar.append(menuBar.element, rightBadges);
 
@@ -427,6 +461,48 @@ export function createAppShell(root: HTMLElement): AppShell {
 
       workspace.mount(workspaceElement);
       connection.syncStatusLabel();
+
+      window.addEventListener('focusin', (event) => {
+        if (isTextEditingTarget(event.target) && event.target instanceof HTMLElement) {
+          lastTextEditingTarget = event.target;
+        } else if (event.target instanceof HTMLElement && !menuBar.element.contains(event.target)) {
+          lastTextEditingTarget = null;
+        }
+      });
+      window.addEventListener('pointerdown', (event) => {
+        if (!isTextEditingTarget(event.target) && event.target instanceof Node && !menuBar.element.contains(event.target)) {
+          lastTextEditingTarget = null;
+        }
+      });
+
+      const handleNativeCopyOrCut = (event: ClipboardEvent) => {
+        if (isTextEditingTarget(event.target)) {
+          assetClipboard.clear();
+          return;
+        }
+        const clipboardEvent = new CustomEvent('cacablu:asset-clipboard-command', {
+          cancelable: true,
+          detail: {
+            command: event.type,
+            clipboardData: event.clipboardData,
+          },
+        });
+        if (!window.dispatchEvent(clipboardEvent)) event.preventDefault();
+      };
+      window.addEventListener('copy', handleNativeCopyOrCut);
+      window.addEventListener('cut', handleNativeCopyOrCut);
+
+      const revalidateAssetClipboard = () => {
+        if (assetClipboard.getSnapshot()?.operation !== 'cut' || !navigator.clipboard?.readText) return;
+        void navigator.clipboard.readText()
+          .then((text) => assetClipboard.revalidateText(text))
+          .catch(() => undefined);
+      };
+      window.addEventListener('focus', revalidateAssetClipboard);
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') revalidateAssetClipboard();
+      });
+      document.addEventListener('clipboardchange', revalidateAssetClipboard);
 
       state.subscribe((snapshot) => {
         updateStatusBadge(shell, snapshot.connectionLabel, snapshot.connectionStatus);
@@ -478,6 +554,12 @@ export function createAppShell(root: HTMLElement): AppShell {
         const resourceSelectionSignature = getResourceSelectionSignature(snapshot.resourceSelection);
         if (resourceSelectionSignature !== lastResourceSelectionSignature) {
           lastResourceSelectionSignature = resourceSelectionSignature;
+          syncMenuDisabled(dbState.getSnapshot());
+        }
+        const assetSelectionSignature = JSON.stringify(snapshot.assetSelection);
+        if (assetSelectionSignature !== lastAssetSelectionSignature || snapshot.activePanelId !== lastActivePanelId) {
+          lastAssetSelectionSignature = assetSelectionSignature;
+          lastActivePanelId = snapshot.activePanelId;
           syncMenuDisabled(dbState.getSnapshot());
         }
       });
@@ -572,8 +654,12 @@ export function createAppShell(root: HTMLElement): AppShell {
           return;
         }
 
+        // Copy and Cut are handled by their native clipboard events so the Pool
+        // can write text directly to the operating-system data transfer.
+        if (command === 'copy' || command === 'cut') return;
+
         event.preventDefault();
-        runEditCommand(command);
+        runClipboardCommand(command);
       });
 
       window.addEventListener('keydown', (event) => {
@@ -648,6 +734,12 @@ export function createAppShell(root: HTMLElement): AppShell {
           ...action,
           disabled: !hasSelectedExistingBars(session?.data ?? null, state.getSnapshot().resourceSelection),
         };
+      }
+      if (state.getSnapshot().activePanelId === 'resources' && (action.id === 'edit-copy' || action.id === 'edit-cut')) {
+        return { ...action, disabled: state.getSnapshot().assetSelection.kind === 'none' };
+      }
+      if (state.getSnapshot().activePanelId === 'resources' && action.id === 'edit-paste') {
+        return { ...action, disabled: assetClipboard.getSnapshot() === null };
       }
       if (fileActionDisabled) return { ...action, disabled: true };
       return action;
@@ -907,8 +999,7 @@ function updateStatusBadge(root: ParentNode, label: string, status: string): voi
   const badge = root.querySelector<HTMLElement>('.connection-badge');
   if (!badge) return;
   if (badge.dataset.status === status && badge.textContent === label) return;
-  badge.dataset.status = status;
-  badge.textContent = label;
+  updatePhoenixConnectionIndicator(badge, label, status);
 }
 
 function createDbBadge(snapshot: DbSnapshot): HTMLElement {

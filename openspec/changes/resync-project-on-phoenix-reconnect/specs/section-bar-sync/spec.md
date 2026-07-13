@@ -5,8 +5,20 @@ Cacablu SHALL synchronize project database bars to Phoenix runtime sections when
 
 #### Scenario: Project bars already match Phoenix sections during ordinary project open
 - **WHEN** Cacablu opens a project outside reconnect recovery and the serialized project bars exactly match Phoenix's section manifest
+- **AND** every matching Phoenix manifest entry reports that its runtime section loaded successfully
 - **THEN** Cacablu does not ask Phoenix to delete or recreate sections
 - **AND** Phoenix keeps the existing runtime sections.
+
+#### Scenario: Matching Phoenix section has a runtime load error
+- **WHEN** a serialized project bar matches Phoenix's persisted section metadata and content
+- **AND** Phoenix's manifest reports that the runtime section did not load successfully
+- **THEN** Cacablu sends a full section replacement after project assets and settings are synchronized
+- **AND** Cacablu uses the replacement response to associate any repeated load failure with the matching Timeline bar.
+
+#### Scenario: Phoenix does not report section runtime state
+- **WHEN** a serialized project bar matches a section manifest entry from an older Phoenix version without runtime load state
+- **THEN** Cacablu treats that section state as unknown
+- **AND** Cacablu sends a full section replacement instead of assuming the section is healthy.
 
 #### Scenario: Project bars differ from Phoenix sections
 - **WHEN** Cacablu opens a project and Phoenix has any missing, extra, or changed section relative to the serialized project bars

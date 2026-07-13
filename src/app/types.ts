@@ -7,10 +7,14 @@ export type ResourceSelection =
   | { kind: 'bar'; id: number }
   | { kind: 'bars'; ids: number[] };
 
-export type AssetSelection =
-  | { kind: 'none' }
+export type AssetSelectionItem =
   | { kind: 'folder'; id: number; name: string }
   | { kind: 'file'; id: number; name: string; fileType: string };
+
+export type AssetSelection =
+  | { kind: 'none' }
+  | AssetSelectionItem
+  | { kind: 'multiple'; items: AssetSelectionItem[] };
 
 export type AppEventSeverity = 'info' | 'warning' | 'error';
 

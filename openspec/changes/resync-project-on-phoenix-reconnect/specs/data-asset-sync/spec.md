@@ -13,11 +13,18 @@ Cacablu SHALL synchronize enabled project pool files to Phoenix when a project o
 - **THEN** Cacablu deletes Phoenix's `pool` directory recursively
 - **AND** Cacablu recreates `pool`
 - **AND** Cacablu uploads every enabled project pool file.
+- **AND** Cacablu verifies that the rebuilt Phoenix manifest exactly matches the project before reporting success.
+
+#### Scenario: Pool cleanup does not remove stale files
+- **WHEN** Phoenix accepts a recursive pool deletion but its next manifest still contains pool files
+- **THEN** Cacablu stops before uploading the project snapshot
+- **AND** reports the first remaining path instead of accepting a non-convergent synchronization.
 
 #### Scenario: Reconnect finds identical pool content
 - **WHEN** Cacablu synchronizes an open project after Phoenix reconnects
 - **AND** Phoenix's pool paths, sizes, and hashes exactly match the enabled project assets
 - **THEN** Cacablu SHALL NOT delete or upload pool content.
+- **AND** Cacablu reports zero copied files and all enabled assets skipped without entering file-copy progress.
 
 #### Scenario: Reconnect finds different pool content
 - **WHEN** Cacablu synchronizes an open project after Phoenix reconnects

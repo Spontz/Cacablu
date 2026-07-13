@@ -2,15 +2,27 @@ import type { IContentRenderer } from 'dockview-core';
 
 import type { AppState } from '../state/app-state';
 import type { DbState } from '../state/db-state';
-import type { DbSessionRef } from '../db/db-session';
+import type { DbSession, DbSessionRef, ResourceClipboardMutation, ResourceItemRef } from '../db/db-session';
 import type { ConnectionController } from '../ws/connection';
 import { createPhoenixAssetClient } from '../phoenix/asset-client';
 import { addAssetImpactEvents } from '../phoenix/asset-impact-events';
 import { deleteAllowedAssetDirectory, deleteAllowedAssetFile, writeAllowedAssetFile } from '../phoenix/asset-operations';
 import { buildResourceTree, type ResourceTreeNode } from '../resources/resource-tree';
+import type { AssetClipboard } from '../resources/asset-clipboard';
+import { normalizePoolPath, pendingCutKeys, resolveAssetPasteParent } from '../resources/asset-clipboard';
+import {
+  createAssetRangeSelection,
+  createAssetSelection,
+  getAssetSelectionItems,
+  isAssetSelected,
+  toggleAssetSelection,
+} from '../resources/asset-selection';
+import type { AssetSelectionItem } from '../app/types';
+import { syncResourceClipboardMutation } from '../services/resource-clipboard-sync';
+import { writeSystemClipboardText } from '../resources/system-clipboard';
+import { ASSET_FILE_DRAG_TYPE } from '../resources/pool-path-drop';
 import { createContentRenderer } from './base-panel';
 
-const ASSET_FILE_DRAG_TYPE = 'application/x-cacablu-asset-file';
 const ASSET_FILE_TEXT_PREFIX = 'cacablu-asset-file:';
 type AssetOperationState = 'blocked' | 'idle' | 'applying' | 'disconnected' | 'discrepant' | 'error';
 
@@ -144,6 +156,7 @@ export function createResourcesPanel(
   dbState: DbState,
   sessionRef: DbSessionRef,
   connection: ConnectionController,
+  assetClipboard: AssetClipboard,
 ): IContentRenderer {
   return createContentRenderer((element) => {
     element.className = 'panel panel--resources';
@@ -151,6 +164,7 @@ export function createResourcesPanel(
     const expandedIds = new Set<number>();
     const phoenixAssets = createPhoenixAssetClient();
     let draggingAssetFile: AssetFileDragPayload | null = null;
+    let selectionAnchor: AssetSelectionItem | null = null;
 
     const placeholder = document.createElement('p');
     placeholder.className = 'resources__placeholder';
@@ -174,9 +188,10 @@ export function createResourcesPanel(
         row.dataset.resourceKind = 'folder';
         row.dataset.resourceId = String(node.id);
         row.dataset.poolPath = `pool/${node.path}`;
-        if (selection.kind === 'folder' && selection.id === node.id) {
+        if (isAssetSelected(selection, 'folder', node.id)) {
           row.classList.add('is-selected');
         }
+        if (pendingCutKeys(assetClipboard.getSnapshot()).has(`folder:${node.id}`)) row.classList.add('is-cut-pending');
 
         const expanded = expandedIds.has(node.id);
         row.append(
@@ -205,9 +220,10 @@ export function createResourcesPanel(
         li.dataset.poolPath = `pool/${node.path}`;
         li.dataset.enabled = node.enabled ? 'true' : 'false';
         li.draggable = true;
-        if (selection.kind === 'file' && selection.id === node.id) {
+        if (isAssetSelected(selection, 'file', node.id)) {
           li.classList.add('is-selected');
         }
+        if (pendingCutKeys(assetClipboard.getSnapshot()).has(`file:${node.id}`)) li.classList.add('is-cut-pending');
 
         const label = document.createElement('span');
         label.className = 'resources__label';
@@ -249,7 +265,13 @@ export function createResourcesPanel(
       treeEl.append(ul);
     }
 
-    function setSyncStatus(_nextState: AssetOperationState, _message: string): void {
+    function setSyncStatus(nextState: AssetOperationState, message: string): void {
+      if (nextState !== 'error' && nextState !== 'discrepant') return;
+      state.addEvent({
+        severity: nextState === 'error' ? 'error' : 'warning',
+        source: 'Pool assets',
+        description: message,
+      });
     }
 
     render();
@@ -262,6 +284,10 @@ export function createResourcesPanel(
     });
 
     const unsubscribeState = state.subscribe(() => {
+      render();
+    });
+
+    const unsubscribeClipboard = assetClipboard.subscribe(() => {
       render();
     });
 
@@ -329,9 +355,9 @@ export function createResourcesPanel(
       };
       const serialized = JSON.stringify(payload);
       draggingAssetFile = payload;
-      event.dataTransfer.effectAllowed = 'move';
+      event.dataTransfer.effectAllowed = 'copyMove';
       event.dataTransfer.setData(ASSET_FILE_DRAG_TYPE, serialized);
-      event.dataTransfer.setData('text/plain', `${ASSET_FILE_TEXT_PREFIX}${serialized}`);
+      event.dataTransfer.setData('text/plain', normalizePoolPath(payload.sourcePath));
       file.classList.add('is-dragging');
     });
 
@@ -363,12 +389,13 @@ export function createResourcesPanel(
       const file = target.closest<HTMLElement>('[data-resource-kind="file"]');
       if (file?.dataset.resourceId) {
         const name = file.dataset.resourceName ?? '';
-        state.setAssetSelection({
+        const item: AssetSelectionItem = {
           kind: 'file',
           id: Number(file.dataset.resourceId),
           name,
           fileType: file.dataset.resourceType ?? '',
-        });
+        };
+        updateAssetSelection(event, item);
         if (event.detail >= 2 && name.toLowerCase().endsWith('.glsl')) {
           event.preventDefault();
           event.stopPropagation();
@@ -386,13 +413,16 @@ export function createResourcesPanel(
       const folder = folderRow?.closest<HTMLElement>('[data-folder-id]');
       if (!folder?.dataset.folderId || !folderRow) return;
       const id = Number(folder.dataset.folderId);
-      state.setAssetSelection({
+      const item: AssetSelectionItem = {
         kind: 'folder',
         id,
         name: folderRow.querySelector<HTMLElement>('.resources__label')?.textContent ?? '',
-      });
-      if (expandedIds.has(id)) expandedIds.delete(id);
-      else expandedIds.add(id);
+      };
+      updateAssetSelection(event, item);
+      if (!event.ctrlKey && !event.metaKey && !event.shiftKey) {
+        if (expandedIds.has(id)) expandedIds.delete(id);
+        else expandedIds.add(id);
+      }
       render();
     });
 
@@ -427,11 +457,111 @@ export function createResourcesPanel(
       void setAssetEnabled(Number(file.dataset.resourceId), file.dataset.resourceName ?? '', file.dataset.poolPath, target.checked);
     });
 
+    const handleClipboardCommand = (event: Event) => {
+      if (state.getSnapshot().activePanelId !== 'resources') return;
+      const detail = event instanceof CustomEvent
+        ? event.detail as { command?: unknown; clipboardData?: DataTransfer | null }
+        : null;
+      if (detail?.command !== 'copy' && detail?.command !== 'cut' && detail?.command !== 'paste') return;
+      event.preventDefault();
+      if (detail.command === 'paste') void pasteAssetClipboard();
+      else void captureAssetClipboard(detail.command, detail.clipboardData);
+    };
+    window.addEventListener('cacablu:asset-clipboard-command', handleClipboardCommand);
+
     return () => {
       unsubscribeDb();
       unsubscribeState();
+      unsubscribeClipboard();
       unsubscribeAssets();
+      window.removeEventListener('cacablu:asset-clipboard-command', handleClipboardCommand);
     };
+
+    function updateAssetSelection(event: MouseEvent, item: AssetSelectionItem): void {
+      const current = state.getSnapshot().assetSelection;
+      if (event.shiftKey) {
+        state.setAssetSelection(createAssetRangeSelection(getVisibleAssetItems(), selectionAnchor, item));
+      } else if (event.ctrlKey || event.metaKey) {
+        state.setAssetSelection(toggleAssetSelection(current, item));
+        selectionAnchor = item;
+      } else {
+        state.setAssetSelection(item);
+        selectionAnchor = item;
+      }
+    }
+
+    function getVisibleAssetItems(): AssetSelectionItem[] {
+      return [...treeEl.querySelectorAll<HTMLElement>('[data-resource-kind][data-resource-id]')]
+        .map(resourceElementToSelection)
+        .filter((item): item is AssetSelectionItem => item !== null);
+    }
+
+    async function captureAssetClipboard(
+      operation: 'copy' | 'cut',
+      clipboardData?: DataTransfer | null,
+    ): Promise<void> {
+      const session = sessionRef.current;
+      if (!session) {
+        setSyncStatus('error', 'Load a project before using the Pool clipboard.');
+        return;
+      }
+      const selected = getAssetSelectionItems(state.getSnapshot().assetSelection);
+      if (selected.length === 0) {
+        setSyncStatus('error', 'Select at least one Pool item to copy or cut.');
+        return;
+      }
+
+      try {
+        const snapshot = assetClipboard.capture(operation, session, session.data, selected);
+        if (clipboardData) {
+          clipboardData.setData('text/plain', snapshot.text);
+          return;
+        }
+        await writeSystemClipboardText(snapshot.text);
+      } catch (error) {
+        state.addEvent({
+          severity: 'error',
+          source: 'Pool clipboard',
+          description: error instanceof Error ? error.message : 'Could not copy Pool items.',
+        });
+      }
+    }
+
+    async function pasteAssetClipboard(): Promise<void> {
+      const session = sessionRef.current;
+      const snapshot = assetClipboard.getSnapshot();
+      if (!session || !snapshot) {
+        setSyncStatus('error', 'The Pool clipboard is empty.');
+        return;
+      }
+
+      try {
+        const parentId = resolveAssetPasteParent(session.data, state.getSnapshot().assetSelection);
+        let result: ResourceClipboardMutation;
+        if (snapshot.operation === 'copy') {
+          result = session.copyResourceItems(snapshot.roots, parentId);
+        } else {
+          if (snapshot.sourceSession !== session) {
+            assetClipboard.clear();
+            throw new Error('The cut Pool items belong to a project that is no longer open.');
+          }
+          result = session.moveResourceItems(
+            snapshot.roots.map((root) => ({ kind: root.kind, id: root.sourceId })),
+            parentId,
+          );
+        }
+
+        dbState.setDirty();
+        state.setAssetSelection(createAssetSelection(result.roots.map((root) => resourceRefToSelection(session, root))));
+        if (snapshot.operation === 'cut') assetClipboard.consumeCut();
+        render();
+        await syncResourceClipboardMutation(result, phoenixAssets, state, connection.isConnected());
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Could not paste Pool items.';
+        if (snapshot.operation === 'cut' && /no longer|no longer open/i.test(message)) assetClipboard.clear();
+        setSyncStatus('error', message);
+      }
+    }
 
     function getDropTarget(target: HTMLElement): DropTarget | null {
       const assetFolder = target.closest<HTMLElement>('[data-resource-kind="folder"]');
@@ -613,7 +743,7 @@ export function createResourcesPanel(
         setSyncStatus('applying', `Deleting ${name}...`);
         session.deleteResourceFile(fileId);
         dbState.setDirty();
-        state.clearResourceSelection();
+        state.clearAssetSelection();
 
         if (connection.isConnected()) {
           try {
@@ -641,7 +771,7 @@ export function createResourcesPanel(
         session.deleteResourceFolder(folderId);
         expandedIds.delete(folderId);
         dbState.setDirty();
-        state.clearResourceSelection();
+        state.clearAssetSelection();
 
         if (connection.isConnected()) {
           try {
@@ -674,6 +804,38 @@ interface AssetFileDragPayload {
 
 function getEventElement(event: Event): HTMLElement | null {
   return event.target instanceof HTMLElement ? event.target : null;
+}
+
+function resourceElementToSelection(element: HTMLElement): AssetSelectionItem | null {
+  const id = Number(element.dataset.resourceId);
+  if (!Number.isInteger(id)) return null;
+  if (element.dataset.resourceKind === 'file') {
+    return {
+      kind: 'file',
+      id,
+      name: element.dataset.resourceName ?? '',
+      fileType: element.dataset.resourceType ?? '',
+    };
+  }
+  if (element.dataset.resourceKind === 'folder') {
+    return {
+      kind: 'folder',
+      id,
+      name: element.querySelector<HTMLElement>('.resources__label')?.textContent ?? '',
+    };
+  }
+  return null;
+}
+
+function resourceRefToSelection(session: DbSession, ref: ResourceItemRef): AssetSelectionItem {
+  if (ref.kind === 'file') {
+    const file = session.data.files.find((candidate) => candidate.id === ref.id);
+    if (!file) throw new Error(`Pasted Pool file ${ref.id} was not found.`);
+    return { kind: 'file', id: file.id, name: file.name, fileType: file.type };
+  }
+  const folder = session.data.folders.find((candidate) => candidate.id === ref.id);
+  if (!folder) throw new Error(`Pasted Pool folder ${ref.id} was not found.`);
+  return { kind: 'folder', id: folder.id, name: folder.name };
 }
 
 function hasAssetFileDrag(dataTransfer: DataTransfer | null): boolean {

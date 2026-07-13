@@ -589,9 +589,27 @@ body > .context-view {
   font-size: 13px;
 }
 
+.connection-badge {
+  position: relative;
+}
+
 .connection-badge[data-status='connected'] {
-  border-color: rgba(49, 196, 141, 0.6);
+  border-color: rgba(89, 255, 191, 0.9);
   background: var(--accent-soft);
+  box-shadow:
+    0 0 6px rgba(49, 196, 141, 0.82),
+    0 0 15px rgba(49, 196, 141, 0.42),
+    inset 0 0 7px rgba(49, 196, 141, 0.16);
+  animation: phoenix-connection-glow 3.2s ease-out infinite;
+}
+
+.connection-badge[data-status='connected'][data-activity='active'] {
+  box-shadow:
+    0 0 9px rgba(89, 255, 191, 0.98),
+    0 0 23px rgba(49, 196, 141, 0.66),
+    inset 0 0 9px rgba(89, 255, 191, 0.22);
+  animation-name: phoenix-connection-activity-glow;
+  animation-duration: 0.42s;
 }
 
 .connection-badge[data-status='error'] {
@@ -771,6 +789,52 @@ body > .context-view {
 .panel li,
 .panel span:not(.monaco-editor span) {
   color: var(--panel-muted);
+}
+
+@keyframes phoenix-connection-glow {
+  0% {
+    box-shadow:
+      0 0 10px rgba(89, 255, 191, 0.98),
+      0 0 24px rgba(49, 196, 141, 0.64),
+      inset 0 0 9px rgba(89, 255, 191, 0.22);
+  }
+
+  100% {
+    box-shadow:
+      0 0 4px rgba(49, 196, 141, 0.52),
+      0 0 10px rgba(49, 196, 141, 0.25),
+      inset 0 0 5px rgba(49, 196, 141, 0.12);
+  }
+}
+
+@keyframes phoenix-connection-activity-glow {
+  0% {
+    box-shadow:
+      0 0 10px rgba(89, 255, 191, 0.98),
+      0 0 24px rgba(49, 196, 141, 0.64),
+      inset 0 0 9px rgba(89, 255, 191, 0.22);
+  }
+
+  100% {
+    box-shadow:
+      0 0 4px rgba(49, 196, 141, 0.52),
+      0 0 10px rgba(49, 196, 141, 0.25),
+      inset 0 0 5px rgba(49, 196, 141, 0.12);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .connection-badge[data-status='connected'] {
+    animation: none;
+  }
+
+  .connection-badge[data-status='connected'][data-activity='active'] {
+    animation: none;
+    box-shadow:
+      0 0 10px rgba(89, 255, 191, 0.98),
+      0 0 24px rgba(49, 196, 141, 0.66),
+      inset 0 0 9px rgba(89, 255, 191, 0.22);
+  }
 }
 
 .panel-list {
@@ -2059,6 +2123,11 @@ button.events-listbox__severity:focus-visible {
 
 .resources__file.is-dragging {
   opacity: 0.55;
+}
+
+.resources__folder-row.is-cut-pending,
+.resources__file.is-cut-pending {
+  opacity: 0.5;
 }
 
 .resources__file:hover {

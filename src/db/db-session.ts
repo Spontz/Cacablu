@@ -3,6 +3,7 @@ import type { SqlDatabase } from './sql-loader';
 import { readDatabase } from './db-reader';
 import { serializeDatabase } from './db-writer';
 import type { DbBar, DbFbo, DbFile, DbFolder, DbMarker, ProjectDatabase } from './db-schema';
+import { buildResourcePath, type AssetClipboardNode } from '../resources/asset-clipboard';
 
 type EditableDbValue = string | number | boolean | null;
 type DbTableName = string;
@@ -50,6 +51,8 @@ export interface DbSession {
   upsertResourceFile(input: NewResourceFile): DbFile;
   insertResourceFolder(input: NewResourceFolder): DbFolder;
   moveResourceFile(fileId: number, parentId: number): DbFile;
+  copyResourceItems(roots: AssetClipboardNode[], parentId: number): ResourceClipboardMutation;
+  moveResourceItems(roots: ResourceItemRef[], parentId: number): ResourceClipboardMutation;
   updateResourceFileContent(fileId: number, input: Pick<DbFile, 'bytes' | 'type' | 'data' | 'format'>): DbFile;
   setResourceFileEnabled(fileId: number, enabled: boolean): DbFile;
   deleteResourceFile(fileId: number): DbFile;
@@ -59,6 +62,23 @@ export interface DbSession {
   save(): Promise<void>;
   saveAs(handle: FileSystemFileHandle): Promise<DbSession>;
   close(): void;
+}
+
+export interface ResourceItemRef {
+  kind: 'file' | 'folder';
+  id: number;
+}
+
+export interface ResourceFileMutation {
+  file: DbFile;
+  oldPath?: string;
+  newPath: string;
+}
+
+export interface ResourceClipboardMutation {
+  operation: 'copy' | 'move';
+  roots: ResourceItemRef[];
+  files: ResourceFileMutation[];
 }
 
 export interface DbTableSnapshot {
@@ -327,6 +347,76 @@ function makeSession(handle: FileSystemFileHandle, db: SqlDatabase, data: Projec
       return file;
     },
 
+    copyResourceItems(roots, parentId): ResourceClipboardMutation {
+      validateDestination(data, parentId);
+      validateClipboardRootNames(data, roots, parentId);
+      const previousFolders = data.folders.map((folder) => ({ ...folder }));
+      const previousFiles = data.files.map(cloneDbFile);
+      const createdRoots: ResourceItemRef[] = [];
+      const createdFiles: DbFile[] = [];
+
+      db.run('BEGIN TRANSACTION');
+      try {
+        for (const root of roots) {
+          createdRoots.push(insertClipboardNode(db, data, root, parentId, createdFiles));
+        }
+        db.run('COMMIT');
+      } catch (error) {
+        rollbackResourceMutation(db, data, previousFolders, previousFiles);
+        throw error;
+      }
+
+      return {
+        operation: 'copy',
+        roots: createdRoots,
+        files: createdFiles.map((file) => ({
+          file,
+          newPath: buildResourcePath(data, 'file', file.id),
+        })),
+      };
+    },
+
+    moveResourceItems(roots, parentId): ResourceClipboardMutation {
+      validateDestination(data, parentId);
+      const canonicalRoots = canonicalizeResourceRefs(data, roots);
+      validateMoveRoots(data, canonicalRoots, parentId);
+      const previousFolders = data.folders.map((folder) => ({ ...folder }));
+      const previousFiles = data.files.map(cloneDbFile);
+      const affectedFileIds = collectRootFileIds(data, canonicalRoots);
+      const oldPaths = new Map(affectedFileIds.map((id) => [id, buildResourcePath(data, 'file', id)]));
+
+      db.run('BEGIN TRANSACTION');
+      try {
+        for (const root of canonicalRoots) {
+          const table = root.kind === 'file' ? 'FILES' : 'FOLDERS';
+          db.run(`UPDATE "${table}" SET "parent" = ? WHERE "id" = ?`, [parentId, root.id]);
+          const item = root.kind === 'file'
+            ? data.files.find((file) => file.id === root.id)
+            : data.folders.find((folder) => folder.id === root.id);
+          if (!item) throw new Error(`Pool ${root.kind} ${root.id} was not found.`);
+          item.parent = parentId;
+        }
+        db.run('COMMIT');
+      } catch (error) {
+        rollbackResourceMutation(db, data, previousFolders, previousFiles);
+        throw error;
+      }
+
+      return {
+        operation: 'move',
+        roots: canonicalRoots,
+        files: affectedFileIds.map((id) => {
+          const file = data.files.find((candidate) => candidate.id === id);
+          if (!file) throw new Error(`Pool file ${id} was not found after moving.`);
+          return {
+            file,
+            oldPath: oldPaths.get(id),
+            newPath: buildResourcePath(data, 'file', id),
+          };
+        }),
+      };
+    },
+
     updateResourceFileContent(fileId, input): DbFile {
       const file = data.files.find((candidate) => candidate.id === fileId);
       if (!file) {
@@ -447,6 +537,163 @@ function makeSession(handle: FileSystemFileHandle, db: SqlDatabase, data: Projec
       db.close();
     },
   };
+}
+
+function validateDestination(data: ProjectDatabase, parentId: number): void {
+  if (!Number.isInteger(parentId) || parentId < 0) throw new Error('Pool destination is invalid.');
+  if (parentId > 0 && !data.folders.some((folder) => folder.id === parentId)) {
+    throw new Error('The selected Pool destination no longer exists.');
+  }
+}
+
+function validateClipboardRootNames(data: ProjectDatabase, roots: AssetClipboardNode[], parentId: number): void {
+  if (roots.length === 0) throw new Error('The Pool clipboard is empty.');
+  const incoming = new Set<string>();
+  for (const root of roots) {
+    const key = root.name.toLocaleLowerCase();
+    if (incoming.has(key)) throw new Error(`The clipboard contains more than one item named ${root.name}.`);
+    incoming.add(key);
+  }
+  const siblings = [
+    ...data.files.filter((file) => file.parent === parentId),
+    ...data.folders.filter((folder) => folder.parent === parentId),
+  ];
+  for (const root of roots) {
+    if (siblings.some((item) => item.name.localeCompare(root.name, undefined, { sensitivity: 'accent' }) === 0)) {
+      throw new Error(`An item named ${root.name} already exists in the destination folder.`);
+    }
+  }
+}
+
+function insertClipboardNode(
+  db: SqlDatabase,
+  data: ProjectDatabase,
+  node: AssetClipboardNode,
+  parentId: number,
+  createdFiles: DbFile[],
+): ResourceItemRef {
+  if (node.kind === 'file') {
+    db.run(
+      'INSERT INTO "FILES" ("name", "parent", "bytes", "type", "data", "format", "enabled") VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [node.name, parentId, node.bytes, node.type, node.data, node.format, node.enabled ? 1 : 0],
+    );
+    const file: DbFile = {
+      id: lastInsertRowId(db),
+      name: node.name,
+      parent: parentId,
+      bytes: node.bytes,
+      type: node.type,
+      data: new Uint8Array(node.data),
+      format: node.format,
+      enabled: node.enabled,
+    };
+    data.files.push(file);
+    createdFiles.push(file);
+    return { kind: 'file', id: file.id };
+  }
+
+  db.run(
+    'INSERT INTO "FOLDERS" ("name", "parent", "enabled") VALUES (?, ?, ?)',
+    [node.name, parentId, node.enabled ? 1 : 0],
+  );
+  const folder: DbFolder = {
+    id: lastInsertRowId(db),
+    name: node.name,
+    parent: parentId,
+    enabled: node.enabled,
+  };
+  data.folders.push(folder);
+  for (const child of node.children) insertClipboardNode(db, data, child, folder.id, createdFiles);
+  return { kind: 'folder', id: folder.id };
+}
+
+function canonicalizeResourceRefs(data: ProjectDatabase, roots: ResourceItemRef[]): ResourceItemRef[] {
+  const unique = new Map(roots.map((root) => [`${root.kind}:${root.id}`, root]));
+  const selectedFolders = new Set(
+    [...unique.values()].filter((root) => root.kind === 'folder').map((root) => root.id),
+  );
+  return [...unique.values()].filter((root) => {
+    const item = root.kind === 'file'
+      ? data.files.find((file) => file.id === root.id)
+      : data.folders.find((folder) => folder.id === root.id);
+    if (!item) throw new Error(`Pool ${root.kind} ${root.id} is no longer available.`);
+    let parentId = item.parent;
+    while (parentId > 0) {
+      if (selectedFolders.has(parentId)) return false;
+      parentId = data.folders.find((folder) => folder.id === parentId)?.parent ?? 0;
+    }
+    return true;
+  });
+}
+
+function validateMoveRoots(data: ProjectDatabase, roots: ResourceItemRef[], parentId: number): void {
+  if (roots.length === 0) throw new Error('The Pool clipboard is empty.');
+  const movingKeys = new Set(roots.map((root) => `${root.kind}:${root.id}`));
+  const names = new Set<string>();
+
+  for (const root of roots) {
+    const item = root.kind === 'file'
+      ? data.files.find((file) => file.id === root.id)
+      : data.folders.find((folder) => folder.id === root.id);
+    if (!item) throw new Error(`Pool ${root.kind} ${root.id} is no longer available.`);
+    if (item.parent === parentId) throw new Error(`${item.name} is already in the destination folder.`);
+    const nameKey = item.name.toLocaleLowerCase();
+    if (names.has(nameKey)) throw new Error(`More than one selected item is named ${item.name}.`);
+    names.add(nameKey);
+
+    if (root.kind === 'folder') {
+      let ancestorId = parentId;
+      while (ancestorId > 0) {
+        if (ancestorId === root.id) throw new Error(`Folder ${item.name} cannot be moved into itself or a descendant.`);
+        ancestorId = data.folders.find((folder) => folder.id === ancestorId)?.parent ?? 0;
+      }
+    }
+
+    const conflict = [
+      ...data.files.filter((file) => file.parent === parentId).map((file) => ({ kind: 'file' as const, ...file })),
+      ...data.folders.filter((folder) => folder.parent === parentId).map((folder) => ({ kind: 'folder' as const, ...folder })),
+    ].find((candidate) => (
+      !movingKeys.has(`${candidate.kind}:${candidate.id}`)
+      && candidate.name.localeCompare(item.name, undefined, { sensitivity: 'accent' }) === 0
+    ));
+    if (conflict) throw new Error(`An item named ${item.name} already exists in the destination folder.`);
+  }
+}
+
+function collectRootFileIds(data: ProjectDatabase, roots: ResourceItemRef[]): number[] {
+  const folderIds = new Set(roots.filter((root) => root.kind === 'folder').map((root) => root.id));
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const folder of data.folders) {
+      if (!folderIds.has(folder.id) && folderIds.has(folder.parent)) {
+        folderIds.add(folder.id);
+        changed = true;
+      }
+    }
+  }
+  const ids = roots.filter((root) => root.kind === 'file').map((root) => root.id);
+  for (const file of data.files) if (folderIds.has(file.parent)) ids.push(file.id);
+  return [...new Set(ids)];
+}
+
+function rollbackResourceMutation(
+  db: SqlDatabase,
+  data: ProjectDatabase,
+  folders: DbFolder[],
+  files: DbFile[],
+): void {
+  try {
+    db.run('ROLLBACK');
+  } catch {
+    // The database may already have rejected and closed the transaction.
+  }
+  data.folders.splice(0, data.folders.length, ...folders);
+  data.files.splice(0, data.files.length, ...files);
+}
+
+function cloneDbFile(file: DbFile): DbFile {
+  return { ...file, data: new Uint8Array(file.data) };
 }
 
 function migrateDatabaseSchema(db: SqlDatabase): void {

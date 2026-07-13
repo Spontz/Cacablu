@@ -21,6 +21,7 @@ vi.mock('../../src/db/sql-loader', () => {
 
 import { openDbSession } from '../../src/db/db-session';
 import { getSqlJs } from '../../src/db/sql-loader';
+import { captureAssetRoots } from '../../src/resources/asset-clipboard';
 
 class MemoryFileHandle {
   readonly name = 'project.sqlite';
@@ -103,6 +104,89 @@ describe('DbSession markers', () => {
   });
 });
 
+describe('DbSession Pool clipboard mutations', () => {
+  it('copies nested folders atomically and persists new ids and contents', async () => {
+    const handle = new MemoryFileHandle(await createResourceProjectBytes()) as unknown as FileSystemFileHandle;
+    let session = await openDbSession(handle);
+    const roots = captureAssetRoots(session.data, [{ kind: 'folder', id: 1, name: 'textures' }]);
+
+    const result = session.copyResourceItems(roots, 10);
+    expect(result.operation).toBe('copy');
+    expect(result.roots).toHaveLength(1);
+    expect(result.files.map((entry) => [entry.file.name, entry.newPath])).toEqual([
+      ['note.txt', '/pool/destination/textures/nested/note.txt'],
+      ['hero.png', '/pool/destination/textures/hero.png'],
+    ]);
+    expect(result.files[0].file.data).not.toBe(session.data.files.find((file) => file.id === 4)?.data);
+
+    await session.save();
+    session.close();
+    session = await openDbSession(handle);
+    expect(session.data.folders.some((folder) => folder.name === 'textures' && folder.parent === 10 && folder.id !== 1)).toBe(true);
+    expect(session.data.files.some((file) => file.name === 'note.txt' && file.id !== 4 && [...file.data].join(',') === '3')).toBe(true);
+    session.close();
+  });
+
+  it('moves files and folders while preserving ids and descendant relationships', async () => {
+    const handle = new MemoryFileHandle(await createResourceProjectBytes()) as unknown as FileSystemFileHandle;
+    const session = await openDbSession(handle);
+
+    const result = session.moveResourceItems([{ kind: 'folder', id: 1 }], 10);
+    expect(result.files.map((entry) => [entry.file.id, entry.oldPath, entry.newPath])).toEqual([
+      [3, '/pool/textures/hero.png', '/pool/destination/textures/hero.png'],
+      [4, '/pool/textures/nested/note.txt', '/pool/destination/textures/nested/note.txt'],
+    ]);
+    expect(session.data.folders.find((folder) => folder.id === 1)?.parent).toBe(10);
+    expect(session.data.folders.find((folder) => folder.id === 2)?.parent).toBe(1);
+    session.close();
+  });
+
+  it('rejects conflicts, same-parent moves, and descendant cycles without mutation', async () => {
+    const handle = new MemoryFileHandle(await createResourceProjectBytes()) as unknown as FileSystemFileHandle;
+    const session = await openDbSession(handle);
+    const beforeFolders = session.data.folders.map((folder) => ({ ...folder }));
+    const beforeFiles = session.data.files.map((file) => ({ ...file, data: [...file.data] }));
+
+    const fileRoot = captureAssetRoots(session.data, [{ kind: 'file', id: 3, name: 'hero.png', fileType: 'image/png' }]);
+    expect(() => session.copyResourceItems(fileRoot, 1)).toThrow('already exists');
+    expect(() => session.moveResourceItems([{ kind: 'file', id: 3 }], 1)).toThrow('already in');
+    expect(() => session.moveResourceItems([{ kind: 'folder', id: 1 }], 2)).toThrow('descendant');
+    expect(session.data.folders).toEqual(beforeFolders);
+    expect(session.data.files.map((file) => ({ ...file, data: [...file.data] }))).toEqual(beforeFiles);
+    session.close();
+  });
+
+  it('rolls back SQL and in-memory rows when a recursive insert fails', async () => {
+    const handle = new MemoryFileHandle(await createResourceProjectBytes()) as unknown as FileSystemFileHandle;
+    const session = await openDbSession(handle);
+    const folderCount = session.data.folders.length;
+    const fileCount = session.data.files.length;
+    const badFile = {
+      kind: 'file' as const,
+      sourceId: 99,
+      name: 'bad.bin',
+      path: '/pool/bad.bin',
+      bytes: 1,
+      type: 'application/octet-stream',
+      format: 'bin',
+      enabled: true,
+    } as Record<string, unknown>;
+    Object.defineProperty(badFile, 'data', { get: () => { throw new Error('Synthetic insert failure.'); } });
+
+    expect(() => session.copyResourceItems([
+      {
+        kind: 'file', sourceId: 98, name: 'ok.bin', path: '/pool/ok.bin', bytes: 1,
+        type: 'application/octet-stream', data: new Uint8Array([1]), format: 'bin', enabled: true,
+      },
+      badFile as never,
+    ], 10)).toThrow('Synthetic insert failure');
+    expect(session.data.folders).toHaveLength(folderCount);
+    expect(session.data.files).toHaveLength(fileCount);
+    expect(session.getTableSnapshot('FILES').rows).toHaveLength(fileCount);
+    session.close();
+  });
+});
+
 async function createLegacyProjectBytes(): Promise<Uint8Array> {
   const SQL = await getSqlJs();
   const db = new SQL.Database();
@@ -128,6 +212,23 @@ async function createLowercaseMarkersProjectBytes(): Promise<Uint8Array> {
   db.run('CREATE TABLE "FOLDERS" ("id" INTEGER PRIMARY KEY, "name" TEXT, "parent" INTEGER, "enabled" INTEGER)');
   db.run('CREATE TABLE "markers" ("id" INTEGER PRIMARY KEY, "time" REAL NOT NULL, "label" TEXT NOT NULL DEFAULT "")');
   db.run('INSERT INTO "markers" ("time", "label") VALUES (?, ?)', [12.5, 'legacy']);
+  const bytes = db.export();
+  db.close();
+  return bytes;
+}
+
+async function createResourceProjectBytes(): Promise<Uint8Array> {
+  const SQL = await getSqlJs();
+  const db = new SQL.Database(await createLegacyProjectBytes());
+  db.run('INSERT INTO "FOLDERS" ("id", "name", "parent", "enabled") VALUES (?, ?, ?, ?)', [1, 'textures', 0, 1]);
+  db.run('INSERT INTO "FOLDERS" ("id", "name", "parent", "enabled") VALUES (?, ?, ?, ?)', [2, 'nested', 1, 1]);
+  db.run('INSERT INTO "FOLDERS" ("id", "name", "parent", "enabled") VALUES (?, ?, ?, ?)', [10, 'destination', 0, 1]);
+  db.run('INSERT INTO "FILES" ("id", "name", "parent", "bytes", "type", "data", "format", "enabled") VALUES (?, ?, ?, ?, ?, ?, ?, ?)', [
+    3, 'hero.png', 1, 2, 'image/png', new Uint8Array([1, 2]), 'png', 1,
+  ]);
+  db.run('INSERT INTO "FILES" ("id", "name", "parent", "bytes", "type", "data", "format", "enabled") VALUES (?, ?, ?, ?, ?, ?, ?, ?)', [
+    4, 'note.txt', 2, 1, 'text/plain', new Uint8Array([3]), 'txt', 0,
+  ]);
   const bytes = db.export();
   db.close();
   return bytes;

@@ -10,6 +10,7 @@ import type { ConnectionController } from '../ws/connection';
 import type { UndoManager } from '../app/undo-manager';
 import { createPhoenixSectionClient } from '../phoenix/section-client';
 import { createPhoenixLogClient } from '../phoenix/log-client';
+import { installPoolPathDrop } from '../resources/pool-path-drop';
 import { primePhoenixLogEvents, recordPhoenixLogsAsEvents } from '../phoenix/log-events';
 import { ProjectSectionSyncError, syncProjectBarToPhoenix, type ProjectSectionSyncIssue } from '../services/project-section-sync';
 import { createContentRenderer } from './base-panel';
@@ -121,6 +122,7 @@ export function createSectionEditorPanel(
 
     let activeSelectionSignature: string | null = null;
     let codeEditor: monaco.editor.IStandaloneCodeEditor | null = null;
+    let disposePoolPathDrop: (() => void) | null = null;
     let activeBarTypeInput: HTMLInputElement | null = null;
     let activeBarTypeMenu: HTMLElement | null = null;
     let barTypes = getInitialBarTypes();
@@ -133,6 +135,8 @@ export function createSectionEditorPanel(
 
     function disposeCodeEditor(): void {
       templateContentRequestId += 1;
+      disposePoolPathDrop?.();
+      disposePoolPathDrop = null;
       codeEditor?.dispose();
       codeEditor = null;
     }
@@ -343,6 +347,7 @@ export function createSectionEditorPanel(
         fixedOverflowWidgets: true,
         overflowWidgetsDomNode: document.body,
       });
+      disposePoolPathDrop = installPoolPathDrop(codeEditor, code);
       requestAnimationFrame(() => {
         codeEditor?.layout();
       });

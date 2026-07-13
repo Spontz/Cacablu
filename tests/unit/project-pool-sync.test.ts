@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import type { ProjectDatabase } from '../../src/db/db-schema';
+import type { AssetManifest, AssetManifestEntry } from '../../src/phoenix/asset-manifest';
 import {
   collectPublishedPoolFiles,
   syncPublishedPoolFilesToPhoenix,
@@ -67,15 +68,10 @@ describe('project pool sync', () => {
     const progress: ProjectPoolSyncProgress[] = [];
 
     const result = await syncPublishedPoolFilesToPhoenix(makeDb(), {
-      fetchManifest: async () => ({
-        root: 'phoenix-engine',
-        generatedAt: new Date().toISOString(),
-        errors: [],
-        entries: [
+      fetchManifest: convergingFetch([
           { path: 'pool/root.txt', kind: 'file', size: 1 },
           { path: 'pool/textures/hero.png', kind: 'file', size: 99 },
-        ],
-      }),
+      ]),
       createDirectory,
       deleteDirectory,
       writeFile,
@@ -102,26 +98,24 @@ describe('project pool sync', () => {
     const deleteDirectory = vi.fn().mockResolvedValue({ ok: true, operation: 'delete-directory' });
     const writeFile = vi.fn().mockResolvedValue({ ok: true, operation: 'write-file' });
 
+    const progress: ProjectPoolSyncProgress[] = [];
     const result = await syncPublishedPoolFilesToPhoenix(makeDb(), {
-      fetchManifest: async () => ({
-        root: 'phoenix-engine',
-        generatedAt: new Date().toISOString(),
-        errors: [],
-        entries: [
+      fetchManifest: async () => manifest([
           { path: 'pool/root.txt', kind: 'file', size: 1, hash: fnv1a(new Uint8Array([6])) },
           { path: 'pool/textures/hero.png', kind: 'file', size: 3, hash: fnv1a(new Uint8Array([1, 2, 3])) },
           { path: 'resources/keep.frag', kind: 'file', size: 99 },
-        ],
-      }),
+      ]),
       createDirectory,
       deleteDirectory,
       writeFile,
-    }, () => {});
+    }, (next) => progress.push(next));
 
     expect(result).toEqual({ total: 2, copied: 0, skipped: 2, failed: 0 });
     expect(deleteDirectory).not.toHaveBeenCalled();
     expect(createDirectory).not.toHaveBeenCalled();
     expect(writeFile).not.toHaveBeenCalled();
+    expect(progress.map((entry) => entry.phase)).toEqual(['scanning', 'complete']);
+    expect(progress.at(-1)?.message).toBe('Phoenix pool already matches: 0 copied, 2 skipped.');
   });
 
   it('rebuilds the pool when a same-size file has different content', async () => {
@@ -130,15 +124,10 @@ describe('project pool sync', () => {
     const writeFile = vi.fn().mockResolvedValue({ ok: true, operation: 'write-file' });
 
     await syncPublishedPoolFilesToPhoenix(makeDb(), {
-      fetchManifest: async () => ({
-        root: 'phoenix-engine',
-        generatedAt: new Date().toISOString(),
-        errors: [],
-        entries: [
+      fetchManifest: convergingFetch([
           { path: 'pool/root.txt', kind: 'file', size: 1, hash: fnv1a(new Uint8Array([9])) },
           { path: 'pool/textures/hero.png', kind: 'file', size: 3, hash: fnv1a(new Uint8Array([1, 2, 3])) },
-        ],
-      }),
+      ]),
       createDirectory,
       deleteDirectory,
       writeFile,
@@ -154,16 +143,11 @@ describe('project pool sync', () => {
     const writeFile = vi.fn().mockResolvedValue({ ok: true, operation: 'write-file' });
 
     const result = await syncPublishedPoolFilesToPhoenix(makeDb(), {
-      fetchManifest: async () => ({
-        root: 'phoenix-engine',
-        generatedAt: new Date().toISOString(),
-        errors: [],
-        entries: [
+      fetchManifest: convergingFetch([
           { path: 'pool/root.txt', kind: 'file', size: 1 },
           { path: 'pool/textures/hero.png', kind: 'file', size: 3 },
           { path: 'pool/old-project/leftover.png', kind: 'file', size: 12 },
-        ],
-      }),
+      ]),
       createDirectory,
       deleteDirectory,
       writeFile,
@@ -185,14 +169,9 @@ describe('project pool sync', () => {
     const writeFile = vi.fn().mockResolvedValue({ ok: true, operation: 'write-file' });
 
     const result = await syncPublishedPoolFilesToPhoenix(db, {
-      fetchManifest: async () => ({
-        root: 'phoenix-engine',
-        generatedAt: new Date().toISOString(),
-        errors: [],
-        entries: [
+      fetchManifest: convergingFetch([
           { path: 'pool/old-project/leftover.png', kind: 'file', size: 12 },
-        ],
-      }),
+      ], []),
       createDirectory,
       deleteDirectory,
       writeFile,
@@ -212,12 +191,7 @@ describe('project pool sync', () => {
       .mockResolvedValue({ ok: true, operation: 'write-file' });
 
     const result = await syncPublishedPoolFilesToPhoenix(makeDb(), {
-      fetchManifest: async () => ({
-        root: 'phoenix-engine',
-        generatedAt: new Date().toISOString(),
-        errors: [],
-        entries: [],
-      }),
+      fetchManifest: convergingFetch([]),
       createDirectory,
       deleteDirectory,
       writeFile,
@@ -227,6 +201,43 @@ describe('project pool sync', () => {
     expect(deleteDirectory).toHaveBeenCalledWith('pool', true, undefined);
     expect(createDirectory).toHaveBeenCalledWith('pool', undefined);
     expect(writeFile).toHaveBeenCalledTimes(2);
+  });
+
+  it('stops before uploading when files remain after Phoenix accepts pool cleanup', async () => {
+    const createDirectory = vi.fn().mockResolvedValue({ ok: true, operation: 'create-directory' });
+    const deleteDirectory = vi.fn().mockResolvedValue({ ok: true, operation: 'delete-directory' });
+    const writeFile = vi.fn().mockResolvedValue({ ok: true, operation: 'write-file' });
+    const fetchManifest = vi.fn()
+      .mockResolvedValueOnce(manifest([{ path: 'pool/old.txt', kind: 'file', size: 1, hash: 'fnv1a:00000000' }]))
+      .mockResolvedValueOnce(manifest([{ path: 'pool/still-there.txt', kind: 'file', size: 1, hash: 'fnv1a:00000000' }]));
+
+    await expect(syncPublishedPoolFilesToPhoenix(makeDb(), {
+      fetchManifest,
+      createDirectory,
+      deleteDirectory,
+      writeFile,
+    }, () => {})).rejects.toThrow('Phoenix pool cleanup did not converge; first remaining file: pool/still-there.txt');
+
+    expect(writeFile).not.toHaveBeenCalled();
+  });
+
+  it('rejects a rebuilt pool whose final manifest still differs', async () => {
+    const createDirectory = vi.fn().mockResolvedValue({ ok: true, operation: 'create-directory' });
+    const deleteDirectory = vi.fn().mockResolvedValue({ ok: true, operation: 'delete-directory' });
+    const writeFile = vi.fn().mockResolvedValue({ ok: true, operation: 'write-file' });
+    const fetchManifest = vi.fn()
+      .mockResolvedValueOnce(manifest([]))
+      .mockResolvedValueOnce(manifest([]))
+      .mockResolvedValueOnce(manifest([
+        { path: 'pool/root.txt', kind: 'file', size: 1, hash: fnv1a(new Uint8Array([6])) },
+      ]));
+
+    await expect(syncPublishedPoolFilesToPhoenix(makeDb(), {
+      fetchManifest,
+      createDirectory,
+      deleteDirectory,
+      writeFile,
+    }, () => {})).rejects.toThrow('Phoenix pool rebuild did not converge: missing file pool/textures/hero.png');
   });
 
   it('stops syncing when cancelled', async () => {
@@ -239,12 +250,7 @@ describe('project pool sync', () => {
     const writeFile = vi.fn().mockResolvedValue({ ok: true, operation: 'write-file' });
 
     await expect(syncPublishedPoolFilesToPhoenix(makeDb(), {
-      fetchManifest: async () => ({
-        root: 'phoenix-engine',
-        generatedAt: new Date().toISOString(),
-        errors: [],
-        entries: [],
-      }),
+      fetchManifest: convergingFetch([]),
       createDirectory,
       deleteDirectory,
       writeFile,
@@ -263,4 +269,30 @@ function fnv1a(value: Uint8Array): string {
     hash = Math.imul(hash, 0x01000193) >>> 0;
   }
   return `fnv1a:${hash.toString(16).padStart(8, '0')}`;
+}
+
+function manifest(entries: AssetManifestEntry[]): AssetManifest {
+  return {
+    root: 'phoenix-engine',
+    generatedAt: new Date().toISOString(),
+    errors: [],
+    entries,
+  };
+}
+
+function matchingPoolEntries(): AssetManifestEntry[] {
+  return [
+    { path: 'pool/root.txt', kind: 'file', size: 1, hash: fnv1a(new Uint8Array([6])) },
+    { path: 'pool/textures/hero.png', kind: 'file', size: 3, hash: fnv1a(new Uint8Array([1, 2, 3])) },
+  ];
+}
+
+function convergingFetch(
+  initialEntries: AssetManifestEntry[],
+  finalEntries: AssetManifestEntry[] = matchingPoolEntries(),
+): ReturnType<typeof vi.fn> {
+  return vi.fn()
+    .mockResolvedValueOnce(manifest(initialEntries))
+    .mockResolvedValueOnce(manifest([]))
+    .mockResolvedValueOnce(manifest(finalEntries));
 }

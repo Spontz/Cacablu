@@ -179,6 +179,7 @@ describe('project section sync', () => {
           blendingEQ: section.blendingEQ,
           contentHash: fnv1a(content),
           size: content.byteLength,
+          loaded: true,
         }],
       }),
       replaceAll,
@@ -186,6 +187,51 @@ describe('project section sync', () => {
 
     expect(replaceAll).not.toHaveBeenCalled();
     expect(result).toEqual({ total: 1, valid: 1, invalid: 0, replaced: false, skipped: 1, issues: [] });
+  });
+
+  it.each([
+    ['failed', false],
+    ['unknown', undefined],
+  ])('replaces matching Phoenix sections when runtime state is %s', async (_state, loaded) => {
+    const replaceAll = vi.fn().mockResolvedValue({
+      requestId: 'sections-test',
+      ok: true,
+      operation: 'replace-all',
+      received: 1,
+      loaded: 1,
+      failed: 0,
+      writtenFiles: 1,
+      deletedFiles: [],
+      failedSections: [],
+    });
+    const section = collectPhoenixSections(makeDb()).sections[0];
+    const content = new TextEncoder().encode([
+      ':::drawImage',
+      'id 17',
+      'start 1',
+      'end 4',
+      'enabled 1',
+      'layer 2',
+      'blend ONE ZERO',
+      'blendequation ADD',
+      '',
+      'param value',
+    ].join('\r\n') + '\r\n');
+
+    await syncProjectBarsToPhoenix(makeDb(), {
+      fetchManifest: vi.fn().mockResolvedValue({
+        root: 'phoenix-engine',
+        entries: [{
+          ...section,
+          contentHash: fnv1a(content),
+          size: content.byteLength,
+          loaded,
+        }],
+      }),
+      replaceAll,
+    }, () => {});
+
+    expect(replaceAll).toHaveBeenCalledTimes(1);
   });
 
   it('forces full replacement without fetching an equal manifest', async () => {

@@ -1,4 +1,5 @@
 import type { AppState } from '../state/app-state';
+import { notifyPhoenixActivity } from '../phoenix/activity';
 import {
   createPhoenixCommand,
   normalizePhoenixMessage,
@@ -104,6 +105,7 @@ export function createConnectionController(state: AppState): ConnectionControlle
       if (!message) {
         return;
       }
+      notifyPhoenixActivity();
 
       if (message.type === 'runtime.state') {
         publishRuntime(message.state);
@@ -166,6 +168,7 @@ export function createConnectionController(state: AppState): ConnectionControlle
       }
 
       socket.send(createPhoenixCommand(command));
+      notifyPhoenixActivity();
       return true;
     },
 

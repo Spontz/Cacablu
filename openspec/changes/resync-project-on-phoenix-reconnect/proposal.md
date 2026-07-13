@@ -13,6 +13,7 @@ When Phoenix stops while a Cacablu project remains open, edits continue only in 
 - Stop Timeline playback extrapolation and freeze the displayed time as soon as Phoenix disconnects.
 - Store the selected loop in shared Cacablu state, restore it in Phoenix after reconnect synchronization, and preserve its Timeline indicator when the panel is closed and reopened.
 - Round section start/end times to three decimal places in Cacablu and validate payloads independently before transmission so one malformed project bar cannot abort project loading; send the valid sections and mark rejected bars as Timeline errors.
+- Require Phoenix's section manifest to report whether each persisted section loaded successfully, and retry matching sections whose runtime state is failed or unknown.
 - Open the Events tab in the background when a new error arrives and show a red dot in its title until the user brings Events to the foreground.
 
 ## Capabilities
@@ -32,5 +33,5 @@ When Phoenix stops while a Cacablu project remains open, edits continue only in 
 - Cacablu section serialization applies three-decimal timing precision and mirrors Phoenix's finite 32-bit floating-point timing and integer layer limits before building a batch request.
 - Cacablu shared application state for the active loop and Timeline panel hydration.
 - Cacablu workspace tab activation and Events error notification state.
-- Phoenix APIs are reused unchanged; no Phoenix C++ implementation changes are required.
+- Phoenix adds a `loaded` flag to existing section-manifest entries; its directory-delete implementation releases dependent runtime video handles before removing `pool`.
 - Cacablu's open project is the source of truth, while identical `pool` content is retained to avoid unnecessary transfer.

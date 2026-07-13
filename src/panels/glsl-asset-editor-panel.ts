@@ -10,6 +10,7 @@ import { buildResourceTree, type ResourceTreeNode } from '../resources/resource-
 import { createPhoenixAssetClient } from '../phoenix/asset-client';
 import { addAssetImpactEvents } from '../phoenix/asset-impact-events';
 import { writeAllowedAssetFile } from '../phoenix/asset-operations';
+import { installPoolPathDrop } from '../resources/pool-path-drop';
 import { createContentRenderer } from './base-panel';
 import { CACABLU_CODE_THEME, registerCacabluCodeTheme } from './code-editor-theme';
 
@@ -79,6 +80,7 @@ export function createGlslAssetEditorPanel(
       padding: { top: 8, bottom: 8 },
       scrollBeyondLastLine: false,
     });
+    const disposePoolPathDrop = installPoolPathDrop(editor, code);
     const editorModel = editor.getModel();
     if (editorModel) {
       monaco.editor.setModelLanguage(editorModel, 'glsl');
@@ -197,6 +199,7 @@ export function createGlslAssetEditorPanel(
     return () => {
       unsubscribeState();
       unsubscribeDb();
+      disposePoolPathDrop();
       editor?.dispose();
       editor = null;
     };

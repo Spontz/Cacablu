@@ -409,6 +409,8 @@ async function sectionManifestMatches(
 
     const other = actualById.get(entry.id);
     if (!other) return false;
+    // Persisted section content is reusable only when Phoenix confirms that its runtime instance loaded.
+    if (other.loaded !== true) return false;
     if (
       other.type !== entry.type ||
       other.startTime !== entry.startTime ||

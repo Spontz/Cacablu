@@ -5,6 +5,7 @@ import type { DbState } from '../state/db-state';
 import type { DbSessionRef } from '../db/db-session';
 import type { ConnectionController } from '../ws/connection';
 import type { UndoManager } from '../app/undo-manager';
+import type { AssetClipboard } from '../resources/asset-clipboard';
 import { createContentRenderer } from './base-panel';
 import { createDbExplorerPanel } from './db-explorer-panel';
 import { createEventsPanel } from './events-panel';
@@ -28,12 +29,13 @@ export function createPanelRegistry(
   sessionRef: DbSessionRef,
   connection: ConnectionController,
   undoManager: UndoManager,
+  assetClipboard: AssetClipboard,
 ): PanelRegistry {
   return {
     create(name: string): IContentRenderer {
       switch (name) {
         case 'resources-panel':
-          return createResourcesPanel(state, dbState, sessionRef, connection);
+          return createResourcesPanel(state, dbState, sessionRef, connection, assetClipboard);
         case 'timeline-panel':
           return createTimelinePanel(state, dbState, sessionRef, connection, undoManager);
         case 'preview-panel':

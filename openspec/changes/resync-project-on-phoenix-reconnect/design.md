@@ -2,7 +2,7 @@
 
 Cacablu currently records project/Phoenix synchronization with a process-local `pending | synced` flag. Opening a project while Phoenix is connected runs pool, demo-settings, and section synchronization. A later disconnect does not invalidate `synced`, so the disconnected-to-connected callback neither resynchronizes nor prompts. Meanwhile Phoenix is a new process whose runtime sections and disk state may be stale.
 
-Phoenix's existing APIs already support recursive `pool`/`resources` deletion, asset writes, configuration writes, and full section replacement. Cacablu must orchestrate those operations as one generation and must not let ordinary manifest shortcuts skip work after reconnect.
+Phoenix's existing APIs already support recursive `pool`/`resources` deletion, asset writes, configuration writes, and full section replacement. Cacablu must orchestrate those operations as one generation and must not let ordinary manifest shortcuts skip work after reconnect. Directory deletion must first deactivate dependent sections and release cached video ownership so Windows can remove open media files.
 
 ## Goals / Non-Goals
 
@@ -54,9 +54,13 @@ Alternative considered: always delete the literal active `data` directory or `po
 
 Asset failures, configuration failures, section failures, cancellation, or disconnect keep the generation pending. Existing Events and the synchronization modal report the failing phase. A later reconnect retries the complete sequence from its destructive first step.
 
+Pool reconstruction verifies both destructive boundaries: after recursive deletion the Phoenix pool manifest must be empty, and after upload it must exactly match the current project snapshot. Each mismatch reports its first differing path and reason. This prevents a successful HTTP response from hiding a non-convergent disk state and avoids presenting skipped assets as an active copy phase when the initial manifest already matches.
+
 Request-level failures remain fatal to the synchronization generation, but bar-level validation failures are collected before transmission. Cacablu first rounds section start/end times to three decimal places, then sends one `replaceAll` request containing only representable enabled bars, records an issue for every omitted bar, and allows project loading to finish. This prevents Phoenix's all-or-nothing request parser from rejecting valid sections alongside a malformed section. Rounded timing values must be finite and either zero or representable as a non-subnormal 32-bit float because Phoenix parses them with `std::stof`; layers must be 32-bit integers and time ranges must be ordered.
 
-The conversion belongs to Cacablu's section serializer; Phoenix remains unchanged. This also converts legacy floating-point residue near zero to `0.000`, matching the database's millisecond precision, while genuinely invalid values remain associated with red Timeline bars.
+The timing conversion belongs to Cacablu's section serializer and does not require Phoenix parser changes. This also converts legacy floating-point residue near zero to `0.000`, matching the database's millisecond precision, while genuinely invalid values remain associated with red Timeline bars.
+
+Phoenix's section manifest includes the existing runtime `Section::loaded` state for every entry. Cacablu may skip an ordinary project-open replacement only when serialized content matches and every corresponding manifest entry explicitly reports `loaded: true`. A matching entry with `loaded: false` is retried after asset synchronization, allowing repaired dependencies to recover; a missing flag from an older Phoenix build is treated as unknown and retried safely. The replacement response remains the source of detailed per-section failure messages, so Phoenix does not need a second persistent error store.
 
 ### Keep transport and loop state outside the Timeline panel lifecycle
 
@@ -87,7 +91,7 @@ Alternative considered: activate Events for each error. This interrupts editing 
 2. Replace the prompt-based reconnect branch with the serialized coordinator.
 3. Add reconnection, duplicate notification, disconnect-during-sync, and project-switch tests.
 4. Add transport-disconnect and active-loop lifecycle coverage.
-5. Keep existing Phoenix API operations unchanged.
+5. Extend section-manifest entries with runtime load state and release runtime video handles before deleting the managed pool.
 
 Rollback consists of restoring the prompt-based connection branch and removing the forced options; no project database migration is required.
 

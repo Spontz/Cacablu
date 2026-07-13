@@ -55,28 +55,45 @@ export async function syncPublishedPoolFilesToPhoenix(
   throwIfAborted(options.signal);
   const manifest = await client.fetchManifest(options.signal);
   // Cacablu owns the published pool snapshot; resources and bootstrap files remain Phoenix-owned here.
-  let phoenixFiles = new Map(
-    manifest.entries
-      .filter((entry) => entry.kind === 'file' && entry.path.startsWith('pool/'))
-      .map((entry) => [entry.path, entry]),
-  );
-  const needsClean = !poolManifestMatchesPublishedFiles(phoenixFiles, files);
+  let phoenixFiles = poolFilesFromManifest(manifest.entries);
+  const firstDifference = describeFirstPoolDifference(phoenixFiles, files);
 
-  if (needsClean) {
-    throwIfAborted(options.signal);
+  if (!firstDifference) {
+    const result = { total: files.length, copied: 0, skipped: files.length, failed: 0 };
     onProgress({
-      phase: 'cleaning',
-      current: 0,
+      phase: 'complete',
+      current: files.length,
       total: files.length,
       copied: 0,
-      skipped: 0,
+      skipped: files.length,
       failed: 0,
-      message: 'Clearing Phoenix pool before sync...',
+      message: `Phoenix pool already matches: 0 copied, ${files.length} skipped.`,
     });
-    await client.deleteDirectory('pool', true, options.signal);
-    throwIfAborted(options.signal);
-    await client.createDirectory('pool', options.signal);
-    phoenixFiles = new Map();
+    return result;
+  }
+
+  throwIfAborted(options.signal);
+  onProgress({
+    phase: 'cleaning',
+    current: 0,
+    total: files.length,
+    copied: 0,
+    skipped: 0,
+    failed: 0,
+    message: `Clearing Phoenix pool: ${firstDifference}`,
+  });
+  const deleteResult = await client.deleteDirectory('pool', true, options.signal);
+  requireSuccessfulOperation(deleteResult, 'delete Phoenix pool');
+  throwIfAborted(options.signal);
+  const createResult = await client.createDirectory('pool', options.signal);
+  requireSuccessfulOperation(createResult, 'recreate Phoenix pool');
+
+  // Do not upload into a pool that Phoenix reported as deleted but still exposes stale files.
+  const cleanedManifest = await client.fetchManifest(options.signal);
+  phoenixFiles = poolFilesFromManifest(cleanedManifest.entries);
+  if (phoenixFiles.size > 0) {
+    const firstRemaining = [...phoenixFiles.keys()].sort((a, b) => a.localeCompare(b))[0];
+    throw new Error(`Phoenix pool cleanup did not converge; first remaining file: ${firstRemaining}`);
   }
 
   let copied = 0;
@@ -113,7 +130,8 @@ export async function syncPublishedPoolFilesToPhoenix(
       message: `Copying ${file.path} to Phoenix...`,
     });
     try {
-      await client.writeFile(file.path, file.data, options.signal);
+      const writeResult = await client.writeFile(file.path, file.data, options.signal);
+      requireSuccessfulOperation(writeResult, `copy ${file.path}`);
       copied += 1;
     } catch {
       throwIfAborted(options.signal);
@@ -128,6 +146,16 @@ export async function syncPublishedPoolFilesToPhoenix(
         path: file.path,
         message: `Could not copy ${file.path}; continuing...`,
       });
+    }
+  }
+
+  if (failed === 0) {
+    throwIfAborted(options.signal);
+    const rebuiltManifest = await client.fetchManifest(options.signal);
+    const rebuiltFiles = poolFilesFromManifest(rebuiltManifest.entries);
+    const remainingDifference = describeFirstPoolDifference(rebuiltFiles, files);
+    if (remainingDifference) {
+      throw new Error(`Phoenix pool rebuild did not converge: ${remainingDifference}`);
     }
   }
 
@@ -151,18 +179,42 @@ function throwIfAborted(signal?: AbortSignal): void {
   throw signal.reason instanceof Error ? signal.reason : new DOMException('Pool sync cancelled.', 'AbortError');
 }
 
-function poolManifestMatchesPublishedFiles(
+function describeFirstPoolDifference(
   phoenixFiles: Map<string, { size?: number; hash?: string }>,
   files: PublishedPoolFile[],
-): boolean {
-  if (phoenixFiles.size !== files.length) return false;
-
+): string | null {
   for (const file of files) {
     const existing = phoenixFiles.get(file.path);
-    if (existing?.size !== file.bytes || existing.hash !== file.hash) return false;
+    if (!existing) return `missing file ${file.path}`;
+    if (existing.size !== file.bytes) {
+      return `size differs for ${file.path} (${existing.size ?? 'unknown'} in Phoenix, ${file.bytes} in project)`;
+    }
+    if (existing.hash !== file.hash) return `hash differs for ${file.path}`;
   }
 
-  return true;
+  const projectPaths = new Set(files.map((file) => file.path));
+  const extraPath = [...phoenixFiles.keys()]
+    .filter((path) => !projectPaths.has(path))
+    .sort((a, b) => a.localeCompare(b))[0];
+  return extraPath ? `extra file ${extraPath}` : null;
+}
+
+function poolFilesFromManifest(
+  entries: Array<{ path: string; kind: string; size?: number; hash?: string }>,
+): Map<string, { size?: number; hash?: string }> {
+  return new Map(
+    entries
+      .filter((entry) => entry.kind === 'file' && entry.path.startsWith('pool/'))
+      .map((entry) => [entry.path, entry]),
+  );
+}
+
+function requireSuccessfulOperation(
+  result: { ok: boolean; message?: string },
+  operation: string,
+): void {
+  if (result.ok) return;
+  throw new Error(result.message ? `Could not ${operation}: ${result.message}` : `Could not ${operation}.`);
 }
 
 export function collectPublishedPoolFiles(db: ProjectDatabase): PublishedPoolFile[] {

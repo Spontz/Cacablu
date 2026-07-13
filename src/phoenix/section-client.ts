@@ -1,3 +1,5 @@
+import { phoenixFetch } from './activity';
+
 const PHOENIX_HTTP_BASE = 'http://127.0.0.1:29100';
 
 export interface PhoenixSectionManifestEntry {
@@ -12,6 +14,7 @@ export interface PhoenixSectionManifestEntry {
   blendingEQ: string;
   contentHash: string;
   size: number;
+  loaded?: boolean;
 }
 
 export interface PhoenixSectionManifest {
@@ -72,7 +75,7 @@ export function createPhoenixSectionClient(baseUrl = PHOENIX_HTTP_BASE): Phoenix
   async function requestJson(path: string, init?: RequestInit): Promise<unknown> {
     let response: Response;
     try {
-      response = await fetch(`${base}${path}`, {
+      response = await phoenixFetch(`${base}${path}`, {
         ...init,
         headers: {
           'Content-Type': 'application/json',
@@ -176,6 +179,7 @@ export function normalizeSectionManifest(input: unknown): PhoenixSectionManifest
       blendingEQ: value.blendingEQ,
       contentHash: value.contentHash,
       size: value.size,
+      loaded: typeof value.loaded === 'boolean' ? value.loaded : undefined,
     });
   }
 

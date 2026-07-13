@@ -7,6 +7,11 @@
 - [x] 1.5 Add unit tests proving forced section sync calls `replaceAll` even when manifests match and includes every current enabled supported bar.
 - [x] 1.6 Round section timing to three decimal places in Cacablu, validate enabled bars against Phoenix's numeric constraints, omit malformed bars from batch requests, and report bar-specific issues.
 - [x] 1.7 Ensure all-invalid section snapshots do not abort local project loading and add regression coverage for mixed valid/invalid and all-invalid projects.
+- [x] 1.8 Short-circuit exact pool matches with `0 copied, N skipped` and report the first manifest difference that requires rebuilding.
+- [x] 1.9 Verify pool emptiness after cleanup and exact manifest convergence after upload; fail the sync generation when either check fails.
+- [x] 1.10 Add regression coverage for exact-match progress, stale files surviving cleanup, and a non-matching rebuilt manifest.
+- [x] 1.11 Expose Phoenix runtime load state in section manifest entries and require explicit `loaded: true` before Cacablu skips an ordinary section replacement.
+- [x] 1.12 Add regression coverage for matching loaded sections, matching failed sections, and legacy manifests without runtime load state.
 
 ## 2. Reconnect Synchronization Coordinator
 
@@ -21,8 +26,9 @@
 ## 3. Ownership and Phoenix API Coverage
 
 - [x] 3.1 Document in code the Cacablu-managed `data` roots versus Phoenix-owned bootstrap files and verify current scoped asset/section APIs remove all stale managed content.
-- [x] 3.2 If current APIs cannot clear a managed subtree safely, add the smallest Phoenix editor API operation needed, with active-data-root confinement and path traversal protection. (Existing scoped APIs are sufficient; no Phoenix change required.)
+- [x] 3.2 Reuse the existing scoped Phoenix directory API without broadening its active-data-root confinement or path traversal surface.
 - [x] 3.3 Ensure full section replacement removes stale editor-published root `.spo` files before recreating the current project snapshot.
+- [x] 3.4 Deactivate dependent sections and release cached video handles before Phoenix recursively deletes the managed pool on Windows.
 
 ## 4. Integration Verification
 
@@ -30,7 +36,7 @@
 - [x] 4.2 Add coverage that connecting without a project performs no destructive Phoenix operations.
 - [x] 4.3 Add coverage for duplicate connected notifications, disconnect during synchronization, and switching projects during synchronization.
 - [x] 4.4 Verify a failed reconnect generation remains pending and a later reconnect retries the complete sequence.
-- [x] 4.5 Run Cacablu typecheck/unit tests and the relevant Phoenix build/tests when Phoenix API changes are required. (No Phoenix API changes were needed.)
+- [x] 4.5 Run Cacablu typecheck/unit tests and rebuild Phoenix after the directory-delete lifecycle correction.
 - [x] 4.6 Stop Timeline playback extrapolation immediately when Phoenix disconnects and verify the current time remains frozen.
 - [x] 4.7 Store the selected loop in shared Cacablu state and restore it in Phoenix after reconnect section synchronization.
 - [x] 4.8 Hydrate each Timeline panel instance from the shared active loop so closing and reopening the panel preserves its indicator.

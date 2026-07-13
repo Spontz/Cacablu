@@ -1,3 +1,5 @@
+import { phoenixFetch } from './activity';
+
 const PHOENIX_HTTP_BASE = 'http://127.0.0.1:29100';
 
 export const GRAPHICS_FBO_FORMATS = [
@@ -59,7 +61,7 @@ export function createPhoenixGraphicsClient(baseUrl = PHOENIX_HTTP_BASE): Phoeni
   async function requestJson(path: string, init?: RequestInit): Promise<unknown> {
     let response: Response;
     try {
-      response = await fetch(`${base}${path}`, {
+      response = await phoenixFetch(`${base}${path}`, {
         ...init,
         headers: {
           'Content-Type': 'application/json',
