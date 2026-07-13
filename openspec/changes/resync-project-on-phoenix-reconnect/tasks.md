@@ -5,6 +5,8 @@
 - [x] 1.3 Ensure reconnect asset synchronization reports scanning/cleaning/copying progress accurately and propagates cancellation or connection failures.
 - [x] 1.4 Add unit tests proving reconnect asset sync skips an exact match, rebuilds differing content, and clears stale Phoenix assets for an empty project.
 - [x] 1.5 Add unit tests proving forced section sync calls `replaceAll` even when manifests match and includes every current enabled supported bar.
+- [x] 1.6 Round section timing to three decimal places in Cacablu, validate enabled bars against Phoenix's numeric constraints, omit malformed bars from batch requests, and report bar-specific issues.
+- [x] 1.7 Ensure all-invalid section snapshots do not abort local project loading and add regression coverage for mixed valid/invalid and all-invalid projects.
 
 ## 2. Reconnect Synchronization Coordinator
 
@@ -32,3 +34,4 @@
 - [x] 4.6 Stop Timeline playback extrapolation immediately when Phoenix disconnects and verify the current time remains frozen.
 - [x] 4.7 Store the selected loop in shared Cacablu state and restore it in Phoenix after reconnect section synchronization.
 - [x] 4.8 Hydrate each Timeline panel instance from the shared active loop so closing and reopening the panel preserves its indicator.
+- [x] 4.9 Verify the attached project's near-zero `startTime` is converted to zero in Cacablu, both sections synchronize, and project loading completes.

@@ -25,7 +25,7 @@ export interface ProjectSectionSyncIssue {
   barId: number;
   sectionType: string;
   description: string;
-  kind: 'unsupported-type' | 'load-failed';
+  kind: 'unsupported-type' | 'invalid-payload' | 'load-failed';
 }
 
 export class ProjectSectionSyncError extends Error {
@@ -58,9 +58,6 @@ export async function syncProjectBarsToPhoenix(
 ): Promise<ProjectSectionSyncResult> {
   throwIfAborted(options.signal);
   const { sections, issues } = collectPhoenixSections(db);
-  if (sections.length === 0 && issues.length > 0) {
-    throw new ProjectSectionSyncError(issues);
-  }
 
   if (!options.forceReplace) {
     const expected = await buildExpectedSectionManifestEntries(sections, onProgress, options.signal);
@@ -257,35 +254,82 @@ async function buildExpectedSectionManifestEntries(
 
 export function collectPhoenixSections(db: Pick<ProjectDatabase, 'bars'>): ProjectSectionCollection {
   const bars = [...db.bars].filter((bar) => bar.enabled).sort(compareBarsForPhoenixLoad);
-  const issues = bars
-    .filter((bar) => bar.type.trim() !== '')
-    .map((bar) => {
-      const sectionType = bar.type.trim();
-      return {
+  const sections: PhoenixSectionPayload[] = [];
+  const issues: ProjectSectionSyncIssue[] = [];
+
+  for (const bar of bars) {
+    const sectionType = bar.type.trim();
+    if (!isSupportedPhoenixSectionType(sectionType)) {
+      issues.push({
         barId: bar.id,
         sectionType,
         description: `Bar ${bar.id} was not sent to Phoenix because "${sectionType}" is not a supported Phoenix section type.`,
-        kind: 'unsupported-type' as const,
-      };
-    })
-    .filter((issue) => !isSupportedPhoenixSectionType(issue.sectionType));
+        kind: 'unsupported-type',
+      });
+      continue;
+    }
 
-  const sections = bars
-    .filter((bar) => isSupportedPhoenixSectionType(bar.type))
-    .map((bar) => ({
+    const startTime = roundPhoenixSectionTime(bar.startTime);
+    const endTime = roundPhoenixSectionTime(bar.endTime);
+    const invalidReason = getInvalidPhoenixSectionReason(bar, startTime, endTime);
+    if (invalidReason) {
+      issues.push({
+        barId: bar.id,
+        sectionType,
+        description: `Bar ${bar.id} was not sent to Phoenix because ${invalidReason}.`,
+        kind: 'invalid-payload',
+      });
+      continue;
+    }
+
+    sections.push({
       id: String(bar.id),
-      type: bar.type.trim(),
-      startTime: bar.startTime,
-      endTime: bar.endTime,
+      type: sectionType,
+      startTime,
+      endTime,
       enabled: bar.enabled,
       layer: bar.layer,
       srcBlending: bar.srcBlending,
       dstBlending: bar.dstBlending,
       blendingEQ: bar.blendingEQ,
       scriptBase64: textToBase64(normalizeSectionScriptLineEndings(toText(bar.script))),
-    }));
+    });
+  }
 
   return { sections, issues };
+}
+
+const PHOENIX_FLOAT_MIN_NORMAL = 1.1754943508222875e-38;
+const PHOENIX_FLOAT_MAX = 3.4028234663852886e38;
+const PHOENIX_INT_MIN = -2_147_483_648;
+const PHOENIX_INT_MAX = 2_147_483_647;
+
+function getInvalidPhoenixSectionReason(
+  bar: ProjectDatabase['bars'][number],
+  startTime: number,
+  endTime: number,
+): string | null {
+  if (!Number.isSafeInteger(bar.id) || bar.id < 0) return 'its id is invalid';
+  if (!isPhoenixFloat(startTime) || !isPhoenixFloat(endTime)) {
+    return 'its timing cannot be represented by Phoenix';
+  }
+  if (endTime < startTime) return 'its end time is earlier than its start time';
+  if (!Number.isInteger(bar.layer) || bar.layer < PHOENIX_INT_MIN || bar.layer > PHOENIX_INT_MAX) {
+    return 'its layer is not a 32-bit integer';
+  }
+  return null;
+}
+
+function roundPhoenixSectionTime(value: number): number {
+  if (!Number.isFinite(value)) return value;
+  const rounded = Number(value.toFixed(3));
+  return Object.is(rounded, -0) ? 0 : rounded;
+}
+
+function isPhoenixFloat(value: number): boolean {
+  if (!Number.isFinite(value)) return false;
+  const magnitude = Math.abs(value);
+  return magnitude === 0 || (magnitude >= PHOENIX_FLOAT_MIN_NORMAL && magnitude <= PHOENIX_FLOAT_MAX);
 }
 
 function compareBarsForPhoenixLoad(

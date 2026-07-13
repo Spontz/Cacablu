@@ -52,3 +52,10 @@ Cacablu SHALL synchronize committed timeline bar changes to Phoenix using the ex
 #### Scenario: Timeline displays section errors
 - **WHEN** Cacablu has tracked section error ids from section sync or asset impact responses
 - **THEN** matching timeline bars are colored red until those ids are cleared by successful resync or project reset.
+
+#### Scenario: Project open contains a malformed section
+- **GIVEN** Phoenix is already connected
+- **WHEN** the user opens a project containing a bar that cannot be represented by Phoenix
+- **THEN** the project still opens locally
+- **AND** valid bars and assets continue synchronizing
+- **AND** the malformed bar is colored red in the Timeline.

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { collectPhoenixSections, isSupportedPhoenixSectionType, ProjectSectionSyncError, syncProjectBarsToPhoenix } from '../../src/services/project-section-sync';
+import { collectPhoenixSections, isSupportedPhoenixSectionType, syncProjectBarsToPhoenix } from '../../src/services/project-section-sync';
 import type { ProjectDatabase } from '../../src/db/db-schema';
 
 function makeDb(): Pick<ProjectDatabase, 'bars'> {
@@ -113,6 +113,14 @@ describe('project section sync', () => {
 
     const script = decodeBase64(result.sections[0].scriptBase64);
     expect(script).toBe('sModelFilePath /pool/model.3ds\r\nfEnableDepthBufferClearing 0\r\n[shader]\r\npath /pool/shader.glsl\r\n');
+  });
+
+  it('rounds section timing to three decimal places before sending it to Phoenix', () => {
+    const result = collectPhoenixSections({
+      bars: [{ ...makeDb().bars[0], startTime: 1.23456, endTime: 4.56789 }],
+    });
+
+    expect(result.sections[0]).toMatchObject({ startTime: 1.235, endTime: 4.568 });
   });
 
   it('replaces Phoenix sections when the manifest differs', async () => {
@@ -237,6 +245,57 @@ describe('project section sync', () => {
     expect(result.issues[0]).toMatchObject({ barId: 165, sectionType: 'setVariable' });
   });
 
+  it('rounds the attached project timing residue to zero and sends both sections', async () => {
+    const replaceAll = vi.fn().mockResolvedValue({
+      requestId: 'sections-test',
+      ok: true,
+      operation: 'replace-all',
+      received: 2,
+      loaded: 2,
+      failed: 0,
+      writtenFiles: 1,
+      deletedFiles: [],
+      failedSections: [],
+    });
+
+    const result = await syncProjectBarsToPhoenix({
+      bars: [
+        { ...makeDb().bars[0], id: 22, type: 'drawVideo', startTime: -1.2578179228199107e-306, endTime: 45 },
+        { ...makeDb().bars[0], id: 23, type: 'cameraFPS', layer: 0, startTime: 0, endTime: 44.44 },
+      ],
+    }, {
+      fetchManifest: vi.fn().mockResolvedValue({ root: 'phoenix-engine', entries: [] }),
+      replaceAll,
+    }, () => {});
+
+    expect(replaceAll).toHaveBeenCalledWith(
+      [
+        expect.objectContaining({ id: '23', type: 'cameraFPS', startTime: 0, endTime: 44.44 }),
+        expect.objectContaining({ id: '22', type: 'drawVideo', startTime: 0, endTime: 45 }),
+      ],
+      undefined,
+      expect.stringMatching(/^sections-/),
+    );
+    expect(result).toMatchObject({ total: 2, valid: 2, invalid: 0, replaced: true, issues: [] });
+  });
+
+  it('reports invalid Phoenix time ranges and layers per bar', () => {
+    const result = collectPhoenixSections({
+      bars: [
+        { ...makeDb().bars[0], id: 20, startTime: 5, endTime: 4 },
+        { ...makeDb().bars[0], id: 21, layer: 1.5 },
+        { ...makeDb().bars[0], id: 22, endTime: Number.POSITIVE_INFINITY },
+      ],
+    });
+
+    expect(result.sections).toEqual([]);
+    expect(result.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({ barId: 20, kind: 'invalid-payload', description: expect.stringContaining('end time') }),
+      expect.objectContaining({ barId: 21, kind: 'invalid-payload', description: expect.stringContaining('32-bit integer') }),
+      expect.objectContaining({ barId: 22, kind: 'invalid-payload', description: expect.stringContaining('timing') }),
+    ]));
+  });
+
   it('reports sections that Phoenix receives but cannot load', async () => {
     const result = await syncProjectBarsToPhoenix(makeDb(), {
       fetchManifest: vi.fn().mockResolvedValue({ root: 'phoenix-engine', entries: [] }),
@@ -261,13 +320,18 @@ describe('project section sync', () => {
     }]);
   });
 
-  it('fails when every bar is invalid', async () => {
-    await expect(syncProjectBarsToPhoenix({
-      bars: [{ ...makeDb().bars[0], id: 165, type: 'setVariable' }],
+  it('completes without sending a request when every bar is invalid and Phoenix is already empty', async () => {
+    const replaceAll = vi.fn();
+    const result = await syncProjectBarsToPhoenix({
+      bars: [{ ...makeDb().bars[0], id: 22, startTime: Number.NaN }],
     }, {
-      fetchManifest: vi.fn(),
-      replaceAll: vi.fn(),
-    }, () => {})).rejects.toBeInstanceOf(ProjectSectionSyncError);
+      fetchManifest: vi.fn().mockResolvedValue({ root: 'phoenix-engine', entries: [] }),
+      replaceAll,
+    }, () => {});
+
+    expect(replaceAll).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ total: 1, valid: 0, invalid: 1, replaced: false });
+    expect(result.issues).toEqual([expect.objectContaining({ barId: 22, kind: 'invalid-payload' })]);
   });
 });
 

@@ -13,6 +13,7 @@ Phoenix's existing APIs already support recursive `pool`/`resources` deletion, a
 - Coalesce duplicate connected notifications and prevent overlapping full syncs.
 - Leave a failed or interrupted generation pending for retry.
 - Freeze the Timeline transport while Phoenix is offline and preserve the active loop independently of the Timeline panel lifecycle.
+- Keep project loading successful when individual bars cannot be represented by Phoenix, while highlighting those bars as errors and synchronizing every valid bar.
 
 **Non-Goals:**
 - Delete Phoenix bootstrap files that Cacablu cannot recreate, such as installation-owned loader/configuration templates.
@@ -51,6 +52,10 @@ Alternative considered: always delete the literal active `data` directory or `po
 ### Report errors without accepting partial synchronization as complete
 
 Asset failures, configuration failures, section failures, cancellation, or disconnect keep the generation pending. Existing Events and the synchronization modal report the failing phase. A later reconnect retries the complete sequence from its destructive first step.
+
+Request-level failures remain fatal to the synchronization generation, but bar-level validation failures are collected before transmission. Cacablu first rounds section start/end times to three decimal places, then sends one `replaceAll` request containing only representable enabled bars, records an issue for every omitted bar, and allows project loading to finish. This prevents Phoenix's all-or-nothing request parser from rejecting valid sections alongside a malformed section. Rounded timing values must be finite and either zero or representable as a non-subnormal 32-bit float because Phoenix parses them with `std::stof`; layers must be 32-bit integers and time ranges must be ordered.
+
+The conversion belongs to Cacablu's section serializer; Phoenix remains unchanged. This also converts legacy floating-point residue near zero to `0.000`, matching the database's millisecond precision, while genuinely invalid values remain associated with red Timeline bars.
 
 ### Keep transport and loop state outside the Timeline panel lifecycle
 

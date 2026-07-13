@@ -26,3 +26,35 @@ Cacablu SHALL synchronize project database bars to Phoenix runtime sections when
 - **WHEN** a project synchronization requires both asset uploads and section replacement
 - **THEN** Cacablu completes the asset and project-settings phases before requesting section replacement
 - **AND** section scripts that reference published assets can resolve current files from Phoenix's active `data` folder.
+
+### Requirement: Invalid bars do not abort project loading
+Cacablu SHALL round section start/end times to three decimal places, validate each enabled project bar before sending a section batch, and isolate bar-level failures from valid sections.
+
+#### Scenario: Section timing has more than three decimal places
+- **WHEN** Cacablu serializes an enabled bar for Phoenix
+- **THEN** Cacablu rounds its start and end times to three decimal places before transmission
+- **AND** Phoenix receives the converted numeric times.
+
+#### Scenario: Legacy timing contains near-zero floating-point residue
+- **WHEN** an enabled bar has a finite start or end time whose magnitude rounds to zero at three decimal places
+- **THEN** Cacablu sends that time as zero
+- **AND** the residue does not cause Phoenix to reject the section batch.
+
+#### Scenario: One enabled bar has timing Phoenix cannot represent
+- **GIVEN** a project contains both valid enabled bars and an enabled bar whose timing remains non-finite or outside Phoenix's 32-bit floating-point range after conversion
+- **WHEN** Cacablu synchronizes project sections
+- **THEN** Cacablu omits only the invalid bar from the Phoenix request
+- **AND** Cacablu sends every valid enabled supported bar
+- **AND** project loading finishes
+- **AND** Cacablu marks the invalid bar as a section error so the Timeline displays it in red.
+
+#### Scenario: Enabled bar has an invalid layer or time range
+- **WHEN** an enabled bar has a non-integer or out-of-range 32-bit layer, or its end time is earlier than its start time
+- **THEN** Cacablu does not send that bar to Phoenix
+- **AND** Cacablu reports an issue associated with that bar id
+- **AND** other valid bars continue synchronizing.
+
+#### Scenario: Every enabled bar is invalid
+- **WHEN** no enabled project bar can be represented as a Phoenix section
+- **THEN** section synchronization completes without aborting local project loading
+- **AND** every invalid bar is marked as a section error.
