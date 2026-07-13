@@ -14,6 +14,7 @@ Phoenix's existing APIs already support recursive `pool`/`resources` deletion, a
 - Leave a failed or interrupted generation pending for retry.
 - Freeze the Timeline transport while Phoenix is offline and preserve the active loop independently of the Timeline panel lifecycle.
 - Keep project loading successful when individual bars cannot be represented by Phoenix, while highlighting those bars as errors and synchronizing every valid bar.
+- Surface new errors without interrupting the current workspace by opening Events as an inactive tab and keeping a visible red error indicator in its title.
 
 **Non-Goals:**
 - Delete Phoenix bootstrap files that Cacablu cannot recreate, such as installation-owned loader/configuration templates.
@@ -64,6 +65,12 @@ When Phoenix disconnects, Timeline immediately sets its transport to not playing
 The selected loop interval is stored in shared `AppState`, not only inside the Timeline renderer closure. Reconnect synchronization reads that interval after section replacement and sends it through the existing runtime loop client. Every new Timeline panel instance hydrates its local loop from `AppState`, so closing and reopening the panel restores the indicator without changing Phoenix state.
 
 Alternative considered: keep the loop only in the panel and query Phoenix when reopening. That loses the editor selection while Phoenix is offline and makes Phoenix, rather than Cacablu, the source of truth.
+
+### Notify errors without stealing focus
+
+`AppState` increments an error revision whenever one or more new error events are added. The shell compares revisions and newly tracked section-error ids. When Events is closed, it opens it with Dockview's native inactive-panel option. If an error arrives while a project is still opening and Timeline has temporarily been closed, the shell defers Events until Timeline is restored, then inserts Events inactive within Timeline's tab group. The user's active panel and keyboard focus remain unchanged. Events explicitly selects the registered `shell-tab` renderer (registering a `createTabComponent` factory alone does not make Dockview use it). That renderer displays a separate red dot while new errors remain unread. Activating Events marks the notification as read and removes the dot without deleting its events or clearing Timeline section errors. Section validation issues are added to Events as well as to the Timeline error-id set.
+
+Alternative considered: activate Events for each error. This interrupts editing and can repeatedly move focus during a synchronization that emits several errors.
 
 ## Risks / Trade-offs
 

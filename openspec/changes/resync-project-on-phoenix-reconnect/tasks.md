@@ -35,3 +35,8 @@
 - [x] 4.7 Store the selected loop in shared Cacablu state and restore it in Phoenix after reconnect section synchronization.
 - [x] 4.8 Hydrate each Timeline panel instance from the shared active loop so closing and reopening the panel preserves its indicator.
 - [x] 4.9 Verify the attached project's near-zero `startTime` is converted to zero in Cacablu, both sections synchronize, and project loading completes.
+- [x] 4.10 Track newly added error events independently from warnings/info and automatically open Events as an inactive Dockview tab without changing focus.
+- [x] 4.11 Add a red error dot to the Events tab title, record local section validation issues as error events, and add focused state/UI regression coverage.
+- [x] 4.12 Defer error-triggered Events creation during project opening until Timeline is restored, include newly tracked section-error ids, and verify the real load ordering.
+- [x] 4.13 Explicitly select the notification-aware Dockview tab component for Events and verify the rendered red indicator in a browser.
+- [x] 4.14 Track the red Events indicator as an unread-error notification and clear it when the Events panel becomes active without clearing error data.

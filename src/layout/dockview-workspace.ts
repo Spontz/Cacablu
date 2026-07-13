@@ -24,6 +24,7 @@ export interface DockviewWorkspace {
 
 interface OpenPanelOptions {
   widthRatio?: number;
+  activate?: boolean;
 }
 
 export function createDockviewWorkspace(options: WorkspaceOptions): DockviewWorkspace {
@@ -41,13 +42,17 @@ export function createDockviewWorkspace(options: WorkspaceOptions): DockviewWork
       id: panel.id,
       component: panel.component,
       title: panel.title,
+      ...(panel.id === 'events' ? { tabComponent: 'shell-tab' } : {}),
       renderer: 'always',
+      inactive: panelOptions.activate === false,
       ...(initialWidth ? { initialWidth } : {}),
       ...(position ? { position } : {}),
     });
 
-    dockview.setActivePanel(addedPanel);
-    addedPanel.focus();
+    if (panelOptions.activate !== false) {
+      dockview.setActivePanel(addedPanel);
+      addedPanel.focus();
+    }
   }
 
   function getInitialWidth(options: OpenPanelOptions): number | null {
@@ -127,8 +132,10 @@ export function createDockviewWorkspace(options: WorkspaceOptions): DockviewWork
 
       const panel = dockview.getGroupPanel(panelId);
       if (panel) {
-        dockview.setActivePanel(panel);
-        panel.focus();
+        if (panelOptions.activate !== false) {
+          dockview.setActivePanel(panel);
+          panel.focus();
+        }
         return;
       }
 
@@ -208,7 +215,12 @@ function createShellTab(state: AppState): ITabRenderer {
   badge.className = 'shell-tab__badge';
   badge.hidden = true;
 
-  element.append(label, badge);
+  const errorDot = document.createElement('span');
+  errorDot.className = 'shell-tab__error-dot';
+  errorDot.hidden = true;
+  errorDot.setAttribute('aria-hidden', 'true');
+
+  element.append(label, errorDot, badge);
 
   let params: TabPartInitParameters | null = null;
   let unsubscribe: (() => void) | null = null;
@@ -217,12 +229,17 @@ function createShellTab(state: AppState): ITabRenderer {
     if (!params) return;
 
     label.textContent = params.api.title ?? params.api.id;
-    const unread = state.getSnapshot().unreadEventCount;
+    const snapshot = state.getSnapshot();
+    const unread = snapshot.unreadEventCount;
     const showBadge = params.api.id === 'events' && unread > 0;
+    const showErrorDot = params.api.id === 'events' && snapshot.hasUnreadErrors;
     badge.hidden = !showBadge;
     badge.textContent = unread > 99 ? '99+' : String(unread);
+    errorDot.hidden = !showErrorDot;
     element.dataset.panelId = params.api.id;
     element.dataset.hasUnread = showBadge ? 'true' : 'false';
+    element.dataset.hasErrors = showErrorDot ? 'true' : 'false';
+    element.title = showErrorDot ? 'Events contains errors' : '';
   }
 
   return {

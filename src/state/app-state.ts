@@ -33,6 +33,8 @@ const INITIAL_SNAPSHOT: AppSnapshot = {
   assetSelection: { kind: 'none' },
   events: [],
   unreadEventCount: 0,
+  hasUnreadErrors: false,
+  errorEventRevision: 0,
   displayTimelineIds: false,
   sectionErrorIds: [],
   activeLoop: null,
@@ -66,6 +68,7 @@ export function createAppState(): AppState {
       snapshot = {
         ...snapshot,
         activePanelId: panelId,
+        ...(panelId === 'events' ? { unreadEventCount: 0, hasUnreadErrors: false } : {}),
       };
       publish();
     },
@@ -148,7 +151,10 @@ export function createAppState(): AppState {
       snapshot = {
         ...snapshot,
         events: [...nextEvents, ...snapshot.events].slice(0, 1000),
-        unreadEventCount: snapshot.unreadEventCount + nextEvents.length,
+        unreadEventCount: snapshot.activePanelId === 'events' ? 0 : snapshot.unreadEventCount + nextEvents.length,
+        hasUnreadErrors: snapshot.activePanelId !== 'events'
+          && (snapshot.hasUnreadErrors || nextEvents.some((event) => event.severity === 'error')),
+        errorEventRevision: snapshot.errorEventRevision + nextEvents.filter((event) => event.severity === 'error').length,
       };
       publish();
     },
@@ -167,6 +173,7 @@ export function createAppState(): AppState {
       snapshot = {
         ...snapshot,
         sectionErrorIds,
+        hasUnreadErrors: snapshot.activePanelId !== 'events',
       };
       publish();
     },
@@ -179,6 +186,7 @@ export function createAppState(): AppState {
       snapshot = {
         ...snapshot,
         sectionErrorIds,
+        hasUnreadErrors: hasCurrentErrors(snapshot.events, sectionErrorIds) && snapshot.hasUnreadErrors,
       };
       publish();
     },
@@ -188,6 +196,7 @@ export function createAppState(): AppState {
       snapshot = {
         ...snapshot,
         sectionErrorIds: [],
+        hasUnreadErrors: snapshot.events.some((event) => event.severity === 'error') && snapshot.hasUnreadErrors,
       };
       publish();
     },
@@ -216,15 +225,17 @@ export function createAppState(): AppState {
         ...snapshot,
         events: nextEvents,
         unreadEventCount: Math.max(0, snapshot.unreadEventCount - removed),
+        hasUnreadErrors: hasCurrentErrors(nextEvents, snapshot.sectionErrorIds) && snapshot.hasUnreadErrors,
       };
       publish();
     },
 
     markEventsRead(): void {
-      if (snapshot.unreadEventCount === 0) return;
+      if (snapshot.unreadEventCount === 0 && !snapshot.hasUnreadErrors) return;
       snapshot = {
         ...snapshot,
         unreadEventCount: 0,
+        hasUnreadErrors: false,
       };
       publish();
     },
@@ -235,8 +246,13 @@ export function createAppState(): AppState {
         ...snapshot,
         events: [],
         unreadEventCount: 0,
+        hasUnreadErrors: snapshot.sectionErrorIds.length > 0 && snapshot.hasUnreadErrors,
       };
       publish();
     },
   };
+}
+
+function hasCurrentErrors(events: AppEvent[], sectionErrorIds: number[]): boolean {
+  return sectionErrorIds.length > 0 || events.some((event) => event.severity === 'error');
 }

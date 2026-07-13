@@ -51,6 +51,8 @@ export interface AppSnapshot {
   assetSelection: AssetSelection;
   events: AppEvent[];
   unreadEventCount: number;
+  hasUnreadErrors: boolean;
+  errorEventRevision: number;
   displayTimelineIds: boolean;
   sectionErrorIds: number[];
   activeLoop: { startTime: number; endTime: number } | null;

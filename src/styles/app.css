@@ -805,7 +805,7 @@ body > .context-view {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  background: #d82035;
+  background: #465664;
   color: #ffffff;
   font-size: 11px;
   line-height: 1;
@@ -814,6 +814,19 @@ body > .context-view {
 }
 
 .shell-tab__badge[hidden] {
+  display: none;
+}
+
+.shell-tab__error-dot {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 8px;
+  border-radius: 50%;
+  background: #e32636;
+  box-shadow: 0 0 0 1px rgb(255 255 255 / 18%);
+}
+
+.shell-tab__error-dot[hidden] {
   display: none;
 }
 

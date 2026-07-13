@@ -34,6 +34,7 @@ import { syncProjectDemoSettingsToPhoenix, type ProjectDemoSettingsSyncProgress 
 import { ProjectSectionSyncError, syncProjectBarsToPhoenix, type ProjectSectionSyncProgress } from '../services/project-section-sync';
 import { createProjectSyncCoordinator } from '../services/project-sync-coordinator';
 import { graphicsConfigFromProject } from '../services/graphics-config';
+import { hasNewSectionErrors, shouldDeferEventsOpen, shouldOpenEventsForNewError } from './event-notifications';
 
 export interface AppShell {
   mount(): void;
@@ -77,6 +78,9 @@ export function createAppShell(root: HTMLElement): AppShell {
   let lastInspectorSelectionId: number | null = null;
   let lastSectionEditorSelectionId: string | null = null;
   let lastConnectionStatus = state.getSnapshot().connectionStatus;
+  let lastErrorEventRevision = state.getSnapshot().errorEventRevision;
+  let lastSectionErrorIds = new Set(state.getSnapshot().sectionErrorIds);
+  let pendingEventsOpen = false;
   let lastDisplayTimelineIds = state.getSnapshot().displayTimelineIds;
   let lastResourceSelectionSignature = getResourceSelectionSignature(state.getSnapshot().resourceSelection);
   const projectSyncCoordinator = createProjectSyncCoordinator<DbSession>(
@@ -341,6 +345,7 @@ export function createAppShell(root: HTMLElement): AppShell {
       dbState.setOpen(session.fileName);
       workspace.closePanel('inspector');
       workspace.openPanel('timeline');
+      flushPendingEventsOpen();
       workspace.openPanel('resources', { widthRatio: SIDE_PANEL_WIDTH_RATIO });
     } catch (err) {
       nextSession?.close();
@@ -349,6 +354,7 @@ export function createAppShell(root: HTMLElement): AppShell {
       projectSyncCoordinator.setSession(null);
       state.clearResourceSelection();
       dbState.clear();
+      flushPendingEventsOpen();
       if (!isAbortError(err)) {
         window.alert(err instanceof Error ? err.message : 'Failed to open database.');
       }
@@ -424,6 +430,18 @@ export function createAppShell(root: HTMLElement): AppShell {
 
       state.subscribe((snapshot) => {
         updateStatusBadge(shell, snapshot.connectionLabel, snapshot.connectionStatus);
+        const newErrorEvent = shouldOpenEventsForNewError(
+          lastErrorEventRevision,
+          snapshot.errorEventRevision,
+          workspace.isPanelOpen('events'),
+        );
+        const newSectionError = hasNewSectionErrors(lastSectionErrorIds, snapshot.sectionErrorIds);
+        if ((newErrorEvent || newSectionError) && !workspace.isPanelOpen('events')) {
+          pendingEventsOpen = true;
+        }
+        lastErrorEventRevision = snapshot.errorEventRevision;
+        lastSectionErrorIds = new Set(snapshot.sectionErrorIds);
+        flushPendingEventsOpen();
         if (snapshot.connectionStatus === 'connected' && lastConnectionStatus !== 'connected') {
           if (workspace.isPanelOpen('preview')) {
             enablePhoenixPreview();
@@ -708,8 +726,26 @@ export function createAppShell(root: HTMLElement): AppShell {
     }
   }
 
+  function flushPendingEventsOpen(): void {
+    if (!pendingEventsOpen) return;
+    if (workspace.isPanelOpen('events')) {
+      pendingEventsOpen = false;
+      return;
+    }
+    if (shouldDeferEventsOpen(dbState.getSnapshot().status === 'opening', workspace.isPanelOpen('timeline'))) return;
+
+    workspace.openPanel('events', { activate: false });
+    pendingEventsOpen = false;
+  }
+
   function recordSectionIssues(issues: ProjectSectionSyncError['issues']): void {
     if (issues.length === 0) return;
+    state.addEvents(issues.map((issue) => ({
+      severity: 'error',
+      source: 'Phoenix section sync',
+      subjectId: String(issue.barId),
+      description: issue.description,
+    })));
     state.markSectionErrors(issues.map((issue) => issue.barId));
   }
 
