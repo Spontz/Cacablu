@@ -33,6 +33,7 @@ import {
 import { syncProjectDemoSettingsToPhoenix, type ProjectDemoSettingsSyncProgress } from '../services/project-demo-settings-sync';
 import { ProjectSectionSyncError, syncProjectBarsToPhoenix, type ProjectSectionSyncProgress } from '../services/project-section-sync';
 import { createProjectSyncCoordinator } from '../services/project-sync-coordinator';
+import { canAddTimelineLayer, createTimelineLayerSession } from '../services/timeline-layers';
 import { graphicsConfigFromProject } from '../services/graphics-config';
 import { hasNewSectionErrors, shouldDeferEventsOpen, shouldOpenEventsForNewError } from './event-notifications';
 import { createAssetClipboard } from '../resources/asset-clipboard';
@@ -55,7 +56,8 @@ export function createAppShell(root: HTMLElement): AppShell {
   const connection = createConnectionController(state);
   const undoManager = createUndoManager();
   const assetClipboard = createAssetClipboard();
-  const panels = createPanelRegistry(state, dbState, sessionRef, connection, undoManager, assetClipboard);
+  const timelineLayers = createTimelineLayerSession();
+  const panels = createPanelRegistry(state, dbState, sessionRef, connection, undoManager, assetClipboard, timelineLayers);
   const workspace = createDockviewWorkspace({
     state,
     panels,
@@ -63,6 +65,7 @@ export function createAppShell(root: HTMLElement): AppShell {
       if (panelId === 'preview') {
         enablePhoenixPreview();
       }
+      syncMenuDisabled(dbState.getSnapshot());
     },
     onPanelClosed: (panelId) => {
       if (panelId === 'preview') {
@@ -71,6 +74,7 @@ export function createAppShell(root: HTMLElement): AppShell {
       if (panelId === 'section-editor') {
         lastSectionEditorSelectionId = null;
       }
+      syncMenuDisabled(dbState.getSnapshot());
     },
   });
   const phoenixAssets = createPhoenixAssetClient();
@@ -147,6 +151,9 @@ export function createAppShell(root: HTMLElement): AppShell {
           break;
         case 'toggle-display-timeline-ids':
           state.toggleDisplayTimelineIds();
+          break;
+        case 'new-timeline-layer':
+          addTimelineLayer();
           break;
         case 'select-all-bars':
           selectAllBars();
@@ -282,6 +289,14 @@ export function createAppShell(root: HTMLElement): AppShell {
     return event.key.toLowerCase() === 'd' && !event.shiftKey && !event.altKey && (event.ctrlKey || event.metaKey);
   }
 
+  function isNewTimelineLayerShortcut(event: KeyboardEvent): boolean {
+    return event.key.toLowerCase() === 'l'
+      && event.ctrlKey
+      && !event.metaKey
+      && !event.shiftKey
+      && !event.altKey;
+  }
+
   function isTextEditingTarget(target: EventTarget | null): boolean {
     if (!(target instanceof HTMLElement)) return false;
     return Boolean(target.closest('input, textarea, select, [contenteditable="true"], .monaco-editor'));
@@ -296,6 +311,13 @@ export function createAppShell(root: HTMLElement): AppShell {
     }
 
     state.setResourceSelection(ids.length === 1 ? { kind: 'bar', id: ids[0] } : { kind: 'bars', ids });
+  }
+
+  function addTimelineLayer(): boolean {
+    if (!canAddTimelineLayer(Boolean(session), workspace.isPanelOpen('timeline'))) return false;
+    const event = new Event('cacablu:timeline-new-layer', { cancelable: true });
+    window.dispatchEvent(event);
+    return event.defaultPrevented;
   }
 
   function getSelectedBarIds(): number[] {
@@ -354,6 +376,7 @@ export function createAppShell(root: HTMLElement): AppShell {
 
   async function openProjectHandle(handle: FileSystemFileHandle): Promise<void> {
     dbState.setOpening();
+    timelineLayers.clear();
     state.clearResourceSelection();
     state.clearAssetSelection();
     assetClipboard.invalidateSession(null);
@@ -711,6 +734,12 @@ export function createAppShell(root: HTMLElement): AppShell {
         event.preventDefault();
         void toggleSelectedBarsEnabled();
       });
+
+      window.addEventListener('keydown', (event) => {
+        if (!isNewTimelineLayerShortcut(event) || isTextEditingTarget(event.target)) return;
+        if (!addTimelineLayer()) return;
+        event.preventDefault();
+      });
     },
   };
 
@@ -753,6 +782,12 @@ export function createAppShell(root: HTMLElement): AppShell {
         return {
           ...action,
           disabled: !hasSelectedExistingBars(session?.data ?? null, state.getSnapshot().resourceSelection),
+        };
+      }
+      if (action.id === 'new-timeline-layer') {
+        return {
+          ...action,
+          disabled: !canAddTimelineLayer(Boolean(session), workspace.isPanelOpen('timeline')),
         };
       }
       if (state.getSnapshot().activePanelId === 'resources' && (action.id === 'edit-copy' || action.id === 'edit-cut')) {

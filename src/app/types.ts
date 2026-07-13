@@ -37,7 +37,7 @@ export interface PanelDefinition {
 export interface MenuActionDefinition {
   id: string;
   label: string;
-  menu: 'File' | 'Edit' | 'Bars' | 'Panels';
+  menu: 'File' | 'Edit' | 'Timeline' | 'Panels';
   disabled?: boolean;
   separator?: boolean;
   shortcut?: {

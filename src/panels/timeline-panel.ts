@@ -18,12 +18,14 @@ import { createPhoenixRuntimeLoopClient } from '../phoenix/runtime-loop-client';
 import { primePhoenixLogEvents, recordPhoenixLogsAsEvents } from '../phoenix/log-events';
 import { ProjectSectionSyncError, syncProjectBarToPhoenix } from '../services/project-section-sync';
 import { computeLoopIntervalFromMarkers } from '../services/timeline-loop-markers';
+import type { TimelineLayerSession } from '../services/timeline-layers';
 import { createContentRenderer } from './base-panel';
 
 const CLIP_COLOR = '#5e86b8';
 const MIN_MARKER_LABEL_SPACING = 88;
 const TRANSPORT_STEP_SECONDS = 1;
 const DRAG_THRESHOLD_PX = 3;
+const TIMELINE_LAYER_HEIGHT = 18;
 const MARKER_DOUBLE_CLICK_MS = 450;
 const MOVE_SYNC_DELAY_MS = 850;
 const TRANSPORT_SYNC_GRACE_MS = 1200;
@@ -98,6 +100,7 @@ export function createTimelinePanel(
   sessionRef: DbSessionRef,
   connection: ConnectionController,
   undoManager: UndoManager,
+  timelineLayers: TimelineLayerSession,
 ): IContentRenderer {
   const initialActiveLoop = appState.getSnapshot().activeLoop;
   const state = createTimelineState({
@@ -168,10 +171,10 @@ export function createTimelinePanel(
       runtimeAnchorTimestamp = performance.now();
     }
 
-    const layerNums = [...new Set(db.bars.map((b) => b.layer))].sort((a, b) => a - b);
+    const layerNums = timelineLayers.getLayers(db.bars.map((bar) => bar.layer));
 
     state.tracks = layerNums.map((layer, index) =>
-      createTrack({ id: `layer-${layer}`, label: `Layer ${layer}`, kind: 'generic', order: index, height: 18 }),
+      createTrack({ id: `layer-${layer}`, label: `Layer ${layer}`, kind: 'generic', order: index, height: TIMELINE_LAYER_HEIGHT }),
     );
 
     state.clips = db.bars.map((bar) =>
@@ -188,6 +191,7 @@ export function createTimelinePanel(
   }
 
   function resetToEmptyProject(): void {
+    timelineLayers.clear();
     state.tracks = [];
     state.clips = [];
     state.transport.duration = 0;
@@ -252,6 +256,44 @@ export function createTimelinePanel(
   function getLayerFromTrackId(trackId: string): number {
     const value = Number(trackId.replace(/^layer-/, ''));
     return Number.isFinite(value) ? value : 0;
+  }
+
+  function getVisibleLayerCapacity(viewport: HTMLElement): number {
+    const ruler = viewport.querySelector<HTMLElement>('.timeline-panel__ruler');
+    const usableHeight = Math.max(viewport.clientHeight - (ruler?.offsetHeight ?? 0), TIMELINE_LAYER_HEIGHT);
+    return Math.ceil(usableHeight / TIMELINE_LAYER_HEIGHT);
+  }
+
+  function ensureVisibleLayerSurface(viewport: HTMLElement): boolean {
+    const db = sessionRef.current?.data;
+    if (!db || !isProjectReady()) return false;
+
+    const usedLayers = timelineLayers.getLayers(db.bars.map((bar) => bar.layer));
+    const lastUsedLayer = usedLayers.length > 0 ? Math.max(...usedLayers) : -1;
+    const requiredLayerCount = lastUsedLayer + 1 + getVisibleLayerCapacity(viewport);
+    const existingLayers = new Set(state.tracks.map((track) => getLayerFromTrackId(track.id)));
+    for (let layer = 0; layer < requiredLayerCount; layer += 1) {
+      existingLayers.add(layer);
+    }
+
+    const nextLayers = [...existingLayers].sort((left, right) => left - right);
+    if (
+      nextLayers.length === state.tracks.length
+      && nextLayers.every((layer, index) => layer === getLayerFromTrackId(state.tracks[index].id))
+    ) {
+      return false;
+    }
+
+    state.tracks = nextLayers.map((layer, index) =>
+      createTrack({
+        id: `layer-${layer}`,
+        label: `Layer ${layer}`,
+        kind: 'generic',
+        order: index,
+        height: TIMELINE_LAYER_HEIGHT,
+      }),
+    );
+    return true;
   }
 
   function getLayerAtPoint(clientX: number, clientY: number, fallback: number): number {
@@ -969,6 +1011,9 @@ export function createTimelinePanel(
       const markers = sessionRef.current?.data.markers ?? [];
       const playTitle = state.transport.isPlaying ? 'Pause' : 'Play';
       const previousViewport = element.querySelector<HTMLElement>('.timeline-panel__viewport');
+      if (previousViewport) {
+        ensureVisibleLayerSurface(previousViewport);
+      }
       const previousScrollLeft = previousViewport?.scrollLeft ?? lastViewportScrollLeft;
       const previousScrollTop = previousViewport?.scrollTop ?? lastViewportScrollTop;
       const viewportWidth = previousViewport?.clientWidth ?? element.clientWidth;
@@ -979,7 +1024,7 @@ export function createTimelinePanel(
       const activeLoop = state.transport.loop ? normalizeRange(state.transport.loop) : null;
       const loopLeft = activeLoop ? activeLoop.start * effectivePixelsPerSecond : 0;
       const loopWidth = activeLoop ? Math.max((activeLoop.end - activeLoop.start) * effectivePixelsPerSecond, 1) : 0;
-
+      const lanesHeight = state.tracks.reduce((height, track) => height + track.height, 0);
       element.innerHTML = `
         <div class="timeline-panel ${state.transport.isPlaying ? 'is-playing' : ''}">
           <div class="timeline-panel__body">
@@ -1005,7 +1050,7 @@ export function createTimelinePanel(
                 }).join('')}
               </div>
 
-              <div class="timeline-panel__grid" style="width:${timelineWidth}px">
+              <div class="timeline-panel__grid" style="width:${timelineWidth}px;height:${lanesHeight}px">
                 ${Array.from({ length: markerCount }, (_, index) => {
                   const left = index * markerStep * effectivePixelsPerSecond;
                   return `<span class="timeline-panel__grid-line" style="left:${left}px"></span>`;
@@ -1271,7 +1316,23 @@ export function createTimelinePanel(
       render();
     });
 
+    let surfaceResizeFrame: number | null = null;
+    const reconcileVisibleLayerSurface = (): void => {
+      surfaceResizeFrame = null;
+      const viewport = element.querySelector<HTMLElement>('.timeline-panel__viewport');
+      if (viewport && ensureVisibleLayerSurface(viewport)) {
+        render(true);
+      }
+    };
+    const scheduleVisibleLayerSurfaceReconciliation = (): void => {
+      if (surfaceResizeFrame !== null) return;
+      surfaceResizeFrame = window.requestAnimationFrame(reconcileVisibleLayerSurface);
+    };
+    const surfaceResizeObserver = new ResizeObserver(scheduleVisibleLayerSurfaceReconciliation);
+    surfaceResizeObserver.observe(element);
+
     render();
+    scheduleVisibleLayerSurfaceReconciliation();
     requestAnimationFrame(tick);
 
     function beginDrag(event: PointerEvent): void {
@@ -1401,7 +1462,9 @@ export function createTimelinePanel(
         selectedIds: [],
         hasMoved: false,
       };
-      viewport.setPointerCapture(event.pointerId);
+      // The viewport is replaced while rendering the selection preview. Keep
+      // pointer capture on the stable panel root so pointerup can commit it.
+      element.setPointerCapture(event.pointerId);
     }
 
     function beginEmptyBarCreation(event: PointerEvent): void {
@@ -1421,7 +1484,9 @@ export function createTimelinePanel(
         layer: getLayerAtPoint(event.clientX, event.clientY, 0),
         hasMoved: false,
       };
-      viewport.setPointerCapture(event.pointerId);
+      // The viewport is replaced while rendering the creation preview. Keep
+      // pointer capture on the stable panel root so pointerup can commit it.
+      element.setPointerCapture(event.pointerId);
     }
 
     function updateDrag(event: PointerEvent): void {
@@ -1775,6 +1840,16 @@ export function createTimelinePanel(
     };
     window.addEventListener('cacablu:timeline-bars-changed', handleBarsChanged);
 
+    const handleNewLayer = (event: Event): void => {
+      const db = sessionRef.current?.data;
+      if (!db || !isProjectReady()) return;
+      timelineLayers.addNext(db.bars.map((bar) => bar.layer));
+      loadFromDb({ preserveTransport: true });
+      render(true);
+      event.preventDefault();
+    };
+    window.addEventListener('cacablu:timeline-new-layer', handleNewLayer);
+
     const handleMarkersChanged = (): void => {
       render(true);
     };
@@ -2005,9 +2080,15 @@ export function createTimelinePanel(
         window.clearTimeout(suppressNextClickTimeout);
         suppressNextClickTimeout = null;
       }
+      surfaceResizeObserver.disconnect();
+      if (surfaceResizeFrame !== null) {
+        window.cancelAnimationFrame(surfaceResizeFrame);
+        surfaceResizeFrame = null;
+      }
       pendingMovedBarIds.clear();
       window.removeEventListener('cacablu:edit-delete', handleDeleteAction);
       window.removeEventListener('cacablu:timeline-bars-changed', handleBarsChanged);
+      window.removeEventListener('cacablu:timeline-new-layer', handleNewLayer);
       window.removeEventListener('cacablu:timeline-markers-changed', handleMarkersChanged);
       window.removeEventListener('cacablu:timeline-reveal-bar', handleRevealBar);
       element.removeEventListener('scroll', handleTimelineScroll, true);

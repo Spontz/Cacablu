@@ -15,7 +15,7 @@ export function createMenuBar(options: MenuBarOptions): MenuBar {
   element.className = 'menu-bar';
   element.setAttribute('aria-label', 'Main menu');
 
-  const menuNames = ['File', 'Edit', 'Bars', 'Panels'] as const;
+  const menuNames = ['File', 'Edit', 'Timeline', 'Panels'] as const;
   const buttonMap = new Map<string, HTMLButtonElement>();
   const isMac = /\b(Mac|iPhone|iPad|iPod)\b/i.test(navigator.platform);
 

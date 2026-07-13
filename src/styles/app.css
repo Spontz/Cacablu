@@ -1384,7 +1384,8 @@ button.events-listbox__severity:focus-visible {
 
 .timeline-panel__grid {
   position: absolute;
-  inset: 2.4rem 0 0;
+  top: 2.4rem;
+  left: 0;
   pointer-events: none;
 }
 
