@@ -180,6 +180,26 @@ export function resolveAssetPasteParent(db: Pick<ProjectDatabase, 'files' | 'fol
   return file.parent;
 }
 
+export function validateAssetCopyDestination(
+  db: Pick<ProjectDatabase, 'folders'>,
+  roots: AssetClipboardNode[],
+  parentId: number,
+): void {
+  for (const root of roots) {
+    if (root.kind !== 'folder') continue;
+    let currentId = parentId;
+    const visited = new Set<number>();
+    while (currentId > 0) {
+      if (currentId === root.sourceId) {
+        throw new Error('A Pool folder cannot be copied into itself or one of its descendants.');
+      }
+      if (visited.has(currentId)) break;
+      visited.add(currentId);
+      currentId = db.folders.find((folder) => folder.id === currentId)?.parent ?? 0;
+    }
+  }
+}
+
 export function buildResourcePath(db: Pick<ProjectDatabase, 'folders' | 'files'>, kind: 'file' | 'folder', id: number): string {
   const item = kind === 'file'
     ? db.files.find((file) => file.id === id)

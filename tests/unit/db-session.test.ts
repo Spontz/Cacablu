@@ -105,6 +105,48 @@ describe('DbSession markers', () => {
 });
 
 describe('DbSession Pool clipboard mutations', () => {
+  it('copies only a root file into the selected folder', async () => {
+    const handle = new MemoryFileHandle(await createResourceProjectBytes()) as unknown as FileSystemFileHandle;
+    const session = await openDbSession(handle);
+    const rootFile = session.upsertResourceFile({
+      name: 'root.txt',
+      parent: 0,
+      bytes: 4,
+      type: 'text/plain',
+      data: new TextEncoder().encode('root'),
+      format: 'txt',
+      enabled: true,
+    });
+    const folderCount = session.data.folders.length;
+    const roots = captureAssetRoots(session.data, [{
+      kind: 'file',
+      id: rootFile.id,
+      name: rootFile.name,
+      fileType: rootFile.type,
+    }]);
+
+    const result = session.copyResourceItems(roots, 10);
+    expect(result.roots).toEqual([{ kind: 'file', id: expect.any(Number) }]);
+    expect(result.files.map((entry) => entry.newPath)).toEqual(['/pool/destination/root.txt']);
+    expect(session.data.folders).toHaveLength(folderCount);
+    session.close();
+  });
+
+  it('copies and moves items into the Pool root', async () => {
+    const handle = new MemoryFileHandle(await createResourceProjectBytes()) as unknown as FileSystemFileHandle;
+    const session = await openDbSession(handle);
+    const fileRoot = captureAssetRoots(session.data, [{ kind: 'file', id: 3, name: 'hero.png', fileType: 'image/png' }]);
+
+    const copyResult = session.copyResourceItems(fileRoot, 0);
+    expect(copyResult.files.map((entry) => entry.newPath)).toEqual(['/pool/hero.png']);
+    expect(copyResult.files[0].file.parent).toBe(0);
+
+    const moveResult = session.moveResourceItems([{ kind: 'folder', id: 2 }], 0);
+    expect(moveResult.files.map((entry) => entry.newPath)).toEqual(['/pool/nested/note.txt']);
+    expect(session.data.folders.find((folder) => folder.id === 2)?.parent).toBe(0);
+    session.close();
+  });
+
   it('copies nested folders atomically and persists new ids and contents', async () => {
     const handle = new MemoryFileHandle(await createResourceProjectBytes()) as unknown as FileSystemFileHandle;
     let session = await openDbSession(handle);

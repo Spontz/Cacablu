@@ -2071,12 +2071,17 @@ button.events-listbox__severity:focus-visible {
   padding-left: 16px;
 }
 
+.resources__pool-root > .resources__list {
+  padding-left: 16px;
+}
+
 .resources__folder,
 .resources__file {
   font-size: 13px;
   list-style: none;
 }
 
+.resources__root-row,
 .resources__folder-row,
 .resources__file {
   display: flex;
@@ -2087,21 +2092,25 @@ button.events-listbox__severity:focus-visible {
   overflow: hidden;
 }
 
+.resources__root-row,
 .resources__folder-row {
   cursor: pointer;
   color: var(--panel-text);
 }
 
+.resources__root-row:hover,
 .resources__folder-row:hover {
   background: var(--menu-hover);
 }
 
+.resources__root-row.is-drop-target,
 .resources__folder-row.is-drop-target {
   background: rgba(97, 215, 255, 0.16);
   outline: 1px solid rgba(97, 215, 255, 0.45);
   outline-offset: -1px;
 }
 
+.resources__root-row.is-selected,
 .resources__folder-row.is-selected,
 .resources__file.is-selected {
   background: rgba(97, 215, 255, 0.12);

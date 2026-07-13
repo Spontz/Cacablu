@@ -9,7 +9,12 @@ import { addAssetImpactEvents } from '../phoenix/asset-impact-events';
 import { deleteAllowedAssetDirectory, deleteAllowedAssetFile, writeAllowedAssetFile } from '../phoenix/asset-operations';
 import { buildResourceTree, type ResourceTreeNode } from '../resources/resource-tree';
 import type { AssetClipboard } from '../resources/asset-clipboard';
-import { normalizePoolPath, pendingCutKeys, resolveAssetPasteParent } from '../resources/asset-clipboard';
+import {
+  normalizePoolPath,
+  pendingCutKeys,
+  resolveAssetPasteParent,
+  validateAssetCopyDestination,
+} from '../resources/asset-clipboard';
 import {
   createAssetRangeSelection,
   createAssetSelection,
@@ -251,18 +256,35 @@ export function createResourcesPanel(
 
       const roots = buildResourceTree(db);
 
+      const poolRoot = document.createElement('div');
+      poolRoot.className = 'resources__pool-root';
+      poolRoot.dataset.poolRoot = 'true';
+
+      const rootRow = document.createElement('div');
+      rootRow.className = 'resources__root-row';
+      if (state.getSnapshot().assetSelection.kind === 'none') rootRow.classList.add('is-selected');
+      rootRow.append(
+        createIconEl('folder-open'),
+        Object.assign(document.createElement('span'), {
+          className: 'resources__label',
+          textContent: 'pool',
+        }),
+      );
+      poolRoot.append(rootRow);
+      treeEl.append(poolRoot);
+
       if (roots.length === 0) {
         const hint = document.createElement('p');
         hint.className = 'resources__hint';
         hint.textContent = 'No files in project.';
-        treeEl.append(hint);
+        poolRoot.append(hint);
         return;
       }
 
       const ul = document.createElement('ul');
       ul.className = 'resources__list';
       for (const node of roots) renderNode(node, ul);
-      treeEl.append(ul);
+      poolRoot.append(ul);
     }
 
     function setSyncStatus(nextState: AssetOperationState, message: string): void {
@@ -411,7 +433,13 @@ export function createResourcesPanel(
 
       const folderRow = target.closest<HTMLElement>('[data-resource-kind="folder"]');
       const folder = folderRow?.closest<HTMLElement>('[data-folder-id]');
-      if (!folder?.dataset.folderId || !folderRow) return;
+      if (!folder?.dataset.folderId || !folderRow) {
+        if (target.closest('.resources__root-row')) {
+          selectionAnchor = null;
+          state.clearAssetSelection();
+        }
+        return;
+      }
       const id = Number(folder.dataset.folderId);
       const item: AssetSelectionItem = {
         kind: 'folder',
@@ -539,6 +567,9 @@ export function createResourcesPanel(
         const parentId = resolveAssetPasteParent(session.data, state.getSnapshot().assetSelection);
         let result: ResourceClipboardMutation;
         if (snapshot.operation === 'copy') {
+          if (snapshot.sourceSession === session) {
+            validateAssetCopyDestination(session.data, snapshot.roots, parentId);
+          }
           result = session.copyResourceItems(snapshot.roots, parentId);
         } else {
           if (snapshot.sourceSession !== session) {
@@ -571,6 +602,16 @@ export function createResourcesPanel(
           element: assetFolder,
           parentId: Number(assetFolder.dataset.resourceId),
           targetPath: assetFolder.dataset.poolPath,
+        };
+      }
+
+      const poolRoot = target.closest<HTMLElement>('[data-pool-root]');
+      if (poolRoot) {
+        return {
+          kind: 'pool',
+          element: poolRoot.querySelector<HTMLElement>('.resources__root-row') ?? poolRoot,
+          parentId: 0,
+          targetPath: 'pool',
         };
       }
 

@@ -3,11 +3,13 @@ import { describe, expect, it, vi } from 'vitest';
 import type { ProjectDatabase } from '../../src/db/db-schema';
 import {
   canonicalizeSelection,
+  captureAssetRoots,
   createAssetClipboard,
   normalizePoolPath,
   pendingCutKeys,
   resolveAssetPasteParent,
   serializePoolPaths,
+  validateAssetCopyDestination,
 } from '../../src/resources/asset-clipboard';
 
 function createProject(): ProjectDatabase {
@@ -55,6 +57,15 @@ describe('asset clipboard', () => {
         { kind: 'folder', id: 2, name: 'nested' },
       ],
     })).toThrow('single Pool destination');
+  });
+
+  it('rejects same-project folder copies into themselves or descendants', () => {
+    const db = createProject();
+    const roots = captureAssetRoots(db, [{ kind: 'folder', id: 1, name: 'textures' }]);
+
+    expect(() => validateAssetCopyDestination(db, roots, 1)).toThrow('cannot be copied into itself');
+    expect(() => validateAssetCopyDestination(db, roots, 2)).toThrow('cannot be copied into itself');
+    expect(() => validateAssetCopyDestination(db, roots, 0)).not.toThrow();
   });
 
   it('captures immutable copy data and keeps copies available', () => {
