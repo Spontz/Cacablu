@@ -15,6 +15,7 @@ import { primePhoenixLogEvents, recordPhoenixLogsAsEvents } from '../phoenix/log
 import { ProjectSectionSyncError, syncProjectBarToPhoenix, type ProjectSectionSyncIssue } from '../services/project-section-sync';
 import { createContentRenderer } from './base-panel';
 import { CACABLU_CODE_THEME, registerCacabluCodeTheme } from './code-editor-theme';
+import { installSelectionOccurrenceHighlighting } from './selection-occurrence-highlighting';
 
 const TEMPLATE_STORAGE_KEY = 'cacablu.sectionEditor.templates';
 const BAR_TYPE_STORAGE_KEY = 'cacablu.sectionEditor.barTypes';
@@ -123,6 +124,7 @@ export function createSectionEditorPanel(
     let activeSelectionSignature: string | null = null;
     let codeEditor: monaco.editor.IStandaloneCodeEditor | null = null;
     let disposePoolPathDrop: (() => void) | null = null;
+    let disposeSelectionOccurrenceHighlighting: (() => void) | null = null;
     let activeBarTypeInput: HTMLInputElement | null = null;
     let activeBarTypeMenu: HTMLElement | null = null;
     let barTypes = getInitialBarTypes();
@@ -137,6 +139,8 @@ export function createSectionEditorPanel(
       templateContentRequestId += 1;
       disposePoolPathDrop?.();
       disposePoolPathDrop = null;
+      disposeSelectionOccurrenceHighlighting?.();
+      disposeSelectionOccurrenceHighlighting = null;
       codeEditor?.dispose();
       codeEditor = null;
     }
@@ -348,6 +352,7 @@ export function createSectionEditorPanel(
         overflowWidgetsDomNode: document.body,
       });
       disposePoolPathDrop = installPoolPathDrop(codeEditor, code);
+      disposeSelectionOccurrenceHighlighting = installSelectionOccurrenceHighlighting(codeEditor);
       requestAnimationFrame(() => {
         codeEditor?.layout();
       });

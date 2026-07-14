@@ -2036,6 +2036,12 @@ button.events-listbox__severity:focus-visible {
   padding-left: 4px;
 }
 
+.monaco-editor .cacablu-code-selection-occurrence {
+  box-sizing: border-box;
+  border: 1px solid rgba(34, 211, 238, 0.88);
+  background: rgba(34, 211, 238, 0.24);
+}
+
 .panel--resources {
   padding: 0;
   overflow: hidden;

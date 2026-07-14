@@ -19,6 +19,7 @@ import {
 } from '../services/glsl-editor-undo';
 import { createContentRenderer } from './base-panel';
 import { CACABLU_CODE_THEME, registerCacabluCodeTheme } from './code-editor-theme';
+import { installSelectionOccurrenceHighlighting } from './selection-occurrence-highlighting';
 
 registerGlslLanguage();
 registerCacabluCodeTheme();
@@ -89,6 +90,7 @@ export function createGlslAssetEditorPanel(
       scrollBeyondLastLine: false,
     });
     const disposePoolPathDrop = installPoolPathDrop(editor, code);
+    const disposeSelectionOccurrenceHighlighting = installSelectionOccurrenceHighlighting(editor);
     const editorModel = editor.getModel();
     if (editorModel) {
       monaco.editor.setModelLanguage(editorModel, 'glsl');
@@ -261,6 +263,7 @@ export function createGlslAssetEditorPanel(
       unsubscribeState();
       unsubscribeDb();
       disposePoolPathDrop();
+      disposeSelectionOccurrenceHighlighting();
       editor?.dispose();
       editor = null;
     };
