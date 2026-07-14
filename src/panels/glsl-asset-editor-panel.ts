@@ -6,11 +6,17 @@ import type { AppState } from '../state/app-state';
 import type { DbState } from '../state/db-state';
 import type { DbSessionRef } from '../db/db-session';
 import type { ConnectionController } from '../ws/connection';
+import type { UndoManager } from '../app/undo-manager';
 import { buildResourceTree, type ResourceTreeNode } from '../resources/resource-tree';
 import { createPhoenixAssetClient } from '../phoenix/asset-client';
 import { addAssetImpactEvents } from '../phoenix/asset-impact-events';
 import { writeAllowedAssetFile } from '../phoenix/asset-operations';
 import { installPoolPathDrop } from '../resources/pool-path-drop';
+import {
+  registerGlslSaveUndo,
+  shouldReplaceGlslEditorContent,
+  snapshotResourceFileContent,
+} from '../services/glsl-editor-undo';
 import { createContentRenderer } from './base-panel';
 import { CACABLU_CODE_THEME, registerCacabluCodeTheme } from './code-editor-theme';
 
@@ -22,6 +28,7 @@ export function createGlslAssetEditorPanel(
   dbState: DbState,
   sessionRef: DbSessionRef,
   connection: ConnectionController,
+  undoManager: UndoManager,
 ): IContentRenderer {
   return createContentRenderer((element, params) => {
     element.className = 'panel panel--glsl-editor';
@@ -35,6 +42,7 @@ export function createGlslAssetEditorPanel(
     let originalContent = '';
     let currentPath = '';
     let updateInFlight = false;
+    let suppressNextDbReload = false;
 
     const header = document.createElement('div');
     header.className = 'glsl-editor__header';
@@ -92,6 +100,9 @@ export function createGlslAssetEditorPanel(
         update.click();
       }
     });
+    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyZ, () => {
+      void editor?.getModel()?.undo();
+    });
     editor.onDidChangeModelContent(() => {
       syncSaveDisabled();
     });
@@ -122,11 +133,18 @@ export function createGlslAssetEditorPanel(
         return;
       }
 
+      const persistedContent = decoder.decode(new Uint8Array(file.data));
+      const replaceEditorContent = shouldReplaceGlslEditorContent(
+        currentFileId,
+        file.id,
+        editor?.getValue() ?? '',
+        persistedContent,
+      );
       currentFileId = file.id;
       currentPath = `pool/${path}`;
-      originalContent = decoder.decode(new Uint8Array(file.data));
+      originalContent = persistedContent;
       title.textContent = currentPath;
-      editor?.setValue(originalContent);
+      if (replaceEditorContent) editor?.setValue(originalContent);
       syncUpdateDisabled();
       syncSaveDisabled();
     };
@@ -140,7 +158,14 @@ export function createGlslAssetEditorPanel(
         loadCurrentSelection();
       }
     });
-    const unsubscribeDb = dbState.subscribe(loadCurrentSelection);
+    const unsubscribeDb = dbState.subscribe(() => {
+      if (suppressNextDbReload) {
+        suppressNextDbReload = false;
+        syncSaveDisabled();
+        return;
+      }
+      loadCurrentSelection();
+    });
 
     update.addEventListener('click', async () => {
       if (!editor || !currentPath) return;
@@ -169,6 +194,9 @@ export function createGlslAssetEditorPanel(
       const content = editor.getValue();
       const bytes = encoder.encode(content);
       const fileName = currentPath.split('/').pop() ?? 'shader.glsl';
+      const file = session.data.files.find((candidate) => candidate.id === currentFileId);
+      if (!file) return;
+      const previous = snapshotResourceFileContent(file);
 
       try {
         save.disabled = true;
@@ -179,7 +207,40 @@ export function createGlslAssetEditorPanel(
           format: 'glsl',
         });
         originalContent = content;
+        suppressNextDbReload = true;
         dbState.setDirty();
+        registerGlslSaveUndo({
+          undoManager,
+          dbState,
+          sessionRef,
+          session,
+          fileId: currentFileId,
+          fileName,
+          previous,
+          onUnavailable: (message) => {
+            state.addEvent({ severity: 'warning', source: 'GLSL editor', description: message });
+          },
+          onRestored: async (restoredFile) => {
+            const activeSession = sessionRef.current;
+            const restoredPath = activeSession ? findAssetPath(activeSession.data, restoredFile.id) : null;
+            if (!restoredPath) {
+              state.addEvent({ severity: 'warning', source: 'GLSL editor', description: `Could not resolve the restored path for ${fileName}.` });
+              return;
+            }
+
+            const poolPath = `pool/${restoredPath}`;
+            if (!connection.isConnected()) {
+              state.addEvent({ severity: 'warning', source: 'GLSL editor', description: `Restored ${fileName} in the project DB, but Phoenix is not connected so its disk copy was not updated.` });
+              return;
+            }
+
+            try {
+              addAssetImpactEvents(state, await writeAllowedAssetFile(phoenixAssets, poolPath, restoredFile.data), `Restored ${fileName}`);
+            } catch (err) {
+              state.addEvent({ severity: 'error', source: 'GLSL editor', description: err instanceof Error ? err.message : `Could not restore ${fileName} in Phoenix.` });
+            }
+          },
+        });
         syncSaveDisabled();
 
         if (connection.isConnected()) {

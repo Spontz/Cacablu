@@ -14,7 +14,6 @@ export function createDefaultMenuActions(): MenuActionDefinition[] {
     { id: 'edit-separator-graphics', label: '', menu: 'Edit', separator: true },
     { id: 'edit-graphics', label: 'Graphics', menu: 'Edit' },
     { id: 'edit-demo-settings', label: 'Demo Settings', menu: 'Edit' },
-    { id: 'new-timeline-layer', label: 'New Layer', menu: 'Timeline', shortcut: { default: 'Ctrl+L' } },
     { id: 'toggle-display-timeline-ids', label: 'Display IDs', menu: 'Timeline' },
     { id: 'bars-separator-selection', label: '', menu: 'Timeline', separator: true },
     { id: 'toggle-enable-bars', label: 'Toggle Enable', menu: 'Timeline', shortcut: { default: 'Ctrl+D', mac: '⌘D' } },

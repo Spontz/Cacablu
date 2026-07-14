@@ -40,14 +40,12 @@ try {
       { createAppState },
       { createDbState },
       { createUndoManager },
-      { createTimelineLayerSession },
     ] = await Promise.all([
       import('/src/panels/timeline-panel.ts'),
       import('/src/panels/markers-panel.tsx'),
       import('/src/state/app-state.ts'),
       import('/src/state/db-state.ts'),
       import('/src/app/undo-manager.ts'),
-      import('/src/services/timeline-layers.ts'),
     ]);
 
     const db = {
@@ -116,7 +114,6 @@ try {
     const appState = createAppState();
     const dbState = createDbState();
     const undoManager = createUndoManager();
-    const timelineLayers = createTimelineLayerSession();
     const sessionRef = { current: session };
     const runtimeListeners = new Set();
     const connection = {
@@ -154,7 +151,7 @@ try {
     root.style.gridTemplateRows = '1fr 180px';
     root.style.height = '100vh';
 
-    const timeline = createTimelinePanel(appState, dbState, sessionRef, connection, undoManager, timelineLayers);
+    const timeline = createTimelinePanel(appState, dbState, sessionRef, connection, undoManager);
     const markers = createMarkersPanel(dbState, sessionRef, undoManager);
     root.append(timeline.element, markers.element);
     timeline.init({});

@@ -18,7 +18,6 @@ import { createPhoenixRuntimeLoopClient } from '../phoenix/runtime-loop-client';
 import { primePhoenixLogEvents, recordPhoenixLogsAsEvents } from '../phoenix/log-events';
 import { ProjectSectionSyncError, syncProjectBarToPhoenix } from '../services/project-section-sync';
 import { computeLoopIntervalFromMarkers } from '../services/timeline-loop-markers';
-import type { TimelineLayerSession } from '../services/timeline-layers';
 import { createContentRenderer } from './base-panel';
 
 const CLIP_COLOR = '#5e86b8';
@@ -100,7 +99,6 @@ export function createTimelinePanel(
   sessionRef: DbSessionRef,
   connection: ConnectionController,
   undoManager: UndoManager,
-  timelineLayers: TimelineLayerSession,
 ): IContentRenderer {
   const initialActiveLoop = appState.getSnapshot().activeLoop;
   const state = createTimelineState({
@@ -171,7 +169,7 @@ export function createTimelinePanel(
       runtimeAnchorTimestamp = performance.now();
     }
 
-    const layerNums = timelineLayers.getLayers(db.bars.map((bar) => bar.layer));
+    const layerNums = getOccupiedLayers(db.bars);
 
     state.tracks = layerNums.map((layer, index) =>
       createTrack({ id: `layer-${layer}`, label: `Layer ${layer}`, kind: 'generic', order: index, height: TIMELINE_LAYER_HEIGHT }),
@@ -191,7 +189,6 @@ export function createTimelinePanel(
   }
 
   function resetToEmptyProject(): void {
-    timelineLayers.clear();
     state.tracks = [];
     state.clips = [];
     state.transport.duration = 0;
@@ -258,6 +255,11 @@ export function createTimelinePanel(
     return Number.isFinite(value) ? value : 0;
   }
 
+  function getOccupiedLayers(bars: DbBar[]): number[] {
+    return [...new Set(bars.map((bar) => bar.layer).filter(Number.isInteger))]
+      .sort((left, right) => left - right);
+  }
+
   function getVisibleLayerCapacity(viewport: HTMLElement): number {
     const ruler = viewport.querySelector<HTMLElement>('.timeline-panel__ruler');
     const usableHeight = Math.max(viewport.clientHeight - (ruler?.offsetHeight ?? 0), TIMELINE_LAYER_HEIGHT);
@@ -268,7 +270,7 @@ export function createTimelinePanel(
     const db = sessionRef.current?.data;
     if (!db || !isProjectReady()) return false;
 
-    const usedLayers = timelineLayers.getLayers(db.bars.map((bar) => bar.layer));
+    const usedLayers = getOccupiedLayers(db.bars);
     const lastUsedLayer = usedLayers.length > 0 ? Math.max(...usedLayers) : -1;
     const requiredLayerCount = lastUsedLayer + 1 + getVisibleLayerCapacity(viewport);
     const existingLayers = new Set(state.tracks.map((track) => getLayerFromTrackId(track.id)));
@@ -1840,16 +1842,6 @@ export function createTimelinePanel(
     };
     window.addEventListener('cacablu:timeline-bars-changed', handleBarsChanged);
 
-    const handleNewLayer = (event: Event): void => {
-      const db = sessionRef.current?.data;
-      if (!db || !isProjectReady()) return;
-      timelineLayers.addNext(db.bars.map((bar) => bar.layer));
-      loadFromDb({ preserveTransport: true });
-      render(true);
-      event.preventDefault();
-    };
-    window.addEventListener('cacablu:timeline-new-layer', handleNewLayer);
-
     const handleMarkersChanged = (): void => {
       render(true);
     };
@@ -2088,7 +2080,6 @@ export function createTimelinePanel(
       pendingMovedBarIds.clear();
       window.removeEventListener('cacablu:edit-delete', handleDeleteAction);
       window.removeEventListener('cacablu:timeline-bars-changed', handleBarsChanged);
-      window.removeEventListener('cacablu:timeline-new-layer', handleNewLayer);
       window.removeEventListener('cacablu:timeline-markers-changed', handleMarkersChanged);
       window.removeEventListener('cacablu:timeline-reveal-bar', handleRevealBar);
       element.removeEventListener('scroll', handleTimelineScroll, true);

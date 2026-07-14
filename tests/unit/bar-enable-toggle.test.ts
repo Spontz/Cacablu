@@ -55,19 +55,6 @@ describe('bar enable toggle', () => {
     });
   });
 
-  it('places New Layer in the Timeline menu with Ctrl+L', () => {
-    const actions = createDefaultMenuActions();
-    const action = actions.find((candidate) => candidate.id === 'new-timeline-layer');
-    const timelineActions = actions.filter((candidate) => candidate.menu === 'Timeline');
-
-    expect(action).toMatchObject({
-      label: 'New Layer',
-      menu: 'Timeline',
-      shortcut: { default: 'Ctrl+L' },
-    });
-    expect(timelineActions[0]?.id).toBe('new-timeline-layer');
-  });
-
   it('detects whether the current selection contains existing bars', () => {
     const db = { bars: [makeBar(1, true)] };
 

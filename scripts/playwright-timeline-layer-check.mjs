@@ -67,7 +67,8 @@ try {
   const timelineTrigger = page.locator('.menu-bar__trigger', { hasText: 'Timeline' });
   await timelineTrigger.click();
   const newLayerAction = page.locator('.menu-bar__item', { hasText: 'New Layer' });
-  if (!(await newLayerAction.isDisabled())) throw new Error('New Layer must be disabled without a project.');
+  const newLayerActionCount = await newLayerAction.count();
+  await page.keyboard.press('Escape');
 
   await page.keyboard.press('Control+O');
   await page.locator('.timeline-panel__lane').first().waitFor({ state: 'visible' });
@@ -144,15 +145,7 @@ try {
     throw new Error(`Unused Timeline layers are not reachable by scrolling: ${JSON.stringify(scrollAccess)}`);
   }
 
-  await timelineTrigger.click();
-  if (await newLayerAction.isDisabled()) throw new Error('New Layer stayed disabled after opening a project.');
-  await newLayerAction.click();
-  await page.waitForFunction((layer) => document.querySelector(`[data-layer="${layer}"]`), postCreationMax + 1);
-  const menuLayers = await readLayers();
-  const menuMax = Math.max(...menuLayers);
-
   await page.evaluate(() => window.dispatchEvent(new Event('cacablu:timeline-bars-changed')));
-  await page.waitForFunction((layer) => document.querySelector(`[data-layer="${layer}"]`), menuMax);
   const rerenderLayers = await readLayers();
 
   const shortcutPrevented = await page.evaluate(() => {
@@ -165,24 +158,7 @@ try {
     window.dispatchEvent(event);
     return event.defaultPrevented;
   });
-  await page.waitForFunction((layer) => document.querySelector(`[data-layer="${layer}"]`), menuMax + 1);
   const shortcutLayers = await readLayers();
-
-  const textShortcutPrevented = await page.evaluate(() => {
-    const input = document.createElement('input');
-    document.body.append(input);
-    input.focus();
-    const event = new KeyboardEvent('keydown', {
-      key: 'l',
-      ctrlKey: true,
-      bubbles: true,
-      cancelable: true,
-    });
-    input.dispatchEvent(event);
-    input.remove();
-    return event.defaultPrevented;
-  });
-  const textLayers = await readLayers();
 
   await page.keyboard.press('Control+O');
   await page.waitForFunction((expectedLayers) => {
@@ -194,14 +170,10 @@ try {
   }, initialLayers);
   const reopenedLayers = await readLayers();
 
-  const expectedMenuLayers = [...postCreationLayers, postCreationMax + 1];
-  const expectedShortcutLayers = [...expectedMenuLayers, postCreationMax + 2];
-  if (JSON.stringify(menuLayers) !== JSON.stringify(expectedMenuLayers)
-    || JSON.stringify(rerenderLayers) !== JSON.stringify(expectedMenuLayers)
-    || !shortcutPrevented
-    || JSON.stringify(shortcutLayers) !== JSON.stringify(expectedShortcutLayers)
-    || textShortcutPrevented
-    || JSON.stringify(textLayers) !== JSON.stringify(expectedShortcutLayers)
+  if (newLayerActionCount !== 0
+    || JSON.stringify(rerenderLayers) !== JSON.stringify(postCreationLayers)
+    || shortcutPrevented
+    || JSON.stringify(shortcutLayers) !== JSON.stringify(postCreationLayers)
     || JSON.stringify(reopenedLayers) !== JSON.stringify(initialLayers)
     || !Number.isInteger(createdBar.barId)
     || createdBar.layer !== createdLayer
@@ -211,12 +183,10 @@ try {
     throw new Error(`Timeline layer workflow failed: ${JSON.stringify({
       initialLayers,
       postCreationLayers,
-      menuLayers,
+      newLayerActionCount,
       rerenderLayers,
       shortcutPrevented,
       shortcutLayers,
-      textShortcutPrevented,
-      textLayers,
       reopenedLayers,
       surfaceCoverage,
       scrollAccess,
@@ -229,12 +199,10 @@ try {
   console.log(JSON.stringify({
     initialLayers,
     postCreationLayers,
-    menuLayers,
+    newLayerActionCount,
     rerenderLayers,
     shortcutPrevented,
     shortcutLayers,
-    textShortcutPrevented,
-    textLayers,
     reopenedLayers,
     surfaceCoverage,
     scrollAccess,
