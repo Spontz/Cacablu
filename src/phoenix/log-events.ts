@@ -2,6 +2,7 @@ import type { AppState } from '../state/app-state';
 import type { PhoenixLogClient, PhoenixLogEntry } from './log-client';
 
 const recordedPhoenixLogs = new Set<string>();
+export const PHOENIX_LOG_EVENT_SOURCE = 'Phoenix log';
 
 export interface PhoenixLogEventRecordResult {
   totalCount: number;
@@ -41,6 +42,7 @@ export async function recordPhoenixLogsAsEvents(
       })
       .map((entry) => ({
         severity: entry.severity,
+        source: PHOENIX_LOG_EVENT_SOURCE,
         subjectId: inferProblemBarId(entry.message)?.toString(),
         description: entry.message,
       }));

@@ -823,7 +823,7 @@ export function createSectionEditorPanel(
       state.clearSectionErrors(barIds);
       state.clearEventsForSubjects(
         barIds.map(String),
-        ['Phoenix section sync', 'Phoenix asset impact'],
+        ['Phoenix section sync', 'Phoenix asset impact', 'Phoenix log'],
       );
     }
 

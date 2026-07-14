@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
-import { collectPhoenixSections, isSupportedPhoenixSectionType, syncProjectBarsToPhoenix } from '../../src/services/project-section-sync';
+import {
+  collectPhoenixSections,
+  isSupportedPhoenixSectionType,
+  normalizeSectionSyncProgress,
+  syncProjectBarsToPhoenix,
+} from '../../src/services/project-section-sync';
 import type { ProjectDatabase } from '../../src/db/db-schema';
 
 function makeDb(): Pick<ProjectDatabase, 'bars'> {
@@ -24,6 +29,21 @@ function makeDb(): Pick<ProjectDatabase, 'bars'> {
     ],
   };
 }
+
+describe('section synchronization progress', () => {
+  it('reports section counts instead of Phoenix write and load work units', () => {
+    expect(normalizeSectionSyncProgress(0, 680, 340)).toEqual({ current: 0, total: 340 });
+    expect(normalizeSectionSyncProgress(340, 680, 340)).toEqual({ current: 170, total: 340 });
+    expect(normalizeSectionSyncProgress(679, 680, 340)).toEqual({ current: 339, total: 340 });
+    expect(normalizeSectionSyncProgress(680, 680, 340)).toEqual({ current: 340, total: 340 });
+  });
+
+  it('clamps invalid or excessive internal work while keeping the real section total', () => {
+    expect(normalizeSectionSyncProgress(900, 680, 340)).toEqual({ current: 340, total: 340 });
+    expect(normalizeSectionSyncProgress(20, 0, 340)).toEqual({ current: 0, total: 340 });
+    expect(normalizeSectionSyncProgress(20, 40, 0)).toEqual({ current: 0, total: 0 });
+  });
+});
 
 describe('project section sync', () => {
   it('serializes bars as Phoenix section payloads', () => {

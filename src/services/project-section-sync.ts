@@ -184,10 +184,11 @@ async function pollSectionSyncStatus(
     try {
       const status = await client.fetchSyncStatus(requestId, signal);
       if (!status) continue;
+      const progress = normalizeSectionSyncProgress(status.current, status.total, fallbackTotal);
       onProgress({
         phase: status.phase === 'error' ? 'error' : 'sections',
-        current: status.total > 0 ? status.current : 0,
-        total: status.total > 0 ? status.total : fallbackTotal,
+        current: progress.current,
+        total: progress.total,
         copied: status.loaded,
         skipped: 0,
         failed: status.failed,
@@ -197,6 +198,22 @@ async function pollSectionSyncStatus(
       if (err instanceof DOMException && err.name === 'AbortError') throw err;
     }
   }
+}
+
+export function normalizeSectionSyncProgress(
+  workCurrent: number,
+  workTotal: number,
+  sectionTotal: number,
+): Pick<ProjectSectionSyncProgress, 'current' | 'total'> {
+  const total = Math.max(0, Math.floor(sectionTotal));
+  if (total === 0) return { current: 0, total: 0 };
+  if (!Number.isFinite(workTotal) || workTotal <= 0) return { current: 0, total };
+
+  const boundedWork = Math.min(Math.max(0, workCurrent), workTotal);
+  return {
+    current: Math.floor((boundedWork / workTotal) * total),
+    total,
+  };
 }
 
 function createSectionSyncRequestId(): string {

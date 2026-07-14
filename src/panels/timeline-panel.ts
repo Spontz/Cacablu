@@ -882,7 +882,7 @@ export function createTimelinePanel(
     appState.clearSectionErrors(barIds);
     appState.clearEventsForSubjects(
       barIds.map(String),
-      ['Phoenix section sync', 'Phoenix asset impact'],
+      ['Phoenix section sync', 'Phoenix asset impact', 'Phoenix log'],
     );
   }
 

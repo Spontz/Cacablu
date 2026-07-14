@@ -9,7 +9,8 @@ import type { ConnectionController } from '../ws/connection';
 import type { UndoManager } from '../app/undo-manager';
 import { buildResourceTree, type ResourceTreeNode } from '../resources/resource-tree';
 import { createPhoenixAssetClient } from '../phoenix/asset-client';
-import { addAssetImpactEvents } from '../phoenix/asset-impact-events';
+import { runAssetOperationWithEvents } from '../phoenix/asset-impact-events';
+import { createPhoenixLogClient } from '../phoenix/log-client';
 import { writeAllowedAssetFile } from '../phoenix/asset-operations';
 import { installPoolPathDrop } from '../resources/pool-path-drop';
 import {
@@ -35,6 +36,7 @@ export function createGlslAssetEditorPanel(
     element.className = 'panel panel--glsl-editor';
 
     const phoenixAssets = createPhoenixAssetClient();
+    const phoenixLogs = createPhoenixLogClient();
     const encoder = new TextEncoder();
     const decoder = new TextDecoder('utf-8');
     const fixedFileId = getPanelFileId(params);
@@ -179,8 +181,13 @@ export function createGlslAssetEditorPanel(
       try {
         updateInFlight = true;
         syncUpdateDisabled();
-        const result = await phoenixAssets.previewFile(currentPath, editor.getValue());
-        addAssetImpactEvents(state, result, `Previewed ${currentPath}`);
+        const content = editor.getValue();
+        await runAssetOperationWithEvents(
+          state,
+          phoenixLogs,
+          `Previewed ${currentPath}`,
+          () => phoenixAssets.previewFile(currentPath, content),
+        );
       } catch (err) {
         state.addEvent({ severity: 'error', source: 'GLSL editor', description: err instanceof Error ? err.message : 'Could not preview GLSL asset.' });
       } finally {
@@ -237,7 +244,12 @@ export function createGlslAssetEditorPanel(
             }
 
             try {
-              addAssetImpactEvents(state, await writeAllowedAssetFile(phoenixAssets, poolPath, restoredFile.data), `Restored ${fileName}`);
+              await runAssetOperationWithEvents(
+                state,
+                phoenixLogs,
+                `Restored ${fileName}`,
+                () => writeAllowedAssetFile(phoenixAssets, poolPath, restoredFile.data),
+              );
             } catch (err) {
               state.addEvent({ severity: 'error', source: 'GLSL editor', description: err instanceof Error ? err.message : `Could not restore ${fileName} in Phoenix.` });
             }
@@ -246,7 +258,12 @@ export function createGlslAssetEditorPanel(
         syncSaveDisabled();
 
         if (connection.isConnected()) {
-          addAssetImpactEvents(state, await writeAllowedAssetFile(phoenixAssets, currentPath, bytes), `Saved ${fileName}`);
+          await runAssetOperationWithEvents(
+            state,
+            phoenixLogs,
+            `Saved ${fileName}`,
+            () => writeAllowedAssetFile(phoenixAssets, currentPath, bytes),
+          );
         } else {
           state.addEvent({ severity: 'warning', source: 'GLSL editor', description: `Saved ${fileName} in the project DB, but Phoenix is not connected so its disk copy was not updated.` });
         }
