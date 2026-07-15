@@ -112,6 +112,24 @@ As a user, I want transport controls to remain visible and understandable whethe
 3. **Given** the timeline starts playing, **When** the playhead advances, **Then** the current-time line glow trail grows gradually.
 4. **Given** playback stops, **When** the playhead is no longer advancing, **Then** the trail fades away gradually and only a subtle glow remains on the line.
 
+---
+
+### User Story 6 - Draw On An Implicit Layer Surface (Priority: P1)
+
+As a user, I want unused timeline rows to behave as available layers so that I can create bars anywhere on the visible surface without first creating or persisting an empty layer.
+
+**Why this priority**: Layer creation is unnecessary when a bar's numeric layer already defines the occupied layer.
+
+**Independent Test**: Scroll below the last occupied layer, drag a bar on an unused row, and verify a further full window of unused rows and aligned grid lines remains below it.
+
+**Acceptance Scenarios**:
+
+1. **Given** visible empty rows, **When** the user drags across an unoccupied interval on any row, **Then** Cacablu creates a bar using that row's numeric layer without a New Layer command.
+2. **Given** a last occupied layer, **When** Timeline lays out or resizes, **Then** at least one full visible window of unused layers remains below it.
+3. **Given** the user creates a bar in the unused window, **When** the last occupied layer changes, **Then** the extension point moves so a further full unused window remains available.
+4. **Given** vertical scrolling below initial content, **When** unused layers are visible, **Then** vertical time-grid lines remain aligned with the ruler and bars.
+5. **Given** the application menu bar, **When** timeline commands render, **Then** they appear under `Timeline`, not the former `Bars` label.
+
 ### Edge Cases
 
 - What happens when a drag would move a bar before time zero?
@@ -173,6 +191,11 @@ As a user, I want transport controls to remain visible and understandable whethe
 - **FR-035**: Edit > Undo MUST pop the latest undoable action and restore the affected bar move when possible.
 - **FR-036**: The Bar Editor Monaco editor MUST render overflow widgets, including suggest lists, hover widgets, and context menus, above the timeline and other docked panels without clipping or stacking behind them.
 - **FR-037**: Bar Editor Monaco overflow behavior MUST be validated with Playwright or equivalent browser automation when changed.
+- **FR-038**: Timeline MUST treat visible empty rows as implicit numeric layers without storing empty-layer entities.
+- **FR-039**: Timeline MUST provide at least one full panel-height window of unused layers below the last occupied layer.
+- **FR-040**: The unused-layer extension MUST advance whenever a new last occupied layer is created.
+- **FR-041**: Vertical time-grid lines MUST continue through all currently visible scrolled layers and remain ruler-aligned.
+- **FR-042**: Timeline-specific commands MUST appear under a top-level menu named `Timeline`, with no separate New Layer command.
 
 ### Key Entities *(include if feature involves data)*
 
@@ -201,6 +224,8 @@ As a user, I want transport controls to remain visible and understandable whethe
 - **SC-010**: Timeline bars with section sync errors are visibly red and return to normal after the affected bars successfully resync or section error state is reset.
 - **SC-011**: Browser automation confirms Monaco popups opened from Bar Editor are the top element at their screen position and do not appear behind the timeline.
 - **SC-012**: Opening a project before Timeline mounts still renders all project bars when the Timeline panel is opened.
+- **SC-013**: A bar can be created on any visible unused row while one full unused window remains below the resulting last occupied layer.
+- **SC-014**: Grid lines remain visible and aligned throughout vertical layer scrolling.
 
 ## Assumptions
 

@@ -8,6 +8,7 @@
 Make Cacablu's Timeline an editable project bar management surface. Timeline will render bars from the loaded SQLite project, support selection and core edit operations, persist committed edits through the project session, and schedule debounced Phoenix section synchronization when the engine is connected.
 The first editing surface is a right-side Bar Editor opened from a selected timeline bar, allowing script and blend setting edits before broader drag/resize timeline operations are added.
 The editor must provide real diagnostic feedback: section sync progress counters only advance for counted local work, bars with section sync errors are colored red, and Events remains a compact diagnostics surface.
+The layer surface is implicit: any visible row can receive a bar, no empty layer entity or New Layer command is stored, and one full window of unused rows remains below occupied content while scrolling preserves the time grid.
 
 ## Technical Context
 

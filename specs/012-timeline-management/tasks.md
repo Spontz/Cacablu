@@ -119,6 +119,15 @@
 - [ ] T054 Run quickstart validation from `quickstart.md`
 - [ ] T055 Verify Events panel reports timeline sync failures clearly with compact text sizing
 - [ ] T056 Verify labels and controls do not overlap at high/low zoom
+
+## Phase 8: Implicit Layer Surface
+
+- [x] T057 Rename the former Bars top-level menu to Timeline while preserving its commands.
+- [x] T058 Remove the unused New Layer command and shortcut.
+- [x] T059 Allow bar creation on every visible empty timeline row through numeric layer assignment.
+- [x] T060 Keep one full panel-height window of unused layers below the last occupied layer.
+- [x] T061 Extend vertical scrolling and keep ruler-aligned time-grid lines visible on scrolled rows.
+- [x] T062 Add browser regression coverage for empty-row creation, layer extension, and grid continuity.
 - [x] T057 Verify Monaco suggest/menu popup z-order with Playwright against a real project and timeline layout
 
 ## Dependencies & Execution Order
