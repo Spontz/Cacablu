@@ -40,7 +40,6 @@ button {
   padding: 8px 14px;
   background: rgba(16, 20, 24, 0.92);
   border-bottom: 1px solid var(--panel-border);
-  backdrop-filter: blur(12px);
 }
 
 .app-shell__workspace {
@@ -462,7 +461,6 @@ body > .context-view {
   place-items: center;
   padding: 24px;
   background: rgba(6, 8, 10, 0.52);
-  backdrop-filter: blur(3px);
 }
 
 .pool-sync-modal[hidden] {
@@ -559,6 +557,7 @@ body > .context-view {
 
 .pool-sync-indicator[data-mode='indeterminate'] .pool-sync-indicator__progress-fill {
   width: 38%;
+  will-change: transform;
   animation: pool-sync-indeterminate 950ms ease-in-out infinite;
 }
 
@@ -582,11 +581,11 @@ body > .context-view {
 
 @keyframes pool-sync-indeterminate {
   0% {
-    left: -42%;
+    transform: translateX(-111%);
   }
 
   100% {
-    left: 104%;
+    transform: translateX(274%);
   }
 }
 
@@ -603,23 +602,40 @@ body > .context-view {
 
 .connection-badge {
   position: relative;
+  isolation: isolate;
 }
 
 .connection-badge[data-status='connected'] {
   border-color: rgba(89, 255, 191, 0.9);
   background: var(--accent-soft);
   box-shadow:
-    0 0 6px rgba(49, 196, 141, 0.82),
-    0 0 15px rgba(49, 196, 141, 0.42),
-    inset 0 0 7px rgba(49, 196, 141, 0.16);
+    0 0 4px rgba(49, 196, 141, 0.52),
+    0 0 10px rgba(49, 196, 141, 0.25),
+    inset 0 0 5px rgba(49, 196, 141, 0.12);
+}
+
+.connection-badge[data-status='connected']::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  box-shadow:
+    0 0 10px rgba(89, 255, 191, 0.98),
+    0 0 24px rgba(49, 196, 141, 0.64),
+    inset 0 0 9px rgba(89, 255, 191, 0.22);
+  will-change: opacity;
   animation: phoenix-connection-glow 3.2s ease-out infinite;
 }
 
 .connection-badge[data-status='connected'][data-activity='active'] {
   box-shadow:
-    0 0 9px rgba(89, 255, 191, 0.98),
-    0 0 23px rgba(49, 196, 141, 0.66),
-    inset 0 0 9px rgba(89, 255, 191, 0.22);
+    0 0 4px rgba(49, 196, 141, 0.52),
+    0 0 10px rgba(49, 196, 141, 0.25),
+    inset 0 0 5px rgba(49, 196, 141, 0.12);
+}
+
+.connection-badge[data-status='connected'][data-activity='active']::after {
   animation-name: phoenix-connection-activity-glow;
   animation-duration: 0.42s;
 }
@@ -805,47 +821,33 @@ body > .context-view {
 
 @keyframes phoenix-connection-glow {
   0% {
-    box-shadow:
-      0 0 10px rgba(89, 255, 191, 0.98),
-      0 0 24px rgba(49, 196, 141, 0.64),
-      inset 0 0 9px rgba(89, 255, 191, 0.22);
+    opacity: 1;
   }
 
   100% {
-    box-shadow:
-      0 0 4px rgba(49, 196, 141, 0.52),
-      0 0 10px rgba(49, 196, 141, 0.25),
-      inset 0 0 5px rgba(49, 196, 141, 0.12);
+    opacity: 0;
   }
 }
 
 @keyframes phoenix-connection-activity-glow {
   0% {
-    box-shadow:
-      0 0 10px rgba(89, 255, 191, 0.98),
-      0 0 24px rgba(49, 196, 141, 0.64),
-      inset 0 0 9px rgba(89, 255, 191, 0.22);
+    opacity: 1;
   }
 
   100% {
-    box-shadow:
-      0 0 4px rgba(49, 196, 141, 0.52),
-      0 0 10px rgba(49, 196, 141, 0.25),
-      inset 0 0 5px rgba(49, 196, 141, 0.12);
+    opacity: 0;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .connection-badge[data-status='connected'] {
+  .connection-badge[data-status='connected']::after {
     animation: none;
+    opacity: 0.35;
   }
 
-  .connection-badge[data-status='connected'][data-activity='active'] {
+  .connection-badge[data-status='connected'][data-activity='active']::after {
     animation: none;
-    box-shadow:
-      0 0 10px rgba(89, 255, 191, 0.98),
-      0 0 24px rgba(49, 196, 141, 0.66),
-      inset 0 0 9px rgba(89, 255, 191, 0.22);
+    opacity: 1;
   }
 }
 
@@ -2077,6 +2079,27 @@ button.events-listbox__severity:focus-visible {
   flex: 1 1 0;
   overflow-y: auto;
   padding: 6px 0;
+  color-scheme: dark;
+  scrollbar-color: rgba(130, 155, 185, 0.48) rgba(7, 10, 15, 0.72);
+  scrollbar-width: thin;
+}
+
+.resources__tree::-webkit-scrollbar {
+  width: 10px;
+}
+
+.resources__tree::-webkit-scrollbar-track {
+  background: rgba(7, 10, 15, 0.72);
+}
+
+.resources__tree::-webkit-scrollbar-thumb {
+  border: 2px solid rgba(7, 10, 15, 0.72);
+  border-radius: 999px;
+  background: rgba(130, 155, 185, 0.48);
+}
+
+.resources__tree::-webkit-scrollbar-thumb:hover {
+  background: rgba(151, 180, 214, 0.68);
 }
 
 .resources__list,

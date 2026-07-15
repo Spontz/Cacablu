@@ -105,7 +105,6 @@ export function createConnectionController(state: AppState): ConnectionControlle
       if (!message) {
         return;
       }
-      notifyPhoenixActivity();
 
       if (message.type === 'runtime.state') {
         publishRuntime(message.state);
@@ -114,6 +113,10 @@ export function createConnectionController(state: AppState): ConnectionControlle
         }
         return;
       }
+
+      // Runtime state is Phoenix's continuous clock signal, not user-visible I/O.
+      // Counting it as activity keeps the connection indicator permanently busy.
+      notifyPhoenixActivity();
 
       if (message.type === 'webrtc.offer' || message.type === 'webrtc.answer' || message.type === 'webrtc.ice-candidate' || message.type === 'webrtc.state') {
         publishWebRtc(message);

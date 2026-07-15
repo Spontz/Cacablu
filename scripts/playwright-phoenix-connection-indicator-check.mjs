@@ -25,25 +25,29 @@ try {
   const readIndicator = () => page.evaluate(() => {
     const badge = window.__indicatorFixture.badge;
     const style = getComputedStyle(badge);
-    const keyframes = badge.getAnimations()[0]?.effect?.getKeyframes() ?? [];
+    const glowStyle = getComputedStyle(badge, '::after');
+    const glowAnimation = badge.getAnimations({ subtree: true })
+      .find((animation) => animation.animationName?.startsWith('phoenix-connection'));
+    const keyframes = glowAnimation?.effect?.getKeyframes() ?? [];
     return {
       status: badge.dataset.status,
       activity: badge.dataset.activity ?? null,
       boxShadow: style.boxShadow,
-      animationName: style.animationName,
-      animationDuration: style.animationDuration,
-      animationTimingFunction: style.animationTimingFunction,
+      animationName: glowStyle.animationName,
+      animationDuration: glowStyle.animationDuration,
+      animationTimingFunction: glowStyle.animationTimingFunction,
       beforeContent: getComputedStyle(badge, '::before').content,
-      firstKeyframeShadow: keyframes[0]?.boxShadow ?? null,
-      lastKeyframeShadow: keyframes.at(-1)?.boxShadow ?? null,
+      afterContent: glowStyle.content,
+      firstKeyframeOpacity: keyframes[0]?.opacity ?? null,
+      lastKeyframeOpacity: keyframes.at(-1)?.opacity ?? null,
     };
   });
 
   const idle = await readIndicator();
-  if (idle.animationName !== 'phoenix-connection-glow' || idle.animationDuration !== '3.2s' || idle.animationTimingFunction !== 'ease-out' || idle.boxShadow === 'none' || idle.beforeContent !== 'none') {
+  if (idle.animationName !== 'phoenix-connection-glow' || idle.animationDuration !== '3.2s' || idle.animationTimingFunction !== 'ease-out' || idle.boxShadow === 'none' || idle.beforeContent !== 'none' || idle.afterContent !== '""') {
     throw new Error(`Connected idle indicator is invalid: ${JSON.stringify(idle)}`);
   }
-  if (!idle.firstKeyframeShadow?.includes('rgba(89, 255, 191, 0.98)') || idle.firstKeyframeShadow === idle.lastKeyframeShadow) {
+  if (idle.firstKeyframeOpacity !== '1' || idle.lastKeyframeOpacity !== '0') {
     throw new Error(`Idle pulse does not start bright and fade: ${JSON.stringify(idle)}`);
   }
 
@@ -79,7 +83,35 @@ try {
     throw new Error(`Reduced-motion indicator is invalid: ${JSON.stringify(reducedMotion)}`);
   }
 
-  console.log(JSON.stringify({ idle, active, settled, disconnected, reducedMotion }, null, 2));
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  const syncModal = await page.evaluate(() => {
+    const overlay = document.querySelector('.pool-sync-modal');
+    const indicator = overlay?.querySelector('.pool-sync-indicator');
+    const fill = overlay?.querySelector('.pool-sync-indicator__progress-fill');
+    if (!(overlay instanceof HTMLElement) || !(indicator instanceof HTMLElement) || !(fill instanceof HTMLElement)) {
+      return null;
+    }
+    overlay.hidden = false;
+    indicator.dataset.mode = 'indeterminate';
+    const overlayStyle = getComputedStyle(overlay);
+    const animation = fill.getAnimations()[0];
+    const keyframes = animation?.effect?.getKeyframes() ?? [];
+    const result = {
+      backdropFilter: overlayStyle.backdropFilter,
+      animationName: getComputedStyle(fill).animationName,
+      firstTransform: keyframes[0]?.transform ?? null,
+      lastTransform: keyframes.at(-1)?.transform ?? null,
+      firstLeft: keyframes[0]?.left ?? null,
+      lastLeft: keyframes.at(-1)?.left ?? null,
+    };
+    overlay.hidden = true;
+    return result;
+  });
+  if (!syncModal || syncModal.backdropFilter !== 'none' || syncModal.animationName !== 'pool-sync-indeterminate' || syncModal.firstTransform === syncModal.lastTransform || syncModal.firstLeft !== null || syncModal.lastLeft !== null) {
+    throw new Error(`Phoenix sync modal uses a repaint-heavy animation: ${JSON.stringify(syncModal)}`);
+  }
+
+  console.log(JSON.stringify({ idle, active, settled, disconnected, reducedMotion, syncModal }, null, 2));
 } finally {
   await browser.close();
 }
