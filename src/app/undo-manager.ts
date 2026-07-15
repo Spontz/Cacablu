@@ -37,7 +37,13 @@ export function createUndoManager(): UndoManager {
       const action = stack.pop();
       if (!action) return false;
       publish();
-      await action.undo();
+      try {
+        await action.undo();
+      } catch (error) {
+        stack.push(action);
+        publish();
+        throw error;
+      }
       return true;
     },
 

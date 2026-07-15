@@ -207,9 +207,17 @@ export function createAppShell(root: HTMLElement): AppShell {
   }
 
   async function handleUndo(): Promise<void> {
-    const undone = await undoManager.undo();
-    if (!undone) {
-      runEditCommand('undo');
+    try {
+      const undone = await undoManager.undo();
+      if (!undone) {
+        runEditCommand('undo');
+      }
+    } catch (error) {
+      state.addEvent({
+        severity: 'error',
+        source: 'Undo',
+        description: error instanceof Error ? error.message : 'Could not undo the last action.',
+      });
     }
   }
 

@@ -38,6 +38,49 @@ describe('resource clipboard Phoenix synchronization', () => {
     await syncResourceClipboardMutation(mutation(), client, createAppState(), true);
 
     expect(calls).toEqual(['write:pool/target/hero.png', 'delete:pool/source/hero.png']);
+    expect(client.writeFile).toHaveBeenCalledWith(
+      'pool/target/hero.png',
+      new Uint8Array([1, 2]),
+      undefined,
+      { reloadSections: false },
+    );
+  });
+
+  it('publishes the complete destination tree before reloading sections and deleting old paths', async () => {
+    const calls: string[] = [];
+    const result = mutation();
+    result.files[1].file.enabled = true;
+    const client = {
+      writeFile: vi.fn(async (path: string) => { calls.push(`write:${path}`); return ok('write-file'); }),
+      deleteFile: vi.fn(async (path: string) => { calls.push(`delete:${path}`); return ok('delete-file'); }),
+    };
+
+    await syncResourceClipboardMutation(result, client, createAppState(), true, {
+      beforeDelete: async () => { calls.push('reload-sections'); return true; },
+    });
+
+    expect(calls).toEqual([
+      'write:pool/target/hero.png',
+      'write:pool/target/disabled.txt',
+      'reload-sections',
+      'delete:pool/source/hero.png',
+      'delete:pool/source/disabled.txt',
+    ]);
+  });
+
+  it('keeps old paths when the affected section replacement fails', async () => {
+    const calls: string[] = [];
+    const client = {
+      writeFile: vi.fn(async (path: string) => { calls.push(`write:${path}`); return ok('write-file'); }),
+      deleteFile: vi.fn(async (path: string) => { calls.push(`delete:${path}`); return ok('delete-file'); }),
+    };
+
+    await syncResourceClipboardMutation(mutation(), client, createAppState(), true, {
+      beforeDelete: async () => { calls.push('reload-sections'); return false; },
+    });
+
+    expect(calls).toEqual(['write:pool/target/hero.png', 'reload-sections']);
+    expect(client.deleteFile).not.toHaveBeenCalled();
   });
 
   it('does not delete sources for copies and skips all Phoenix work while disconnected', async () => {

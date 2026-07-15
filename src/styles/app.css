@@ -153,9 +153,9 @@ body > .context-view {
 
 .menu-bar__item {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) max-content;
+  grid-template-columns: 14px minmax(0, 1fr) max-content;
   align-items: center;
-  gap: 24px;
+  column-gap: 8px;
   text-align: left;
   padding: 8px 10px;
   border-radius: 8px;
@@ -169,9 +169,21 @@ body > .context-view {
 }
 
 .menu-bar__shortcut {
+  margin-left: 16px;
   color: var(--panel-muted);
   font: inherit;
   font-size: 12px;
+}
+
+.menu-icon {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .menu-bar__separator {
@@ -2094,7 +2106,7 @@ button.events-listbox__severity:focus-visible {
   display: flex;
   align-items: center;
   gap: 5px;
-  padding: 3px 14px;
+  padding: 3px 4px 3px 14px;
   white-space: nowrap;
   overflow: hidden;
 }
@@ -2194,52 +2206,128 @@ button.events-listbox__severity:focus-visible {
   cursor: pointer;
 }
 
-.resources__delete {
-  position: relative;
-  flex: 0 0 16px;
-  width: 16px;
-  height: 16px;
+.resources__actions-button {
+  flex: 0 0 18px;
+  width: 18px;
+  height: 18px;
   margin-left: auto;
+  padding: 0;
   border: 0;
-  border-radius: 50%;
-  background: #d93838;
-  color: #fff;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--panel-muted);
   cursor: pointer;
-  opacity: 0;
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.18), 0 1px 3px rgba(0, 0, 0, 0.24);
-}
-
-.resources__delete::before,
-.resources__delete::after {
-  position: absolute;
-  top: 7px;
-  left: 4px;
-  width: 8px;
-  height: 2px;
-  border-radius: 999px;
-  background: currentColor;
-  content: '';
-}
-
-.resources__delete::before {
-  transform: rotate(45deg);
-}
-
-.resources__delete::after {
-  transform: rotate(-45deg);
-}
-
-.resources__folder-row:hover .resources__delete,
-.resources__file:hover .resources__delete,
-.resources__delete:focus-visible {
   opacity: 1;
+  font-size: 16px;
+  line-height: 16px;
 }
 
-.resources__delete:hover,
-.resources__delete:focus-visible {
-  background: #f04a4a;
+.resources__actions-button:hover,
+.resources__actions-button:focus-visible {
+  background: var(--menu-hover);
+  color: var(--panel-text);
   outline: none;
-  transform: scale(1.08);
+}
+
+.resources__actions-menu {
+  position: fixed;
+  z-index: 1200;
+  display: flex;
+  width: 160px;
+  flex-direction: column;
+  padding: 4px;
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  background: var(--menu-bg, #20242b);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.38);
+}
+
+.resources__actions-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 9px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--panel-text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.resources__actions-menu-item:hover,
+.resources__actions-menu-item:focus-visible {
+  background: var(--menu-hover);
+  outline: none;
+}
+
+.resources__actions-menu-separator {
+  height: 1px;
+  margin: 3px 5px;
+  background: var(--panel-border);
+}
+
+.resources__dialog {
+  min-width: min(420px, calc(100vw - 32px));
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  background: var(--menu-bg, #20242b);
+  color: var(--panel-text);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.55);
+}
+
+.resources__dialog::backdrop {
+  background: rgba(0, 0, 0, 0.48);
+}
+
+.resources__dialog h3 {
+  margin: 0 0 14px;
+}
+
+.resources__dialog label {
+  display: grid;
+  gap: 6px;
+}
+
+.resources__dialog input {
+  padding: 8px 10px;
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  background: var(--panel-bg);
+  color: var(--panel-text);
+}
+
+.resources__dialog-error {
+  min-height: 1.2em;
+  margin: 7px 0 0;
+  color: #ff7777;
+  font-size: 12px;
+}
+
+.resources__dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 18px;
+}
+
+.resources__dialog-actions--stacked {
+  align-items: stretch;
+  flex-direction: column;
+}
+
+.resources__dialog-actions button {
+  padding: 7px 11px;
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--panel-text);
+  cursor: pointer;
+}
+
+.resources__dialog-actions button.is-primary {
+  border-color: #61d7ff;
+  background: rgba(97, 215, 255, 0.16);
 }
 
 .resources__icon {

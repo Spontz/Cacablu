@@ -50,13 +50,21 @@ export interface DbSession {
   restoreTimelineMarker(marker: DbMarker): DbMarker;
   upsertResourceFile(input: NewResourceFile): DbFile;
   insertResourceFolder(input: NewResourceFolder): DbFolder;
+  createResourceFolder(parentId: number, name: string): DbFolder;
+  renameResourceItem(item: ResourceItemRef, name: string, updateScriptPaths: boolean): ResourceRenameMutation;
+  restoreResourceRename(mutation: ResourceRenameMutation): ResourceRenameMutation;
+  findResourceScriptReferences(item: ResourceItemRef): ResourceScriptReference[];
   moveResourceFile(fileId: number, parentId: number): DbFile;
   copyResourceItems(roots: AssetClipboardNode[], parentId: number): ResourceClipboardMutation;
   moveResourceItems(roots: ResourceItemRef[], parentId: number): ResourceClipboardMutation;
+  moveResourceItemsToParents(roots: ResourceParentRestore[]): ResourceClipboardMutation;
   updateResourceFileContent(fileId: number, input: Pick<DbFile, 'bytes' | 'type' | 'data' | 'format'>): DbFile;
   setResourceFileEnabled(fileId: number, enabled: boolean): DbFile;
   deleteResourceFile(fileId: number): DbFile;
   deleteResourceFolder(folderId: number): { folders: DbFolder[]; files: DbFile[] };
+  snapshotResourceItems(roots: ResourceItemRef[]): ResourceDeletionSnapshot;
+  deleteResourceItems(roots: ResourceItemRef[], expected?: ResourceDeletionSnapshot): ResourceDeletionSnapshot;
+  restoreResourceItems(snapshot: ResourceDeletionSnapshot): ResourceClipboardMutation;
   updateGraphicsConfig(context: GraphicsContextUpdate, fbos: GraphicsFboUpdate[]): void;
   updateDemoSettings(settings: DemoSettingsUpdate): void;
   save(): Promise<void>;
@@ -69,6 +77,10 @@ export interface ResourceItemRef {
   id: number;
 }
 
+export interface ResourceParentRestore extends ResourceItemRef {
+  parentId: number;
+}
+
 export interface ResourceFileMutation {
   file: DbFile;
   oldPath?: string;
@@ -79,6 +91,33 @@ export interface ResourceClipboardMutation {
   operation: 'copy' | 'move';
   roots: ResourceItemRef[];
   files: ResourceFileMutation[];
+}
+
+export interface ResourceScriptReference {
+  barId: number;
+  occurrences: number;
+}
+
+export interface ResourceScriptEdit {
+  barId: number;
+  before: string;
+  after: string;
+}
+
+export interface ResourceRenameMutation {
+  item: ResourceItemRef;
+  oldName: string;
+  newName: string;
+  oldPath: string;
+  newPath: string;
+  files: ResourceFileMutation[];
+  scripts: ResourceScriptEdit[];
+}
+
+export interface ResourceDeletionSnapshot {
+  roots: ResourceItemRef[];
+  folders: Array<{ row: DbFolder; index: number }>;
+  files: Array<{ row: DbFile; index: number; path: string }>;
 }
 
 export interface DbTableSnapshot {
@@ -327,6 +366,130 @@ function makeSession(handle: FileSystemFileHandle, db: SqlDatabase, data: Projec
       return folder;
     },
 
+    createResourceFolder(parentId, name): DbFolder {
+      validateDestination(data, parentId);
+      const normalizedName = validateResourceItemName(data, parentId, name);
+      db.run('INSERT INTO "FOLDERS" ("name", "parent", "enabled") VALUES (?, ?, ?)', [normalizedName, parentId, 1]);
+      const folder: DbFolder = {
+        id: lastInsertRowId(db),
+        name: normalizedName,
+        parent: parentId,
+        enabled: true,
+      };
+      data.folders.push(folder);
+      return folder;
+    },
+
+    findResourceScriptReferences(item): ResourceScriptReference[] {
+      const target = getResourceItem(data, item);
+      const oldPath = buildResourcePath(data, item.kind, target.id);
+      return data.bars.flatMap((bar) => {
+        const occurrences = countPoolPathReferences(bar.script, oldPath, item.kind === 'folder');
+        return occurrences > 0 ? [{ barId: bar.id, occurrences }] : [];
+      });
+    },
+
+    renameResourceItem(item, name, updateScriptPaths): ResourceRenameMutation {
+      const target = getResourceItem(data, item);
+      const normalizedName = validateResourceItemName(data, target.parent, name, item);
+      const oldName = target.name;
+      const oldPath = buildResourcePath(data, item.kind, target.id);
+      if (normalizedName === oldName) {
+        return { item, oldName, newName: oldName, oldPath, newPath: oldPath, files: [], scripts: [] };
+      }
+
+      const affectedIds = item.kind === 'file' ? [item.id] : collectRootFileIds(data, [item]);
+      const oldPaths = new Map(affectedIds.map((id) => [id, buildResourcePath(data, 'file', id)]));
+      const previousScripts = data.bars.map((bar) => bar.script);
+      const scripts: ResourceScriptEdit[] = [];
+      const table = item.kind === 'file' ? 'FILES' : 'FOLDERS';
+
+      db.run('BEGIN TRANSACTION');
+      try {
+        db.run(`UPDATE "${table}" SET "name" = ? WHERE "id" = ?`, [normalizedName, item.id]);
+        target.name = normalizedName;
+        const newPath = buildResourcePath(data, item.kind, target.id);
+        if (updateScriptPaths) {
+          for (const bar of data.bars) {
+            const after = rewritePoolPathReferences(bar.script, oldPath, newPath, item.kind === 'folder');
+            if (after === bar.script) continue;
+            scripts.push({ barId: bar.id, before: bar.script, after });
+            db.run('UPDATE "BARS" SET "script" = ? WHERE "id" = ?', [after, bar.id]);
+            bar.script = after;
+          }
+        }
+        db.run('COMMIT');
+
+        return {
+          item,
+          oldName,
+          newName: normalizedName,
+          oldPath,
+          newPath,
+          files: affectedIds.map((id) => {
+            const file = data.files.find((candidate) => candidate.id === id);
+            if (!file) throw new Error(`Pool file ${id} was not found after renaming.`);
+            return { file, oldPath: oldPaths.get(id), newPath: buildResourcePath(data, 'file', id) };
+          }),
+          scripts,
+        };
+      } catch (error) {
+        try { db.run('ROLLBACK'); } catch { /* Transaction may already be closed. */ }
+        target.name = oldName;
+        data.bars.forEach((bar, index) => { bar.script = previousScripts[index]; });
+        throw error;
+      }
+    },
+
+    restoreResourceRename(mutation): ResourceRenameMutation {
+      const target = getResourceItem(data, mutation.item);
+      if (target.name !== mutation.newName) {
+        throw new Error(`Cannot undo rename because ${mutation.newName} was renamed again.`);
+      }
+      validateResourceItemName(data, target.parent, mutation.oldName, mutation.item);
+      for (const edit of mutation.scripts) {
+        const bar = data.bars.find((candidate) => candidate.id === edit.barId);
+        if (!bar || bar.script !== edit.after) {
+          throw new Error(`Cannot undo rename because script ${edit.barId} changed afterwards.`);
+        }
+      }
+      const affectedIds = mutation.files.map((entry) => entry.file.id);
+      const currentPaths = new Map(affectedIds.map((id) => [id, buildResourcePath(data, 'file', id)]));
+      const table = mutation.item.kind === 'file' ? 'FILES' : 'FOLDERS';
+      const previousScripts = data.bars.map((bar) => bar.script);
+
+      db.run('BEGIN TRANSACTION');
+      try {
+        db.run(`UPDATE "${table}" SET "name" = ? WHERE "id" = ?`, [mutation.oldName, mutation.item.id]);
+        target.name = mutation.oldName;
+        for (const edit of mutation.scripts) {
+          db.run('UPDATE "BARS" SET "script" = ? WHERE "id" = ?', [edit.before, edit.barId]);
+          const bar = data.bars.find((candidate) => candidate.id === edit.barId);
+          if (bar) bar.script = edit.before;
+        }
+        db.run('COMMIT');
+      } catch (error) {
+        try { db.run('ROLLBACK'); } catch { /* Transaction may already be closed. */ }
+        target.name = mutation.newName;
+        data.bars.forEach((bar, index) => { bar.script = previousScripts[index]; });
+        throw error;
+      }
+
+      return {
+        item: mutation.item,
+        oldName: mutation.newName,
+        newName: mutation.oldName,
+        oldPath: mutation.newPath,
+        newPath: mutation.oldPath,
+        files: affectedIds.map((id) => {
+          const file = data.files.find((candidate) => candidate.id === id);
+          if (!file) throw new Error(`Pool file ${id} was not found after undoing rename.`);
+          return { file, oldPath: currentPaths.get(id), newPath: buildResourcePath(data, 'file', id) };
+        }),
+        scripts: mutation.scripts.map((edit) => ({ barId: edit.barId, before: edit.after, after: edit.before })),
+      };
+    },
+
     moveResourceFile(fileId, parentId): DbFile {
       const file = data.files.find((candidate) => candidate.id === fileId);
       if (!file) {
@@ -417,6 +580,47 @@ function makeSession(handle: FileSystemFileHandle, db: SqlDatabase, data: Projec
       };
     },
 
+    moveResourceItemsToParents(roots): ResourceClipboardMutation {
+      const refs = canonicalizeResourceRefs(data, roots);
+      const requested = new Map(roots.map((root) => [`${root.kind}:${root.id}`, root.parentId]));
+      const previousFolders = data.folders.map((folder) => ({ ...folder }));
+      const previousFiles = data.files.map(cloneDbFile);
+      const affectedFileIds = collectRootFileIds(data, refs);
+      const oldPaths = new Map(affectedFileIds.map((id) => [id, buildResourcePath(data, 'file', id)]));
+
+      for (const root of refs) {
+        const parentId = requested.get(`${root.kind}:${root.id}`);
+        if (parentId === undefined) throw new Error('The original Pool destination is unavailable.');
+        validateDestination(data, parentId);
+        validateMoveRoots(data, [root], parentId);
+      }
+
+      db.run('BEGIN TRANSACTION');
+      try {
+        for (const root of refs) {
+          const parentId = requested.get(`${root.kind}:${root.id}`);
+          if (parentId === undefined) throw new Error('The original Pool destination is unavailable.');
+          const table = root.kind === 'file' ? 'FILES' : 'FOLDERS';
+          db.run(`UPDATE "${table}" SET "parent" = ? WHERE "id" = ?`, [parentId, root.id]);
+          getResourceItem(data, root).parent = parentId;
+        }
+        db.run('COMMIT');
+      } catch (error) {
+        rollbackResourceMutation(db, data, previousFolders, previousFiles);
+        throw error;
+      }
+
+      return {
+        operation: 'move',
+        roots: refs,
+        files: affectedFileIds.map((id) => {
+          const file = data.files.find((candidate) => candidate.id === id);
+          if (!file) throw new Error(`Pool file ${id} was not found after moving.`);
+          return { file, oldPath: oldPaths.get(id), newPath: buildResourcePath(data, 'file', id) };
+        }),
+      };
+    },
+
     updateResourceFileContent(fileId, input): DbFile {
       const file = data.files.find((candidate) => candidate.id === fileId);
       if (!file) {
@@ -455,31 +659,78 @@ function makeSession(handle: FileSystemFileHandle, db: SqlDatabase, data: Projec
     },
 
     deleteResourceFolder(folderId): { folders: DbFolder[]; files: DbFile[] } {
-      const target = data.folders.find((candidate) => candidate.id === folderId);
-      if (!target) {
-        throw new Error(`Resource folder ${folderId} was not found.`);
-      }
+      const deleted = this.deleteResourceItems([{ kind: 'folder', id: folderId }]);
+      return {
+        folders: deleted.folders.map((entry) => entry.row),
+        files: deleted.files.map((entry) => entry.row),
+      };
+    },
 
-      const folderIds = new Set<number>([folderId]);
-      let changed = true;
-      while (changed) {
-        changed = false;
-        for (const folder of data.folders) {
-          if (!folderIds.has(folder.id) && folderIds.has(folder.parent)) {
-            folderIds.add(folder.id);
-            changed = true;
-          }
+    snapshotResourceItems(roots): ResourceDeletionSnapshot {
+      return captureResourceItems(data, roots);
+    },
+
+    deleteResourceItems(roots, expected): ResourceDeletionSnapshot {
+      const canonicalRoots = canonicalizeResourceRefs(data, roots);
+      if (canonicalRoots.length === 0) throw new Error('Select at least one Pool item to delete.');
+      const folderIds = collectRootFolderIds(data, canonicalRoots);
+      const fileIds = new Set(collectRootFileIds(data, canonicalRoots));
+      const snapshot = captureResourceItems(data, canonicalRoots);
+      if (expected) validateExpectedDeletion(snapshot, expected);
+      const previousFolders = data.folders.map((folder) => ({ ...folder }));
+      const previousFiles = data.files.map(cloneDbFile);
+
+      db.run('BEGIN TRANSACTION');
+      try {
+        deleteRowsByIds(db, 'FILES', [...fileIds]);
+        deleteRowsByIds(db, 'FOLDERS', [...folderIds]);
+        db.run('COMMIT');
+        removeWhere(data.files, (file) => fileIds.has(file.id));
+        removeWhere(data.folders, (folder) => folderIds.has(folder.id));
+        return snapshot;
+      } catch (error) {
+        rollbackResourceMutation(db, data, previousFolders, previousFiles);
+        throw error;
+      }
+    },
+
+    restoreResourceItems(snapshot): ResourceClipboardMutation {
+      validateResourceRestoration(data, snapshot);
+      const previousFolders = data.folders.map((folder) => ({ ...folder }));
+      const previousFiles = data.files.map(cloneDbFile);
+
+      db.run('BEGIN TRANSACTION');
+      try {
+        for (const entry of sortRestoredFolders(snapshot.folders)) {
+          const folder = entry.row;
+          db.run('INSERT INTO "FOLDERS" ("id", "name", "parent", "enabled") VALUES (?, ?, ?, ?)', [
+            folder.id, folder.name, folder.parent, folder.enabled ? 1 : 0,
+          ]);
         }
+        for (const entry of snapshot.files) {
+          const file = entry.row;
+          db.run(
+            'INSERT INTO "FILES" ("id", "name", "parent", "bytes", "type", "data", "format", "enabled") VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+            [file.id, file.name, file.parent, file.bytes, file.type, file.data, file.format, file.enabled ? 1 : 0],
+          );
+        }
+        db.run('COMMIT');
+        restoreRowsAtPositions(data.folders, snapshot.folders.map((entry) => ({ row: { ...entry.row }, index: entry.index })));
+        restoreRowsAtPositions(data.files, snapshot.files.map((entry) => ({ row: cloneDbFile(entry.row), index: entry.index })));
+      } catch (error) {
+        rollbackResourceMutation(db, data, previousFolders, previousFiles);
+        throw error;
       }
 
-      const deletedFolders = data.folders.filter((folder) => folderIds.has(folder.id));
-      const deletedFiles = data.files.filter((file) => folderIds.has(file.parent));
-      const placeholders = [...folderIds].map(() => '?').join(', ');
-      db.run(`DELETE FROM "FILES" WHERE "parent" IN (${placeholders})`, [...folderIds]);
-      db.run(`DELETE FROM "FOLDERS" WHERE "id" IN (${placeholders})`, [...folderIds]);
-      removeWhere(data.files, (file) => folderIds.has(file.parent));
-      removeWhere(data.folders, (folder) => folderIds.has(folder.id));
-      return { folders: deletedFolders, files: deletedFiles };
+      return {
+        operation: 'copy',
+        roots: snapshot.roots.map((root) => ({ ...root })),
+        files: snapshot.files.map((entry) => {
+          const file = data.files.find((candidate) => candidate.id === entry.row.id);
+          if (!file) throw new Error(`Restored Pool file ${entry.row.id} was not found.`);
+          return { file, newPath: buildResourcePath(data, 'file', file.id) };
+        }),
+      };
     },
 
     updateGraphicsConfig(context, fbos): void {
@@ -539,11 +790,60 @@ function makeSession(handle: FileSystemFileHandle, db: SqlDatabase, data: Projec
   };
 }
 
+export function validateResourceItemName(
+  data: Pick<ProjectDatabase, 'files' | 'folders'>,
+  parentId: number,
+  name: string,
+  excluded?: ResourceItemRef,
+): string {
+  const normalized = name.trim();
+  if (!normalized) throw new Error('Name cannot be empty.');
+  if (normalized === '.' || normalized === '..') throw new Error('Name cannot be . or ...');
+  if (/[\\/]/.test(normalized)) throw new Error('Name cannot contain path separators.');
+  if ([...normalized].some((character) => {
+    const code = character.charCodeAt(0);
+    return code <= 31 || code === 127;
+  })) throw new Error('Name cannot contain control characters.');
+  const key = normalized.toLocaleLowerCase();
+  const conflict = [
+    ...data.files.map((row) => ({ kind: 'file' as const, ...row })),
+    ...data.folders.map((row) => ({ kind: 'folder' as const, ...row })),
+  ].some((row) => (
+    row.parent === parentId
+    && row.name.toLocaleLowerCase() === key
+    && (!excluded || row.kind !== excluded.kind || row.id !== excluded.id)
+  ));
+  if (conflict) throw new Error(`An item named ${normalized} already exists in this folder.`);
+  return normalized;
+}
+
 function validateDestination(data: ProjectDatabase, parentId: number): void {
   if (!Number.isInteger(parentId) || parentId < 0) throw new Error('Pool destination is invalid.');
   if (parentId > 0 && !data.folders.some((folder) => folder.id === parentId)) {
     throw new Error('The selected Pool destination no longer exists.');
   }
+}
+
+function getResourceItem(data: ProjectDatabase, item: ResourceItemRef): DbFile | DbFolder {
+  const row = item.kind === 'file'
+    ? data.files.find((candidate) => candidate.id === item.id)
+    : data.folders.find((candidate) => candidate.id === item.id);
+  if (!row) throw new Error(`Pool ${item.kind} ${item.id} is no longer available.`);
+  return row;
+}
+
+function countPoolPathReferences(script: string, path: string, folder: boolean): number {
+  return [...script.matchAll(poolPathPattern(path, folder))].length;
+}
+
+function rewritePoolPathReferences(script: string, oldPath: string, newPath: string, folder: boolean): string {
+  return script.replace(poolPathPattern(oldPath, folder), newPath);
+}
+
+function poolPathPattern(path: string, folder: boolean): RegExp {
+  const escaped = path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const boundary = folder ? '(?=\\/|[^A-Za-z0-9_.-]|$)' : '(?![A-Za-z0-9_.\\/\\-])';
+  return new RegExp(`${escaped}${boundary}`, 'g');
 }
 
 function validateClipboardRootNames(data: ProjectDatabase, roots: AssetClipboardNode[], parentId: number): void {
@@ -675,6 +975,96 @@ function collectRootFileIds(data: ProjectDatabase, roots: ResourceItemRef[]): nu
   const ids = roots.filter((root) => root.kind === 'file').map((root) => root.id);
   for (const file of data.files) if (folderIds.has(file.parent)) ids.push(file.id);
   return [...new Set(ids)];
+}
+
+function collectRootFolderIds(data: ProjectDatabase, roots: ResourceItemRef[]): Set<number> {
+  const folderIds = new Set(roots.filter((root) => root.kind === 'folder').map((root) => root.id));
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const folder of data.folders) {
+      if (!folderIds.has(folder.id) && folderIds.has(folder.parent)) {
+        folderIds.add(folder.id);
+        changed = true;
+      }
+    }
+  }
+  return folderIds;
+}
+
+function captureResourceItems(data: ProjectDatabase, roots: ResourceItemRef[]): ResourceDeletionSnapshot {
+  const canonicalRoots = canonicalizeResourceRefs(data, roots);
+  if (canonicalRoots.length === 0) throw new Error('Select at least one Pool item.');
+  const folderIds = collectRootFolderIds(data, canonicalRoots);
+  const fileIds = new Set(collectRootFileIds(data, canonicalRoots));
+  return {
+    roots: canonicalRoots.map((root) => ({ ...root })),
+    folders: data.folders.flatMap((folder, index) => folderIds.has(folder.id)
+      ? [{ row: { ...folder }, index }]
+      : []),
+    files: data.files.flatMap((file, index) => fileIds.has(file.id)
+      ? [{ row: cloneDbFile(file), index, path: buildResourcePath(data, 'file', file.id) }]
+      : []),
+  };
+}
+
+function validateExpectedDeletion(current: ResourceDeletionSnapshot, expected: ResourceDeletionSnapshot): void {
+  const currentKeys = [
+    ...current.folders.map((entry) => `folder:${entry.row.id}`),
+    ...current.files.map((entry) => `file:${entry.row.id}`),
+  ].sort();
+  const expectedKeys = [
+    ...expected.folders.map((entry) => `folder:${entry.row.id}`),
+    ...expected.files.map((entry) => `file:${entry.row.id}`),
+  ].sort();
+  if (currentKeys.length !== expectedKeys.length || currentKeys.some((key, index) => key !== expectedKeys[index])) {
+    throw new Error('Cannot undo Paste because the pasted subtree changed afterwards.');
+  }
+}
+
+function deleteRowsByIds(db: SqlDatabase, table: 'FILES' | 'FOLDERS', ids: number[]): void {
+  if (ids.length === 0) return;
+  db.run(`DELETE FROM "${table}" WHERE "id" IN (${ids.map(() => '?').join(', ')})`, ids);
+}
+
+function validateResourceRestoration(data: ProjectDatabase, snapshot: ResourceDeletionSnapshot): void {
+  const folderIds = new Set(snapshot.folders.map((entry) => entry.row.id));
+  const fileIds = new Set(snapshot.files.map((entry) => entry.row.id));
+  if (data.folders.some((folder) => folderIds.has(folder.id)) || data.files.some((file) => fileIds.has(file.id))) {
+    throw new Error('Cannot undo because one of the original Pool ids is already in use.');
+  }
+  for (const root of snapshot.roots) {
+    const row = root.kind === 'file'
+      ? snapshot.files.find((entry) => entry.row.id === root.id)?.row
+      : snapshot.folders.find((entry) => entry.row.id === root.id)?.row;
+    if (!row) throw new Error(`Cannot undo because Pool ${root.kind} ${root.id} is missing from the restoration payload.`);
+    if (row.parent > 0 && !folderIds.has(row.parent) && !data.folders.some((folder) => folder.id === row.parent)) {
+      throw new Error(`Cannot undo ${row.name} because its original parent no longer exists.`);
+    }
+    validateResourceItemName(data, row.parent, row.name);
+  }
+}
+
+function sortRestoredFolders(entries: ResourceDeletionSnapshot['folders']): ResourceDeletionSnapshot['folders'] {
+  const pending = [...entries];
+  const restored = new Set<number>();
+  const result: ResourceDeletionSnapshot['folders'] = [];
+  while (pending.length > 0) {
+    const index = pending.findIndex((entry) => entry.row.parent === 0
+      || restored.has(entry.row.parent)
+      || !pending.some((candidate) => candidate.row.id === entry.row.parent));
+    if (index < 0) throw new Error('Cannot restore a Pool folder hierarchy containing a cycle.');
+    const [entry] = pending.splice(index, 1);
+    result.push(entry);
+    restored.add(entry.row.id);
+  }
+  return result;
+}
+
+function restoreRowsAtPositions<T>(target: T[], entries: Array<{ row: T; index: number }>): void {
+  for (const entry of [...entries].sort((left, right) => left.index - right.index)) {
+    target.splice(Math.min(entry.index, target.length), 0, entry.row);
+  }
 }
 
 function rollbackResourceMutation(

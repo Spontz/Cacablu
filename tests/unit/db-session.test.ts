@@ -183,6 +183,24 @@ describe('DbSession Pool clipboard mutations', () => {
     session.close();
   });
 
+  it('atomically restores Cut/Paste roots to different original parents', async () => {
+    const handle = new MemoryFileHandle(await createResourceProjectBytes()) as unknown as FileSystemFileHandle;
+    const session = await openDbSession(handle);
+    session.moveResourceItems([{ kind: 'file', id: 3 }, { kind: 'file', id: 4 }], 10);
+    const restored = session.moveResourceItemsToParents([
+      { kind: 'file', id: 3, parentId: 1 },
+      { kind: 'file', id: 4, parentId: 2 },
+    ]);
+
+    expect(restored.files.map((entry) => [entry.file.id, entry.newPath])).toEqual([
+      [3, '/pool/textures/hero.png'],
+      [4, '/pool/textures/nested/note.txt'],
+    ]);
+    expect(session.data.files.find((file) => file.id === 3)?.parent).toBe(1);
+    expect(session.data.files.find((file) => file.id === 4)?.parent).toBe(2);
+    session.close();
+  });
+
   it('rejects conflicts, same-parent moves, and descendant cycles without mutation', async () => {
     const handle = new MemoryFileHandle(await createResourceProjectBytes()) as unknown as FileSystemFileHandle;
     const session = await openDbSession(handle);
@@ -225,6 +243,129 @@ describe('DbSession Pool clipboard mutations', () => {
     expect(session.data.folders).toHaveLength(folderCount);
     expect(session.data.files).toHaveLength(fileCount);
     expect(session.getTableSnapshot('FILES').rows).toHaveLength(fileCount);
+    session.close();
+  });
+
+  it('rejects Copy/Paste undo when the pasted subtree gained later content', async () => {
+    const handle = new MemoryFileHandle(await createResourceProjectBytes()) as unknown as FileSystemFileHandle;
+    const session = await openDbSession(handle);
+    const roots = captureAssetRoots(session.data, [{ kind: 'folder', id: 1, name: 'textures' }]);
+    const copied = session.copyResourceItems(roots, 10);
+    const expected = session.snapshotResourceItems(copied.roots);
+    const pastedFolder = copied.roots[0];
+    if (pastedFolder.kind !== 'folder') throw new Error('Expected copied folder.');
+    session.upsertResourceFile({
+      name: 'later.txt', parent: pastedFolder.id, bytes: 1, type: 'text/plain',
+      data: new Uint8Array([9]), format: 'txt', enabled: true,
+    });
+
+    expect(() => session.deleteResourceItems(copied.roots, expected)).toThrow('changed afterwards');
+    expect(session.data.folders.some((folder) => folder.id === pastedFolder.id)).toBe(true);
+    expect(session.data.files.some((file) => file.name === 'later.txt' && file.parent === pastedFolder.id)).toBe(true);
+    session.close();
+  });
+});
+
+describe('DbSession Pool item actions', () => {
+  it('creates validated root and nested folders and persists them', async () => {
+    const handle = new MemoryFileHandle(await createResourceProjectBytes()) as unknown as FileSystemFileHandle;
+    let session = await openDbSession(handle);
+    const root = session.createResourceFolder(0, '  shaders  ');
+    const nested = session.createResourceFolder(root.id, 'includes');
+
+    expect(root.name).toBe('shaders');
+    expect(nested.parent).toBe(root.id);
+    expect(() => session.createResourceFolder(0, 'SHADERS')).toThrow('already exists');
+    expect(() => session.createResourceFolder(0, '..')).toThrow('cannot be');
+    expect(() => session.createResourceFolder(0, 'bad/name')).toThrow('separators');
+
+    await session.save();
+    session.close();
+    session = await openDbSession(handle);
+    expect(session.data.folders.some((folder) => folder.id === nested.id && folder.parent === root.id)).toBe(true);
+    session.close();
+  });
+
+  it('renames files and folders while rewriting only exact Pool path references', async () => {
+    const handle = new MemoryFileHandle(await createResourceProjectBytes()) as unknown as FileSystemFileHandle;
+    const session = await openDbSession(handle);
+    const bar = session.insertTimelineBar({
+      layer: 0,
+      startTime: 0,
+      endTime: 1,
+      script: 'file /pool/textures/hero.png\nbackup /pool/textures/hero.png.backup\nnested /pool/textures/nested/note.txt',
+    });
+
+    expect(session.findResourceScriptReferences({ kind: 'file', id: 3 })).toEqual([{ barId: bar.id, occurrences: 1 }]);
+    const fileRename = session.renameResourceItem({ kind: 'file', id: 3 }, 'main.png', true);
+    expect(fileRename.oldPath).toBe('/pool/textures/hero.png');
+    expect(fileRename.newPath).toBe('/pool/textures/main.png');
+    expect(session.data.bars[0].script).toContain('/pool/textures/main.png');
+    expect(session.data.bars[0].script).toContain('/pool/textures/hero.png.backup');
+
+    const folderRename = session.renameResourceItem({ kind: 'folder', id: 1 }, 'assets', true);
+    expect(folderRename.files.map((entry) => entry.newPath)).toEqual([
+      '/pool/assets/main.png',
+      '/pool/assets/nested/note.txt',
+    ]);
+    expect(session.data.bars[0].script).toContain('/pool/assets/nested/note.txt');
+    expect(() => session.renameResourceItem({ kind: 'folder', id: 1 }, 'DESTINATION', false)).toThrow('already exists');
+    session.restoreResourceRename(folderRename);
+    session.restoreResourceRename(fileRename);
+    expect(session.data.files.find((file) => file.id === 3)?.name).toBe('hero.png');
+    expect(session.data.bars[0].script).toBe(bar.script);
+    session.close();
+  });
+
+  it('rejects rename undo atomically when an affected script changed afterwards', async () => {
+    const handle = new MemoryFileHandle(await createResourceProjectBytes()) as unknown as FileSystemFileHandle;
+    const session = await openDbSession(handle);
+    const bar = session.insertTimelineBar({
+      layer: 0, startTime: 0, endTime: 1, script: 'file /pool/textures/hero.png',
+    });
+    const renamed = session.renameResourceItem({ kind: 'file', id: 3 }, 'main.png', true);
+    session.updateCell('BARS', bar.id, 'script', `${bar.script}\nchanged later`);
+
+    expect(() => session.restoreResourceRename(renamed)).toThrow('changed afterwards');
+    expect(session.data.files.find((file) => file.id === 3)?.name).toBe('main.png');
+    session.close();
+  });
+
+  it('deletes and restores a complete subtree with exact ids, bytes and positions', async () => {
+    const handle = new MemoryFileHandle(await createResourceProjectBytes()) as unknown as FileSystemFileHandle;
+    let session = await openDbSession(handle);
+    const beforeFolders = session.data.folders.map((folder) => ({ ...folder }));
+    const beforeFiles = session.data.files.map((file) => ({ ...file, data: [...file.data] }));
+    const deleted = session.deleteResourceItems([{ kind: 'folder', id: 1 }]);
+
+    expect(deleted.folders.map((entry) => entry.row.id)).toEqual([1, 2]);
+    expect(deleted.files.map((entry) => entry.path)).toEqual([
+      '/pool/textures/hero.png',
+      '/pool/textures/nested/note.txt',
+    ]);
+    expect(session.data.folders.some((folder) => folder.id === 1)).toBe(false);
+
+    session.restoreResourceItems(deleted);
+    expect(session.data.folders).toEqual(beforeFolders);
+    expect(session.data.files.map((file) => ({ ...file, data: [...file.data] }))).toEqual(beforeFiles);
+
+    await session.save();
+    session.close();
+    session = await openDbSession(handle);
+    expect(session.data.files.find((file) => file.id === 3)?.data).toEqual(new Uint8Array([1, 2]));
+    session.close();
+  });
+
+  it('rejects conflicting restoration without partially restoring a subtree', async () => {
+    const handle = new MemoryFileHandle(await createResourceProjectBytes()) as unknown as FileSystemFileHandle;
+    const session = await openDbSession(handle);
+    const deleted = session.deleteResourceItems([{ kind: 'folder', id: 1 }]);
+    session.createResourceFolder(0, 'TEXTURES');
+    const before = session.data.folders.map((folder) => ({ ...folder }));
+
+    expect(() => session.restoreResourceItems(deleted)).toThrow('already exists');
+    expect(session.data.folders).toEqual(before);
+    expect(session.data.files.some((file) => file.id === 3)).toBe(false);
     session.close();
   });
 });

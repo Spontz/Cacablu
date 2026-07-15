@@ -2,11 +2,14 @@ import type { IContentRenderer } from 'dockview-core';
 
 import type { AppState } from '../state/app-state';
 import type { DbState } from '../state/db-state';
-import type { DbSession, DbSessionRef, ResourceClipboardMutation, ResourceItemRef } from '../db/db-session';
+import { validateResourceItemName } from '../db/db-session';
+import type { DbSession, DbSessionRef, ResourceClipboardMutation, ResourceDeletionSnapshot, ResourceItemRef, ResourceScriptEdit } from '../db/db-session';
+import type { UndoManager } from '../app/undo-manager';
 import type { ConnectionController } from '../ws/connection';
 import { createPhoenixAssetClient } from '../phoenix/asset-client';
+import { createPhoenixSectionClient } from '../phoenix/section-client';
 import { addAssetImpactEvents } from '../phoenix/asset-impact-events';
-import { deleteAllowedAssetDirectory, deleteAllowedAssetFile, writeAllowedAssetFile } from '../phoenix/asset-operations';
+import { deleteAllowedAssetFile, writeAllowedAssetFile } from '../phoenix/asset-operations';
 import { buildResourceTree, type ResourceTreeNode } from '../resources/resource-tree';
 import type { AssetClipboard } from '../resources/asset-clipboard';
 import {
@@ -24,8 +27,10 @@ import {
 } from '../resources/asset-selection';
 import type { AssetSelectionItem } from '../app/types';
 import { syncResourceClipboardMutation } from '../services/resource-clipboard-sync';
+import { ProjectSectionSyncError, syncProjectBarToPhoenix } from '../services/project-section-sync';
 import { writeSystemClipboardText } from '../resources/system-clipboard';
 import { ASSET_FILE_DRAG_TYPE } from '../resources/pool-path-drop';
+import { createMenuIcon } from '../menu/menu-icon';
 import { createContentRenderer } from './base-panel';
 
 const ASSET_FILE_TEXT_PREFIX = 'cacablu-asset-file:';
@@ -108,13 +113,15 @@ function createDisclosureEl(expanded: boolean, visible: boolean): HTMLSpanElemen
   return disclosure;
 }
 
-function createDeleteButton(label: string): HTMLButtonElement {
+function createActionButton(label: string): HTMLButtonElement {
   const button = document.createElement('button');
   button.type = 'button';
-  button.className = 'resources__delete';
+  button.className = 'resources__actions-button';
+  button.dataset.resourceActions = 'true';
   button.setAttribute('aria-label', label);
   button.title = label;
   button.draggable = false;
+  button.textContent = '⋮';
   return button;
 }
 
@@ -161,6 +168,7 @@ export function createResourcesPanel(
   dbState: DbState,
   sessionRef: DbSessionRef,
   connection: ConnectionController,
+  undoManager: UndoManager,
   assetClipboard: AssetClipboard,
 ): IContentRenderer {
   return createContentRenderer((element) => {
@@ -168,8 +176,12 @@ export function createResourcesPanel(
 
     const expandedIds = new Set<number>();
     const phoenixAssets = createPhoenixAssetClient();
+    const phoenixSections = createPhoenixSectionClient();
     let draggingAssetFile: AssetFileDragPayload | null = null;
     let selectionAnchor: AssetSelectionItem | null = null;
+    let actionMenu: HTMLElement | null = null;
+    let actionTarget: ResourceActionTarget | null = null;
+    let observedSession = sessionRef.current;
 
     const placeholder = document.createElement('p');
     placeholder.className = 'resources__placeholder';
@@ -206,7 +218,7 @@ export function createResourcesPanel(
             className: 'resources__label',
             textContent: node.name,
           }),
-          createDeleteButton(`Delete folder ${node.name}`),
+          createActionButton(`Actions for folder ${node.name}`),
         );
         li.append(row);
 
@@ -238,7 +250,7 @@ export function createResourcesPanel(
           createEnabledCheckbox(node.name, node.enabled),
           createIconEl(fileIconName(node.name)),
           label,
-          createDeleteButton(`Delete asset ${node.name}`),
+          createActionButton(`Actions for file ${node.name}`),
         );
       }
 
@@ -247,6 +259,16 @@ export function createResourcesPanel(
 
     function render(): void {
       const db = sessionRef.current?.data ?? null;
+
+      if (sessionRef.current !== observedSession) {
+        observedSession = sessionRef.current;
+        closeActionMenu();
+      } else if (actionTarget && actionTarget.kind !== 'root' && db) {
+        const exists = actionTarget.kind === 'file'
+          ? db.files.some((file) => file.id === actionTarget?.id)
+          : db.folders.some((folder) => folder.id === actionTarget?.id);
+        if (!exists) closeActionMenu();
+      }
 
       placeholder.style.display = db ? 'none' : '';
       treeEl.style.display = db ? '' : 'none';
@@ -269,6 +291,7 @@ export function createResourcesPanel(
           className: 'resources__label',
           textContent: 'pool',
         }),
+        createActionButton('Actions for Pool root'),
       );
       poolRoot.append(rootRow);
       treeEl.append(poolRoot);
@@ -319,6 +342,22 @@ export function createResourcesPanel(
       }
     });
 
+    const dismissActionMenu = (event: Event) => {
+      if (actionMenu?.contains(event.target as Node)) return;
+      closeActionMenu();
+    };
+    const dismissActionMenuOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') closeActionMenu();
+    };
+    document.addEventListener('pointerdown', dismissActionMenu);
+    document.addEventListener('keydown', dismissActionMenuOnEscape);
+
+    treeEl.addEventListener('pointerdown', (event) => {
+      const button = getEventElement(event)?.closest<HTMLButtonElement>('[data-resource-actions]');
+      if (!button) return;
+      event.stopPropagation();
+    });
+
     treeEl.addEventListener('dragover', (event) => {
       const target = getEventElement(event);
       const dropTarget = target ? getDropTarget(target) : null;
@@ -366,7 +405,7 @@ export function createResourcesPanel(
 
     treeEl.addEventListener('dragstart', (event) => {
       const target = getEventElement(event);
-      if (target?.closest('.resources__enabled, .resources__delete')) return;
+      if (target?.closest('.resources__enabled, .resources__actions-button')) return;
       const file = target?.closest<HTMLElement>('[data-resource-kind="file"]');
       if (!file?.dataset.resourceId || !file.dataset.resourceName || !file.dataset.poolPath || !event.dataTransfer) return;
 
@@ -397,14 +436,24 @@ export function createResourcesPanel(
         return;
       }
 
-      const deleteButton = target.closest<HTMLButtonElement>('.resources__delete');
-      if (deleteButton) {
-        const item = deleteButton.closest<HTMLElement>('[data-resource-kind="file"], [data-resource-kind="folder"]');
-        if (item) {
-          event.preventDefault();
-          event.stopPropagation();
-          void deleteAssetItem(item);
+      const actionButton = target.closest<HTMLButtonElement>('[data-resource-actions]');
+      if (actionButton) {
+        event.preventDefault();
+        event.stopPropagation();
+        const captured = captureActionTarget(actionButton);
+        if (!captured) return;
+        const anchorRect = actionButton.getBoundingClientRect();
+        if (captured.kind === 'root') {
+          selectionAnchor = null;
+          state.clearAssetSelection();
+        } else {
+          const selected = resourceActionTargetToSelection(captured, sessionRef.current);
+          if (selected) {
+            state.setAssetSelection(selected);
+            selectionAnchor = selected;
+          }
         }
+        openActionMenu(captured, anchorRect);
         return;
       }
 
@@ -503,7 +552,246 @@ export function createResourcesPanel(
       unsubscribeClipboard();
       unsubscribeAssets();
       window.removeEventListener('cacablu:asset-clipboard-command', handleClipboardCommand);
+      document.removeEventListener('pointerdown', dismissActionMenu);
+      document.removeEventListener('keydown', dismissActionMenuOnEscape);
+      closeActionMenu();
     };
+
+    function captureActionTarget(button: HTMLButtonElement): ResourceActionTarget | null {
+      const item = button.closest<HTMLElement>('[data-resource-kind][data-resource-id]');
+      if (!item) return button.closest('[data-pool-root]')
+        ? { kind: 'root', id: 0, name: 'pool', path: 'pool', parentId: 0 }
+        : null;
+      const kind = item.dataset.resourceKind;
+      const id = Number(item.dataset.resourceId);
+      const path = item.dataset.poolPath;
+      if ((kind !== 'file' && kind !== 'folder') || !Number.isInteger(id) || !path) return null;
+      const session = sessionRef.current;
+      const row = kind === 'file'
+        ? session?.data.files.find((candidate) => candidate.id === id)
+        : session?.data.folders.find((candidate) => candidate.id === id);
+      if (!row) return null;
+      return { kind, id, name: row.name, path, parentId: row.parent };
+    }
+
+    function openActionMenu(target: ResourceActionTarget, anchor: DOMRect): void {
+      closeActionMenu();
+      actionTarget = target;
+      const menu = document.createElement('div');
+      menu.className = 'resources__actions-menu';
+      menu.setAttribute('role', 'menu');
+      menu.setAttribute('aria-label', `${target.name} actions`);
+      const actions: Array<{ id: ResourceAction; label: string }> = target.kind === 'root'
+        ? [
+            { id: 'new-folder', label: 'New Folder' },
+            { id: 'paste', label: 'Paste' },
+          ]
+        : target.kind === 'folder'
+          ? [
+              { id: 'new-folder', label: 'New Folder' },
+              { id: 'cut', label: 'Cut' },
+              { id: 'copy', label: 'Copy' },
+              { id: 'paste', label: 'Paste' },
+              { id: 'rename', label: 'Rename' },
+              { id: 'delete', label: 'Delete' },
+            ]
+          : [
+              { id: 'cut', label: 'Cut' },
+              { id: 'copy', label: 'Copy' },
+              { id: 'rename', label: 'Rename' },
+              { id: 'delete', label: 'Delete' },
+            ];
+      for (const [index, action] of actions.entries()) {
+        if (action.id === 'delete' || (index > 0 && actions[index - 1]?.id === 'new-folder')) {
+          const separator = document.createElement('div');
+          separator.className = 'resources__actions-menu-separator';
+          separator.setAttribute('role', 'separator');
+          menu.append(separator);
+        }
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'resources__actions-menu-item';
+        button.dataset.resourceAction = action.id;
+        button.setAttribute('role', 'menuitem');
+        const label = document.createElement('span');
+        label.textContent = action.label;
+        button.append(createMenuIcon(action.id), label);
+        button.addEventListener('click', () => {
+          const capturedTarget = actionTarget;
+          closeActionMenu();
+          if (capturedTarget) void runResourceAction(action.id, capturedTarget);
+        });
+        menu.append(button);
+      }
+      actionMenu = menu;
+      // Dockview panels clip their contents. Render the fixed menu at document
+      // level so it remains visible when it opens beyond the Resources panel.
+      document.body.append(menu);
+      positionActionMenu(menu, anchor);
+      menu.querySelector<HTMLButtonElement>('button')?.focus();
+    }
+
+    function positionActionMenu(menu: HTMLElement, anchor: DOMRect): void {
+      const viewportMargin = 6;
+      const anchorGap = 2;
+      const bounds = menu.getBoundingClientRect();
+      const preferredLeft = anchor.right + anchorGap;
+      const maximumLeft = window.innerWidth - bounds.width - viewportMargin;
+      menu.style.left = `${Math.max(viewportMargin, Math.min(preferredLeft, maximumLeft))}px`;
+
+      const below = anchor.bottom + anchorGap;
+      const above = anchor.top - bounds.height - anchorGap;
+      menu.style.top = `${below + bounds.height <= window.innerHeight - viewportMargin
+        ? below
+        : Math.max(viewportMargin, above)}px`;
+    }
+
+    function closeActionMenu(): void {
+      actionMenu?.remove();
+      actionMenu = null;
+      actionTarget = null;
+    }
+
+    async function runResourceAction(action: ResourceAction, target: ResourceActionTarget): Promise<void> {
+      if (action === 'new-folder') await createFolder(target.kind === 'folder' ? target.id : 0);
+      else if ((action === 'cut' || action === 'copy') && target.kind !== 'root') {
+        const selected = resourceActionTargetToSelection(target, sessionRef.current);
+        if (selected) await captureAssetClipboard(action, null, [selected]);
+      } else if (action === 'paste' && target.kind !== 'file') {
+        await pasteAssetClipboard(target.kind === 'folder' ? target.id : 0);
+      } else if (action === 'rename' && target.kind !== 'root') await renameAssetItem(target);
+      else if (action === 'delete' && target.kind !== 'root') await deleteAssetItem(target);
+    }
+
+    async function createFolder(parentId: number): Promise<void> {
+      const session = sessionRef.current;
+      if (!session) return;
+      const name = await showResourceNameDialog(
+        'New Folder',
+        'Folder name',
+        '',
+        (candidate) => validateResourceItemName(session.data, parentId, candidate),
+      );
+      if (name === null) return;
+      const wasDirty = dbState.getSnapshot().isDirty;
+      try {
+        const folder = session.createResourceFolder(parentId, name);
+        dbState.setDirty();
+        if (parentId > 0) expandedIds.add(parentId);
+        state.setAssetSelection({ kind: 'folder', id: folder.id, name: folder.name });
+        undoManager.push({
+          label: `Create folder ${folder.name}`,
+          undo: () => {
+            if (session.data.folders.some((candidate) => candidate.parent === folder.id)
+              || session.data.files.some((candidate) => candidate.parent === folder.id)) {
+              throw new Error(`Cannot undo creation of ${folder.name} because the folder is no longer empty.`);
+            }
+            session.deleteResourceItems([{ kind: 'folder', id: folder.id }]);
+            restoreDirtyState(wasDirty);
+            state.clearAssetSelection();
+            render();
+          },
+        });
+        render();
+      } catch (error) {
+        setSyncStatus('error', error instanceof Error ? error.message : 'Could not create the Pool folder.');
+      }
+    }
+
+    async function renameAssetItem(target: Exclude<ResourceActionTarget, { kind: 'root' }>): Promise<void> {
+      const session = sessionRef.current;
+      if (!session) return;
+      const name = await showResourceNameDialog(
+        `Rename ${target.name}`,
+        'New name',
+        target.name,
+        (candidate) => validateResourceItemName(session.data, target.parentId, candidate, { kind: target.kind, id: target.id }),
+      );
+      if (name === null) return;
+      try {
+        const item: ResourceItemRef = { kind: target.kind, id: target.id };
+        const references = session.findResourceScriptReferences(item);
+        let updateScripts = false;
+        if (references.length > 0) {
+          const count = references.reduce((sum, reference) => sum + reference.occurrences, 0);
+          const choice = await showRenamePathDialog(count);
+          if (choice === null) return;
+          updateScripts = choice === 'update';
+        }
+        const wasDirty = dbState.getSnapshot().isDirty;
+        const result = session.renameResourceItem(item, name, updateScripts);
+        if (result.oldName === result.newName) return;
+        dbState.setDirty();
+        undoManager.push({
+          label: `Rename ${result.oldName}`,
+          undo: async () => {
+            const inverse = session.restoreResourceRename(result);
+            restoreDirtyState(wasDirty);
+            await syncResourceClipboardMutation(
+              renameAsClipboardMutation(inverse),
+              phoenixAssets,
+              state,
+              connection.isConnected(),
+              { beforeDelete: () => syncRenamedSections(session, inverse.scripts) },
+            );
+            render();
+          },
+        });
+        await syncResourceClipboardMutation(
+          renameAsClipboardMutation(result),
+          phoenixAssets,
+          state,
+          connection.isConnected(),
+          { beforeDelete: () => syncRenamedSections(session, result.scripts) },
+        );
+        const selected = resourceActionTargetToSelection({ ...target, name: result.newName }, session);
+        if (selected) state.setAssetSelection(selected);
+        render();
+      } catch (error) {
+        setSyncStatus('error', error instanceof Error ? error.message : 'Could not rename the Pool item.');
+      }
+    }
+
+    function restoreDirtyState(wasDirty: boolean): void {
+      if (wasDirty) dbState.setDirty();
+      else dbState.setSaved();
+    }
+
+    async function syncRenamedSections(session: DbSession, scriptEdits: ResourceScriptEdit[]): Promise<boolean> {
+      const barIds = [...new Set(scriptEdits.map((edit) => edit.barId))];
+      let succeeded = true;
+      for (const barId of barIds) {
+        try {
+          const result = await syncProjectBarToPhoenix(session.data, barId, phoenixSections);
+          if (result.issues.length > 0) {
+            succeeded = false;
+            state.markSectionErrors(result.issues.map((issue) => issue.barId));
+            for (const issue of result.issues) {
+              state.addEvent({
+                severity: 'error',
+                source: 'Phoenix section sync',
+                subjectId: String(issue.barId),
+                description: issue.description,
+              });
+            }
+          } else {
+            state.clearSectionErrors([barId]);
+            state.clearEventsForSubjects([String(barId)], ['Phoenix section sync', 'Phoenix asset impact', 'Phoenix log']);
+          }
+        } catch (error) {
+          succeeded = false;
+          const issues = error instanceof ProjectSectionSyncError ? error.issues : [];
+          state.markSectionErrors(issues.length > 0 ? issues.map((issue) => issue.barId) : [barId]);
+          state.addEvent({
+            severity: 'error',
+            source: 'Phoenix section sync',
+            subjectId: String(barId),
+            description: error instanceof Error ? error.message : `Could not reload renamed section ${barId}.`,
+          });
+        }
+      }
+      return succeeded;
+    }
 
     function updateAssetSelection(event: MouseEvent, item: AssetSelectionItem): void {
       const current = state.getSnapshot().assetSelection;
@@ -527,13 +815,14 @@ export function createResourcesPanel(
     async function captureAssetClipboard(
       operation: 'copy' | 'cut',
       clipboardData?: DataTransfer | null,
+      explicitSelection?: AssetSelectionItem[],
     ): Promise<void> {
       const session = sessionRef.current;
       if (!session) {
         setSyncStatus('error', 'Load a project before using the Pool clipboard.');
         return;
       }
-      const selected = getAssetSelectionItems(state.getSnapshot().assetSelection);
+      const selected = explicitSelection ?? getAssetSelectionItems(state.getSnapshot().assetSelection);
       if (selected.length === 0) {
         setSyncStatus('error', 'Select at least one Pool item to copy or cut.');
         return;
@@ -555,7 +844,7 @@ export function createResourcesPanel(
       }
     }
 
-    async function pasteAssetClipboard(): Promise<void> {
+    async function pasteAssetClipboard(explicitParentId?: number): Promise<void> {
       const session = sessionRef.current;
       const snapshot = assetClipboard.getSnapshot();
       if (!session || !snapshot) {
@@ -564,7 +853,17 @@ export function createResourcesPanel(
       }
 
       try {
-        const parentId = resolveAssetPasteParent(session.data, state.getSnapshot().assetSelection);
+        const parentId = explicitParentId ?? resolveAssetPasteParent(session.data, state.getSnapshot().assetSelection);
+        const wasDirty = dbState.getSnapshot().isDirty;
+        const previousParents = snapshot.operation === 'cut'
+          ? snapshot.roots.map((root) => {
+              const row = root.kind === 'file'
+                ? session.data.files.find((candidate) => candidate.id === root.sourceId)
+                : session.data.folders.find((candidate) => candidate.id === root.sourceId);
+              if (!row) throw new Error(`The cut Pool ${root.kind} is no longer available.`);
+              return { kind: root.kind, id: root.sourceId, parentId: row.parent };
+            })
+          : [];
         let result: ResourceClipboardMutation;
         if (snapshot.operation === 'copy') {
           if (snapshot.sourceSession === session) {
@@ -585,6 +884,28 @@ export function createResourcesPanel(
         dbState.setDirty();
         state.setAssetSelection(createAssetSelection(result.roots.map((root) => resourceRefToSelection(session, root))));
         if (snapshot.operation === 'cut') assetClipboard.consumeCut();
+        if (result.operation === 'copy') {
+          const pastedSnapshot = session.snapshotResourceItems(result.roots);
+          undoManager.push({
+            label: 'Paste Pool items',
+            undo: async () => {
+              const deleted = session.deleteResourceItems(result.roots, pastedSnapshot);
+              restoreDirtyState(wasDirty);
+              await syncDeletedResourceItems(deleted);
+              render();
+            },
+          });
+        } else {
+          undoManager.push({
+            label: 'Move Pool items',
+            undo: async () => {
+              const inverse = session.moveResourceItemsToParents(previousParents);
+              restoreDirtyState(wasDirty);
+              await syncResourceClipboardMutation(inverse, phoenixAssets, state, connection.isConnected());
+              render();
+            },
+          });
+        }
         render();
         await syncResourceClipboardMutation(result, phoenixAssets, state, connection.isConnected());
       } catch (error) {
@@ -751,82 +1072,176 @@ export function createResourcesPanel(
       }
     }
 
-    async function deleteAssetItem(item: HTMLElement): Promise<void> {
-      const id = Number(item.dataset.resourceId);
-      const name = item.dataset.resourceName
-        ?? item.querySelector<HTMLElement>('.resources__label')?.textContent
-        ?? 'item';
-      const path = item.dataset.poolPath;
-      if (!Number.isFinite(id) || !path) return;
-
-      if (item.dataset.resourceKind === 'file') {
-        const confirmed = window.confirm(`Delete asset "${name}" from the project database and Phoenix?`);
-        if (!confirmed) return;
-        await deleteAssetFile(id, name, path);
-        return;
-      }
-
-      if (item.dataset.resourceKind === 'folder') {
-        const confirmed = window.confirm(`Delete folder "${name}" and all its contents from the project database and Phoenix?`);
-        if (!confirmed) return;
-        await deleteAssetFolder(id, name, path);
-      }
-    }
-
-    async function deleteAssetFile(fileId: number, name: string, poolPath: string): Promise<void> {
+    async function deleteAssetItem(target: Exclude<ResourceActionTarget, { kind: 'root' }>): Promise<void> {
       const session = sessionRef.current;
-      if (!session) {
-        setSyncStatus('blocked', 'Load a project before deleting assets.');
-        return;
-      }
-
+      if (!session) return;
+      const description = target.kind === 'folder'
+        ? `Delete folder "${target.name}" and all its contents?`
+        : `Delete asset "${target.name}"?`;
+      if (!window.confirm(description)) return;
+      const wasDirty = dbState.getSnapshot().isDirty;
       try {
-        setSyncStatus('applying', `Deleting ${name}...`);
-        session.deleteResourceFile(fileId);
+        const deleted = session.deleteResourceItems([{ kind: target.kind, id: target.id }]);
+        if (target.kind === 'folder') expandedIds.delete(target.id);
         dbState.setDirty();
         state.clearAssetSelection();
-
-        if (connection.isConnected()) {
-          try {
-            addAssetImpactEvents(state, await deleteAllowedAssetFile(phoenixAssets, poolPath), `Deleted ${name}`);
-          } catch (err) {
-            setSyncStatus('error', err instanceof Error ? err.message : 'Could not delete Phoenix asset.');
-          }
-        }
-
+        undoManager.push({
+          label: `Delete ${target.name}`,
+          undo: async () => {
+            const restored = session.restoreResourceItems(deleted);
+            restoreDirtyState(wasDirty);
+            await syncResourceClipboardMutation(restored, phoenixAssets, state, connection.isConnected());
+            render();
+          },
+        });
+        await syncDeletedResourceItems(deleted);
         render();
-      } catch (err) {
-        setSyncStatus('error', err instanceof Error ? err.message : 'Could not delete asset.');
+      } catch (error) {
+        setSyncStatus('error', error instanceof Error ? error.message : 'Could not delete the Pool item.');
       }
     }
 
-    async function deleteAssetFolder(folderId: number, name: string, poolPath: string): Promise<void> {
-      const session = sessionRef.current;
-      if (!session) {
-        setSyncStatus('blocked', 'Load a project before deleting asset folders.');
-        return;
+    async function syncDeletedResourceItems(deleted: ResourceDeletionSnapshot): Promise<void> {
+      if (!connection.isConnected()) return;
+      for (const entry of deleted.files) {
+        if (!entry.row.enabled) continue;
+        try {
+          addAssetImpactEvents(state, await deleteAllowedAssetFile(phoenixAssets, entry.path), `Deleted ${entry.row.name}`);
+        } catch (error) {
+          setSyncStatus('discrepant', `Project updated, but Phoenix could not delete ${entry.path}: ${error instanceof Error ? error.message : 'unknown error'}`);
+        }
       }
+    }
+  });
+}
 
+type ResourceAction = 'new-folder' | 'cut' | 'copy' | 'paste' | 'rename' | 'delete';
+type ResourceActionTarget =
+  | { kind: 'root'; id: 0; name: 'pool'; path: 'pool'; parentId: 0 }
+  | { kind: 'file' | 'folder'; id: number; name: string; path: string; parentId: number };
+
+function resourceActionTargetToSelection(
+  target: Exclude<ResourceActionTarget, { kind: 'root' }>,
+  session: DbSession | null,
+): AssetSelectionItem | null {
+  if (!session) return null;
+  if (target.kind === 'file') {
+    const file = session.data.files.find((candidate) => candidate.id === target.id);
+    return file ? { kind: 'file', id: file.id, name: file.name, fileType: file.type } : null;
+  }
+  const folder = session.data.folders.find((candidate) => candidate.id === target.id);
+  return folder ? { kind: 'folder', id: folder.id, name: folder.name } : null;
+}
+
+function renameAsClipboardMutation(result: {
+  item: ResourceItemRef;
+  files: ResourceClipboardMutation['files'];
+}): ResourceClipboardMutation {
+  return { operation: 'move', roots: [result.item], files: result.files };
+}
+
+function showResourceNameDialog(
+  title: string,
+  label: string,
+  value: string,
+  validate: (value: string) => string,
+): Promise<string | null> {
+  return new Promise((resolve) => {
+    const dialog = document.createElement('dialog');
+    dialog.className = 'resources__dialog';
+    const heading = document.createElement('h3');
+    heading.textContent = title;
+    const inputLabel = document.createElement('label');
+    inputLabel.textContent = label;
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.value = value;
+    input.autocomplete = 'off';
+    inputLabel.append(input);
+    const errorMessage = document.createElement('p');
+    errorMessage.className = 'resources__dialog-error';
+    errorMessage.setAttribute('role', 'alert');
+    const actions = document.createElement('div');
+    actions.className = 'resources__dialog-actions';
+    const cancel = document.createElement('button');
+    cancel.type = 'button';
+    cancel.textContent = 'Cancel';
+    const confirm = document.createElement('button');
+    confirm.type = 'button';
+    confirm.textContent = title === 'New Folder' ? 'Create' : 'Rename';
+    confirm.className = 'is-primary';
+    actions.append(cancel, confirm);
+    dialog.append(heading, inputLabel, errorMessage, actions);
+    document.body.append(dialog);
+    let settled = false;
+    const finish = (result: string | null) => {
+      if (settled) return;
+      settled = true;
+      dialog.close();
+      dialog.remove();
+      resolve(result);
+    };
+    cancel.addEventListener('click', () => finish(null));
+    const submit = () => {
       try {
-        setSyncStatus('applying', `Deleting ${name}...`);
-        session.deleteResourceFolder(folderId);
-        expandedIds.delete(folderId);
-        dbState.setDirty();
-        state.clearAssetSelection();
-
-        if (connection.isConnected()) {
-          try {
-            addAssetImpactEvents(state, await deleteAllowedAssetDirectory(phoenixAssets, poolPath, true), `Deleted folder ${name}`);
-          } catch (err) {
-            setSyncStatus('error', err instanceof Error ? err.message : 'Could not delete Phoenix asset folder.');
-          }
-        }
-
-        render();
-      } catch (err) {
-        setSyncStatus('error', err instanceof Error ? err.message : 'Could not delete asset folder.');
+        finish(validate(input.value));
+      } catch (error) {
+        errorMessage.textContent = error instanceof Error ? error.message : 'Invalid name.';
+        input.focus();
       }
+    };
+    confirm.addEventListener('click', submit);
+    input.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') submit();
+    });
+    dialog.addEventListener('cancel', (event) => {
+      event.preventDefault();
+      finish(null);
+    });
+    dialog.showModal();
+    input.focus();
+    input.select();
+  });
+}
+
+function showRenamePathDialog(referenceCount: number): Promise<'update' | 'keep' | null> {
+  return new Promise((resolve) => {
+    const dialog = document.createElement('dialog');
+    dialog.className = 'resources__dialog';
+    const heading = document.createElement('h3');
+    heading.textContent = 'Update script paths?';
+    const message = document.createElement('p');
+    message.textContent = `${referenceCount} matching script reference${referenceCount === 1 ? '' : 's'} found.`;
+    const actions = document.createElement('div');
+    actions.className = 'resources__dialog-actions resources__dialog-actions--stacked';
+    const choices: Array<{ value: 'update' | 'keep' | null; label: string; primary?: boolean }> = [
+      { value: 'update', label: 'Rename and Update Script Paths', primary: true },
+      { value: 'keep', label: 'Rename and Keep Script Paths' },
+      { value: null, label: 'Cancel' },
+    ];
+    let settled = false;
+    const finish = (value: 'update' | 'keep' | null) => {
+      if (settled) return;
+      settled = true;
+      dialog.close();
+      dialog.remove();
+      resolve(value);
+    };
+    for (const choice of choices) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.textContent = choice.label;
+      if (choice.primary) button.className = 'is-primary';
+      button.addEventListener('click', () => finish(choice.value));
+      actions.append(button);
     }
+    dialog.append(heading, message, actions);
+    document.body.append(dialog);
+    dialog.addEventListener('cancel', (event) => {
+      event.preventDefault();
+      finish(null);
+    });
+    dialog.showModal();
   });
 }
 

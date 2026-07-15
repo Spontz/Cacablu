@@ -1,4 +1,5 @@
 import type { MenuActionDefinition } from '../app/types';
+import { createMenuIcon } from './menu-icon';
 
 interface MenuBarOptions {
   actions: MenuActionDefinition[];
@@ -54,7 +55,7 @@ export function createMenuBar(options: MenuBarOptions): MenuBar {
         const label = document.createElement('span');
         label.className = 'menu-bar__item-label';
         label.textContent = action.label;
-        actionButton.append(label);
+        actionButton.append(createMenuIcon(action.id), label);
 
         const shortcut = getShortcutLabel(action, isMac);
         if (shortcut) {

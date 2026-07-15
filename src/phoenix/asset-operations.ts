@@ -1,17 +1,20 @@
-import type { PhoenixAssetClient, AssetOperationResult } from './asset-client';
+import type { PhoenixAssetClient, AssetOperationResult, AssetWriteOptions } from './asset-client';
 import { normalizeAssetPath } from './asset-paths';
 
 export async function writeAllowedAssetFile(
   client: Pick<PhoenixAssetClient, 'writeFile'>,
   path: string,
   bytes: Uint8Array,
+  options?: AssetWriteOptions,
 ): Promise<AssetOperationResult> {
   const normalized = normalizeAssetPath(path);
   if (!normalized) {
     throw new Error('Asset path must be under pool or resources.');
   }
 
-  return client.writeFile(normalized.path, bytes);
+  return options
+    ? client.writeFile(normalized.path, bytes, undefined, options)
+    : client.writeFile(normalized.path, bytes);
 }
 
 export async function deleteAllowedAssetFile(

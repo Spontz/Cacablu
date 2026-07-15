@@ -6,6 +6,8 @@ const baseUrl = process.env.CACABLU_E2E_URL ?? 'http://127.0.0.1:5177/';
 const browser = await chromium.launch({ headless: true });
 const context = await browser.newContext({ permissions: ['clipboard-read', 'clipboard-write'] });
 const page = await context.newPage();
+page.setDefaultTimeout(5_000);
+page.on('pageerror', (error) => console.error(`PAGE ERROR: ${error.message}`));
 
 try {
   await page.goto(baseUrl, { waitUntil: 'networkidle' });
@@ -16,6 +18,7 @@ try {
       { createAppState },
       { createDbState },
       { createAssetClipboard },
+      { createUndoManager },
       { installPoolPathDrop },
     ] = await Promise.all([
       import('/node_modules/monaco-editor/esm/vs/editor/editor.api.js'),
@@ -23,6 +26,7 @@ try {
       import('/src/state/app-state.ts'),
       import('/src/state/db-state.ts'),
       import('/src/resources/asset-clipboard.ts'),
+      import('/src/app/undo-manager.ts'),
       import('/src/resources/pool-path-drop.ts'),
     ]);
     const root = document.querySelector('#app');
@@ -105,6 +109,23 @@ try {
           files: [{ file, oldPath, newPath }],
         };
       },
+      moveResourceItemsToParents(roots) {
+        const source = roots[0];
+        return this.moveResourceItems([{ kind: source.kind, id: source.id }], source.parentId);
+      },
+      snapshotResourceItems(roots) {
+        const rootIds = new Set(roots.filter((root) => root.kind === 'file').map((root) => root.id));
+        const files = db.files.flatMap((file, index) => rootIds.has(file.id)
+          ? [{ row: { ...file, data: new Uint8Array(file.data) }, index, path: file.parent === 1 ? `/pool/shaders/${file.name}` : `/pool/${file.name}` }]
+          : []);
+        return { roots, folders: [], files };
+      },
+      deleteResourceItems(roots) {
+        const snapshot = this.snapshotResourceItems(roots);
+        const rootIds = new Set(snapshot.files.map((entry) => entry.row.id));
+        db.files.splice(0, db.files.length, ...db.files.filter((file) => !rootIds.has(file.id)));
+        return snapshot;
+      },
       moveResourceFile(fileId, parentId) {
         const file = db.files.find((candidate) => candidate.id === fileId);
         if (!file) throw new Error('Missing moved file.');
@@ -127,11 +148,13 @@ try {
       subscribeAssets: () => () => {},
     };
     const clipboard = createAssetClipboard();
+    const undo = createUndoManager();
     const resources = createResourcesPanel(
       state,
       dbState,
       sessionRef,
       connection,
+      undo,
       clipboard,
     );
     resources.init({});
@@ -141,7 +164,7 @@ try {
     root.replaceChildren(resources.element, editorElement);
     state.setActivePanel('resources');
     dbState.setOpen('fixture.sqlite');
-    window.__poolClipboardFixture = { db, clipboard, state };
+    window.__poolClipboardFixture = { db, clipboard, state, undo };
     window.__poolClipboardEditor = monaco.editor.create(editorElement, { value: '' });
     installPoolPathDrop(window.__poolClipboardEditor, editorElement);
   });
@@ -180,6 +203,15 @@ try {
     detail: { command: 'paste' },
   })));
   await page.waitForFunction(() => document.querySelector('[data-resource-kind="file"][data-pool-path="pool/scene.glsl"]'));
+  await page.evaluate(() => window.__poolClipboardFixture.undo.undo());
+  await page.waitForFunction(() => !document.querySelector('[data-resource-kind="file"][data-pool-path="pool/scene.glsl"]'));
+  const reusableCopyAfterUndo = await page.evaluate(() => window.__poolClipboardFixture.clipboard.getSnapshot()?.operation);
+  if (reusableCopyAfterUndo !== 'copy') throw new Error('Undo Copy/Paste unexpectedly cleared the reusable Copy snapshot.');
+  await page.evaluate(() => {
+    window.__poolClipboardFixture.state.clearAssetSelection();
+    window.dispatchEvent(new CustomEvent('cacablu:asset-clipboard-command', { detail: { command: 'paste' } }));
+  });
+  await page.waitForFunction(() => document.querySelector('[data-resource-kind="file"][data-pool-path="pool/scene.glsl"]'));
 
   const moveFile = page.locator('[data-resource-kind="file"]', { hasText: 'move.txt' });
   await moveFile.click();
@@ -207,6 +239,25 @@ try {
     || cutResult.matchingFiles[0].id !== 11 || cutResult.matchingFiles[0].parent !== 0) {
     throw new Error(`Pool cut/paste did not move the source: ${JSON.stringify({ cutSnapshot, cutResult })}`);
   }
+  await page.evaluate(() => window.__poolClipboardFixture.undo.undo());
+  await page.waitForFunction(() => window.__poolClipboardFixture.db.files.find((file) => file.id === 11)?.parent === 1);
+  const cutUndoState = await page.evaluate(() => ({
+    parent: window.__poolClipboardFixture.db.files.find((file) => file.id === 11)?.parent,
+    clipboard: window.__poolClipboardFixture.clipboard.getSnapshot(),
+  }));
+  if (cutUndoState.parent !== 1 || cutUndoState.clipboard !== null) {
+    throw new Error(`Undo Cut/Paste corrupted the consumed clipboard state: ${JSON.stringify(cutUndoState)}`);
+  }
+  await page.evaluate(() => {
+    window.__poolClipboardFixture.state.setAssetSelection({ kind: 'file', id: 11, name: 'move.txt', fileType: 'text/plain' });
+    window.dispatchEvent(new CustomEvent('cacablu:asset-clipboard-command', { detail: { command: 'cut' } }));
+  });
+  await page.waitForFunction(() => window.__poolClipboardFixture.clipboard.getSnapshot()?.operation === 'cut');
+  await page.evaluate(() => {
+    window.__poolClipboardFixture.state.clearAssetSelection();
+    window.dispatchEvent(new CustomEvent('cacablu:asset-clipboard-command', { detail: { command: 'paste' } }));
+  });
+  await page.waitForFunction(() => window.__poolClipboardFixture.db.files.find((file) => file.id === 11)?.parent === 0);
 
   const externalTransfer = await page.evaluateHandle(() => {
     const transfer = new DataTransfer();
@@ -287,7 +338,12 @@ try {
     menuCopyAccepted,
     rejectedSelfCopy,
     cutResult,
+    cutUndoState,
+    reusableCopyAfterUndo,
   }, null, 2));
+} catch (error) {
+  console.error(error);
+  process.exitCode = 1;
 } finally {
   await browser.close();
 }

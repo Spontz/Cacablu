@@ -11,10 +11,12 @@ try {
   await page.goto(baseUrl, { waitUntil: 'networkidle' });
 
   await page.evaluate(async () => {
-    const [{ createResourcesPanel }, { createAppState }, { createDbState }] = await Promise.all([
+    const [{ createResourcesPanel }, { createAppState }, { createDbState }, { createUndoManager }, { createAssetClipboard }] = await Promise.all([
       import('/src/panels/resources-panel.ts'),
       import('/src/state/app-state.ts'),
       import('/src/state/db-state.ts'),
+      import('/src/app/undo-manager.ts'),
+      import('/src/resources/asset-clipboard.ts'),
     ]);
 
     class MemoryWritable {
@@ -175,35 +177,24 @@ try {
 
     const root = document.querySelector('#app');
     root.innerHTML = '';
-    const renderer = createResourcesPanel(state, dbState, sessionRef, connection);
+    const renderer = createResourcesPanel(state, dbState, sessionRef, connection, createUndoManager(), createAssetClipboard());
     root.append(renderer.element);
     renderer.init({});
     dbState.setOpen('fixture.sqlite');
   });
 
-  await page.getByRole('button', { name: /select data folder/i }).click();
   await page.locator('[data-resource-kind="folder"]', { hasText: 'source' }).click();
 
   const sourceFile = page.locator('[data-resource-kind="file"]', { hasText: 'logo.png' });
   const targetFolder = page.locator('[data-resource-kind="folder"]', { hasText: 'target' });
 
   await sourceFile.dragTo(targetFolder);
-  await page.waitForFunction(() => {
-    const fixture = window.__assetDndFixture;
-    const target = fixture?.dataFolder?.directories?.get('pool')?.directories?.get('target');
-    const source = fixture?.dataFolder?.directories?.get('pool')?.directories?.get('source');
-    const dbFile = fixture?.db?.files?.find((file) => file.id === 10);
-    return target?.files?.has('logo.png') && !source?.files?.has('logo.png') && dbFile?.parent === 2;
-  }, null, { timeout: 1000 }).catch(async () => {
+  await page.waitForFunction(() => window.__assetDndFixture?.db?.files?.find((file) => file.id === 10)?.parent === 2, null, { timeout: 1000 }).catch(async () => {
     const state = await page.evaluate(() => {
       const fixture = window.__assetDndFixture;
-      const pool = fixture.dataFolder.directories.get('pool');
       return {
-        sourceFiles: [...pool.directories.get('source').files.keys()],
-        targetFiles: [...pool.directories.get('target').files.keys()],
         dbFileParent: fixture.db.files.find((file) => file.id === 10)?.parent,
         labels: [...document.querySelectorAll('.resources__label')].map((node) => node.textContent),
-        status: document.querySelector('.resources-sync__status')?.textContent,
       };
     });
     throw new Error(`Asset DnD did not move file: ${JSON.stringify(state)}`);
@@ -211,13 +202,9 @@ try {
 
   const result = await page.evaluate(() => {
     const fixture = window.__assetDndFixture;
-    const pool = fixture.dataFolder.directories.get('pool');
     return {
-      sourceFiles: [...pool.directories.get('source').files.keys()],
-      targetFiles: [...pool.directories.get('target').files.keys()],
       dbFileParent: fixture.db.files.find((file) => file.id === 10)?.parent,
       disclosureCount: document.querySelectorAll('.resources__disclosure').length,
-      status: document.querySelector('.resources-sync__status')?.textContent,
     };
   });
 
