@@ -43,6 +43,7 @@ export interface DbSession {
   getTableSnapshot(tableName: string): DbTableSnapshot;
   insertTimelineBar(input: NewTimelineBar): DbBar;
   deleteTimelineBars(ids: number[]): DbBar[];
+  restoreTimelineBars(bars: DbBar[]): DbBar[];
   setTimelineBarEnabled(barId: number, enabled: boolean): DbBar;
   insertTimelineMarker(input: NewTimelineMarker): DbMarker;
   updateTimelineMarker(markerId: number, input: Partial<Pick<DbMarker, 'time' | 'label'>>): DbMarker;
@@ -241,6 +242,33 @@ function makeSession(handle: FileSystemFileHandle, db: SqlDatabase, data: Projec
       db.run(`DELETE FROM "BARS" WHERE "id" IN (${placeholders})`, deleted.map((bar) => bar.id));
       removeWhere(data.bars, (bar) => idSet.has(bar.id));
       return deleted;
+    },
+
+    restoreTimelineBars(bars): DbBar[] {
+      if (bars.length === 0) return [];
+      const restored = bars.map((bar) => ({ ...bar }));
+      const restoredIds = new Set(restored.map((bar) => bar.id));
+      if (restoredIds.size !== restored.length) {
+        throw new Error('Cannot undo bar deletion because the restoration payload contains duplicate ids.');
+      }
+      const conflicting = data.bars.find((bar) => restoredIds.has(bar.id));
+      if (conflicting) {
+        throw new Error(`Cannot undo bar deletion because bar ${conflicting.id} already exists.`);
+      }
+
+      db.run('BEGIN TRANSACTION');
+      try {
+        for (const bar of restored) {
+          insertTimelineBarRow(db, bar);
+        }
+        db.run('COMMIT');
+      } catch (error) {
+        rollbackQuietly(db);
+        throw error;
+      }
+
+      data.bars.push(...restored);
+      return restored;
     },
 
     setTimelineBarEnabled(barId, enabled): DbBar {
@@ -1084,6 +1112,36 @@ function rollbackResourceMutation(
 
 function cloneDbFile(file: DbFile): DbFile {
   return { ...file, data: new Uint8Array(file.data) };
+}
+
+function insertTimelineBarRow(db: SqlDatabase, bar: DbBar): void {
+  db.run(
+    'INSERT INTO "BARS" ("id", "name", "type", "layer", "startTime", "endTime", "enabled", "selected", "script", "srcBlending", "dstBlending", "blendingEQ", "srcAlpha", "dstAlpha") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    [
+      bar.id,
+      bar.name,
+      bar.type,
+      bar.layer,
+      bar.startTime,
+      bar.endTime,
+      bar.enabled ? 1 : 0,
+      bar.selected ? 1 : 0,
+      bar.script,
+      bar.srcBlending,
+      bar.dstBlending,
+      bar.blendingEQ,
+      bar.srcAlpha,
+      bar.dstAlpha,
+    ],
+  );
+}
+
+function rollbackQuietly(db: SqlDatabase): void {
+  try {
+    db.run('ROLLBACK');
+  } catch {
+    // The database may already have rejected and closed the transaction.
+  }
 }
 
 function migrateDatabaseSchema(db: SqlDatabase): void {

@@ -312,13 +312,6 @@ export function createTimelinePanel(
     return new Set();
   }
 
-  function getSelectedBarIdList(): number[] {
-    const selection = appState.getSnapshot().resourceSelection;
-    if (selection.kind === 'bar') return [selection.id];
-    if (selection.kind === 'bars') return [...selection.ids];
-    return [];
-  }
-
   function getSelectionSignature(ids: Set<number>): string {
     return [...ids].sort((a, b) => a - b).join(',');
   }
@@ -806,48 +799,6 @@ export function createTimelinePanel(
       });
       appState.markSectionErrors([barId]);
     }
-  }
-
-  async function deleteBarsFromPhoenix(barIds: number[]): Promise<void> {
-    if (!connection.isConnected() || barIds.length === 0) return;
-    try {
-      await phoenixSections.deleteMany(barIds.map(String));
-    } catch (err) {
-      appState.addEvent({
-        severity: 'error',
-        source: 'Phoenix section sync',
-        description: err instanceof Error ? err.message : 'Could not delete timeline bars from Phoenix.',
-      });
-    }
-  }
-
-  function deleteSelectedBars(): boolean {
-    const session = sessionRef.current;
-    const selectedIds = getSelectedBarIdList();
-    if (!session || selectedIds.length === 0) return false;
-
-    const deletedBars = session.deleteTimelineBars(selectedIds);
-    if (deletedBars.length === 0) return false;
-
-    const deletedIds = deletedBars.map((bar) => bar.id);
-    undoManager.push({
-      label: `Delete ${deletedIds.length} bars`,
-      undo: async () => {
-        for (const bar of deletedBars.sort((a, b) => a.id - b.id)) {
-          session.insertTimelineBar(bar);
-        }
-        appState.setResourceSelection(deletedIds.length === 1 ? { kind: 'bar', id: deletedIds[0] } : { kind: 'bars', ids: deletedIds });
-        loadFromDb({ preserveTransport: true });
-        renderTimeline?.(true);
-        scheduleMovedBarsSync(deletedIds, MOVE_SYNC_DELAY_MS);
-      },
-    });
-
-    appState.clearResourceSelection();
-    loadFromDb({ preserveTransport: true });
-    renderTimeline?.(true);
-    void deleteBarsFromPhoenix(deletedIds);
-    return true;
   }
 
   function recordSectionIssues(issues: ProjectSectionSyncError['issues']): void {
@@ -1823,14 +1774,14 @@ export function createTimelinePanel(
       }
 
       if (event.key !== 'Delete' && event.key !== 'Backspace') return;
-      if (deleteSelectedMarker() || deleteSelectedBars()) {
+      if (deleteSelectedMarker()) {
         event.preventDefault();
         event.stopPropagation();
       }
     });
 
     const handleDeleteAction = (event: Event): void => {
-      if (deleteSelectedMarker() || deleteSelectedBars()) {
+      if (deleteSelectedMarker()) {
         event.preventDefault();
       }
     };

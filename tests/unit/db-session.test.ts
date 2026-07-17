@@ -104,6 +104,71 @@ describe('DbSession markers', () => {
   });
 });
 
+describe('DbSession timeline bar deletion', () => {
+  it('deletes and atomically restores complete bars with stable ids', async () => {
+    const handle = new MemoryFileHandle(await createLegacyProjectBytes()) as unknown as FileSystemFileHandle;
+    let session = await openDbSession(handle);
+    const first = session.insertTimelineBar({
+      name: 'first',
+      type: 'drawImage',
+      layer: 3,
+      startTime: 1.25,
+      endTime: 9.75,
+      enabled: true,
+      selected: true,
+      script: 'image /pool/first.png',
+      srcBlending: 'SRC_ALPHA',
+      dstBlending: 'ONE_MINUS_SRC_ALPHA',
+      blendingEQ: 'ADD',
+      srcAlpha: 'ONE',
+      dstAlpha: 'ZERO',
+    });
+    const second = session.insertTimelineBar({
+      name: 'second',
+      type: 'drawVideo',
+      layer: 7,
+      startTime: 10,
+      endTime: 20,
+      enabled: false,
+      selected: false,
+      script: 'video /pool/second.mp4',
+      srcBlending: 'ONE',
+      dstBlending: 'ZERO',
+      blendingEQ: 'MAX',
+      srcAlpha: 'SRC_ALPHA',
+      dstAlpha: 'DST_ALPHA',
+    });
+
+    const deleted = session.deleteTimelineBars([second.id, first.id]);
+    expect(session.data.bars).toEqual([]);
+    expect(deleted).toEqual([first, second]);
+
+    const restored = session.restoreTimelineBars(deleted);
+    expect(restored).toEqual([first, second]);
+    expect(session.data.bars).toEqual([first, second]);
+
+    await session.save();
+    session.close();
+    session = await openDbSession(handle);
+    expect(session.data.bars).toEqual([first, second]);
+    session.close();
+  });
+
+  it('rejects a conflicting restore without partially restoring other deleted bars', async () => {
+    const handle = new MemoryFileHandle(await createLegacyProjectBytes()) as unknown as FileSystemFileHandle;
+    const session = await openDbSession(handle);
+    const first = session.insertTimelineBar({ id: 10, layer: 1, startTime: 0, endTime: 1 });
+    const second = session.insertTimelineBar({ id: 11, layer: 2, startTime: 1, endTime: 2 });
+    const deleted = session.deleteTimelineBars([first.id, second.id]);
+    session.insertTimelineBar({ ...first, name: 'replacement' });
+
+    expect(() => session.restoreTimelineBars(deleted)).toThrow('bar 10 already exists');
+    expect(session.data.bars.map((bar) => [bar.id, bar.name])).toEqual([[10, 'replacement']]);
+    expect(session.getTableSnapshot('BARS').rows.map((row) => row.id)).toEqual([10]);
+    session.close();
+  });
+});
+
 describe('DbSession Pool clipboard mutations', () => {
   it('copies only a root file into the selected folder', async () => {
     const handle = new MemoryFileHandle(await createResourceProjectBytes()) as unknown as FileSystemFileHandle;

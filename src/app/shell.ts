@@ -27,6 +27,14 @@ import {
   type BarEnableToggleResult,
 } from '../services/bar-enable-toggle';
 import {
+  deleteSelectedTimelineBars,
+  isBarDeletionEditingTarget,
+  isBarDeletionShortcut,
+  restoreDeletedTimelineBars,
+  syncDeletedTimelineBarsToPhoenix,
+  syncRestoredTimelineBarsToPhoenix,
+} from '../services/bar-deletion';
+import {
   syncPublishedPoolFilesToPhoenix,
   type ProjectPoolSyncProgress,
 } from '../services/project-pool-sync';
@@ -249,6 +257,7 @@ export function createAppShell(root: HTMLElement): AppShell {
   }
 
   function runDeleteAction(): void {
+    if (deleteSelectedBars()) return;
     const event = new Event('cacablu:edit-delete', { cancelable: true });
     if (!window.dispatchEvent(event)) return;
     runEditCommand('delete');
@@ -278,10 +287,6 @@ export function createAppShell(root: HTMLElement): AppShell {
       default:
         return null;
     }
-  }
-
-  function isAppDeleteShortcut(event: KeyboardEvent): boolean {
-    return (event.key === 'Delete' || event.key === 'Backspace') && !event.ctrlKey && !event.metaKey && !event.altKey;
   }
 
   function isSelectAllBarsShortcut(event: KeyboardEvent): boolean {
@@ -336,6 +341,95 @@ export function createAppShell(root: HTMLElement): AppShell {
     });
 
     await syncBarEnableToggleResult(result);
+  }
+
+  function deleteSelectedBars(): boolean {
+    if (!session) return false;
+    const selectedIds = getSelectedBarIds();
+    if (selectedIds.length === 0) return false;
+
+    let result;
+    try {
+      result = deleteSelectedTimelineBars(session, state.getSnapshot().resourceSelection);
+    } catch (error) {
+      state.addEvent({
+        severity: 'error',
+        source: 'Timeline deletion',
+        description: error instanceof Error ? error.message : 'Could not delete the selected timeline bars.',
+      });
+      return true;
+    }
+    if (result.deletedBars.length === 0) return false;
+
+    const deletedBars = result.deletedBars.map((bar) => ({ ...bar }));
+    const deletedIds = [...result.deletedIds];
+    const deletionSession = session;
+    const phoenixDeletion = syncDeletedBars(deletedIds);
+    undoManager.push({
+      label: `Delete ${deletedIds.length} bars`,
+      undo: async () => {
+        restoreDeletedTimelineBars(deletionSession, deletedBars);
+        state.setResourceSelection(
+          deletedIds.length === 1
+            ? { kind: 'bar', id: deletedIds[0] }
+            : { kind: 'bars', ids: deletedIds },
+        );
+        window.dispatchEvent(new CustomEvent('cacablu:timeline-bars-changed'));
+        await phoenixDeletion;
+        await syncRestoredBars(deletionSession, deletedIds);
+      },
+    });
+
+    state.clearResourceSelection();
+    window.dispatchEvent(new CustomEvent('cacablu:timeline-bars-changed'));
+    void phoenixDeletion;
+    return true;
+  }
+
+  async function syncDeletedBars(deletedIds: number[]): Promise<void> {
+    if (!connection.isConnected()) return;
+    try {
+      await primePhoenixLogEvents(phoenixLogs);
+      await syncDeletedTimelineBarsToPhoenix(deletedIds, connection, phoenixSections);
+      await recordRecentPhoenixLogs();
+      state.clearSectionErrors(deletedIds);
+      state.clearEventsForSubjects(deletedIds.map(String), ['Phoenix section sync']);
+    } catch (error) {
+      await recordRecentPhoenixLogs();
+      state.addEvents(deletedIds.map((barId) => ({
+        severity: 'error',
+        source: 'Phoenix section sync',
+        subjectId: String(barId),
+        description: error instanceof Error ? error.message : `Could not delete timeline bar ${barId} from Phoenix.`,
+      })));
+      state.markSectionErrors(deletedIds);
+    }
+  }
+
+  async function syncRestoredBars(restoredSession: DbSession, restoredIds: number[]): Promise<void> {
+    if (!connection.isConnected()) return;
+    try {
+      await primePhoenixLogEvents(phoenixLogs);
+      const result = await syncRestoredTimelineBarsToPhoenix(
+        restoredSession.data,
+        restoredIds,
+        connection,
+        phoenixSections,
+      );
+      await recordRecentPhoenixLogs();
+      state.clearSectionErrors(result.restoredIds);
+      state.clearEventsForSubjects(result.restoredIds.map(String), ['Phoenix section sync']);
+      recordSectionIssues(result.issues);
+    } catch (error) {
+      await recordRecentPhoenixLogs();
+      state.addEvents(restoredIds.map((barId) => ({
+        severity: 'error',
+        source: 'Phoenix section sync',
+        subjectId: String(barId),
+        description: error instanceof Error ? error.message : `Could not restore timeline bar ${barId} in Phoenix.`,
+      })));
+      state.markSectionErrors(restoredIds);
+    }
   }
 
   async function syncBarEnableToggleResult(result: BarEnableToggleResult): Promise<void> {
@@ -693,7 +787,17 @@ export function createAppShell(root: HTMLElement): AppShell {
       });
 
       window.addEventListener('keydown', (event) => {
-        if (!isAppDeleteShortcut(event) || isTextEditingTarget(event.target)) {
+        if (
+          event.defaultPrevented
+          || !isBarDeletionShortcut(event)
+          || isBarDeletionEditingTarget(event.target)
+        ) {
+          return;
+        }
+
+        if (deleteSelectedBars()) {
+          event.preventDefault();
+          event.stopPropagation();
           return;
         }
 
