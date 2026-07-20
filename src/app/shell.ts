@@ -46,6 +46,14 @@ import { hasNewSectionErrors, shouldDeferEventsOpen, shouldOpenEventsForNewError
 import { createAssetClipboard } from '../resources/asset-clipboard';
 import { isNativeTextWriteInProgress } from '../resources/system-clipboard';
 import {
+  createBarClipboardEnvelope,
+  poolClipboardRootsToAssetNodes,
+  readEnvelopeFromDataTransfer,
+  readEnvelopeFromSystemClipboard,
+  writeEnvelopeToDataTransfer,
+  type CacabluClipboardEnvelope,
+} from '../services/cross-project-clipboard';
+import {
   installPhoenixConnectionIndicator,
   updatePhoenixConnectionIndicator,
 } from './phoenix-connection-indicator';
@@ -102,6 +110,7 @@ export function createAppShell(root: HTMLElement): AppShell {
   let lastResourceSelectionSignature = getResourceSelectionSignature(state.getSnapshot().resourceSelection);
   let lastAssetSelectionSignature = JSON.stringify(state.getSnapshot().assetSelection);
   let lastActivePanelId = state.getSnapshot().activePanelId;
+  let lastTimelinePasteLayer = state.getSnapshot().timelinePasteLayer;
   let lastTextEditingTarget: HTMLElement | null = null;
   const projectSyncCoordinator = createProjectSyncCoordinator<DbSession>(
     async (openedSession, signal) => {
@@ -239,6 +248,10 @@ export function createAppShell(root: HTMLElement): AppShell {
       runEditCommand(command);
       return;
     }
+    if (fromMenu && command === 'paste' && ['timeline', 'resources'].includes(state.getSnapshot().activePanelId ?? '')) {
+      void pasteRichClipboardFromMenu();
+      return;
+    }
     if (command === 'cut' || command === 'copy') {
       if (command === 'cut' && state.getSnapshot().activePanelId === 'resources') {
         window.dispatchEvent(new CustomEvent('cacablu:asset-clipboard-command', {
@@ -249,11 +262,60 @@ export function createAppShell(root: HTMLElement): AppShell {
       runEditCommand(command);
       return;
     }
-    const clipboardEvent = new CustomEvent('cacablu:asset-clipboard-command', {
-      cancelable: true,
-      detail: { command },
-    });
-    if (window.dispatchEvent(clipboardEvent)) runEditCommand(command);
+    runEditCommand(command);
+  }
+
+  function routeRichClipboardEnvelope(envelope: CacabluClipboardEnvelope): boolean {
+    const activePanelId = state.getSnapshot().activePanelId;
+    if (activePanelId === 'timeline') {
+      if (envelope.kind !== 'bars') {
+        throw new Error('Only Timeline bars can be pasted into the Timeline.');
+      }
+      window.dispatchEvent(new CustomEvent('cacablu:timeline-clipboard-paste', {
+        detail: { payload: envelope.payload },
+      }));
+      return true;
+    }
+    if (activePanelId === 'resources') {
+      if (envelope.kind !== 'pool') {
+        throw new Error('Only Pool files and folders can be pasted into the Pool.');
+      }
+      window.dispatchEvent(new CustomEvent('cacablu:asset-clipboard-command', {
+        detail: {
+          command: 'paste',
+          externalRoots: poolClipboardRootsToAssetNodes(envelope.payload),
+        },
+      }));
+      return true;
+    }
+    return false;
+  }
+
+  async function pasteRichClipboardFromMenu(): Promise<void> {
+    try {
+      const envelope = await readEnvelopeFromSystemClipboard();
+      if (envelope && routeRichClipboardEnvelope(envelope)) return;
+      if (state.getSnapshot().activePanelId === 'resources') {
+        window.dispatchEvent(new CustomEvent('cacablu:asset-clipboard-command', {
+          detail: { command: 'paste' },
+        }));
+      }
+    } catch (error) {
+      if (
+        state.getSnapshot().activePanelId === 'resources'
+        && assetClipboard.getSnapshot() !== null
+      ) {
+        window.dispatchEvent(new CustomEvent('cacablu:asset-clipboard-command', {
+          detail: { command: 'paste' },
+        }));
+        return;
+      }
+      state.addEvent({
+        severity: 'error',
+        source: 'Clipboard',
+        description: error instanceof Error ? error.message : 'Could not read the clipboard.',
+      });
+    }
   }
 
   function runDeleteAction(): void {
@@ -460,6 +522,7 @@ export function createAppShell(root: HTMLElement): AppShell {
     dbState.setOpening();
     state.clearResourceSelection();
     state.clearAssetSelection();
+    state.setTimelinePasteLayer(null);
     assetClipboard.invalidateSession(null);
     state.resetSectionErrors();
     state.setActiveLoop(null);
@@ -594,6 +657,27 @@ export function createAppShell(root: HTMLElement): AppShell {
           assetClipboard.clear();
           return;
         }
+        if (event.type === 'copy' && state.getSnapshot().activePanelId === 'timeline') {
+          const currentSession = sessionRef.current;
+          if (!currentSession) return;
+          const bars = getSelectedExistingBars(
+            currentSession.data,
+            state.getSnapshot().resourceSelection,
+          );
+          if (bars.length === 0 || !event.clipboardData) return;
+          try {
+            writeEnvelopeToDataTransfer(event.clipboardData, createBarClipboardEnvelope(bars));
+            event.preventDefault();
+          } catch (error) {
+            state.addEvent({
+              severity: 'error',
+              source: 'Timeline clipboard',
+              description: error instanceof Error ? error.message : 'Could not copy Timeline bars.',
+            });
+          }
+          return;
+        }
+        if (state.getSnapshot().activePanelId !== 'resources') return;
         const clipboardEvent = new CustomEvent('cacablu:asset-clipboard-command', {
           cancelable: true,
           detail: {
@@ -605,6 +689,24 @@ export function createAppShell(root: HTMLElement): AppShell {
       };
       window.addEventListener('copy', handleNativeCopyOrCut);
       window.addEventListener('cut', handleNativeCopyOrCut);
+
+      window.addEventListener('paste', (event) => {
+        if (isTextEditingTarget(event.target) || !event.clipboardData) return;
+        try {
+          const envelope = readEnvelopeFromDataTransfer(event.clipboardData);
+          if (!envelope) return;
+          if (routeRichClipboardEnvelope(envelope)) event.preventDefault();
+        } catch (error) {
+          if (['timeline', 'resources'].includes(state.getSnapshot().activePanelId ?? '')) {
+            event.preventDefault();
+            state.addEvent({
+              severity: 'error',
+              source: 'Clipboard',
+              description: error instanceof Error ? error.message : 'Could not paste clipboard data.',
+            });
+          }
+        }
+      });
 
       const revalidateAssetClipboard = () => {
         if (assetClipboard.getSnapshot()?.operation !== 'cut' || !navigator.clipboard?.readText) return;
@@ -666,6 +768,10 @@ export function createAppShell(root: HTMLElement): AppShell {
         }
         if (snapshot.displayTimelineIds !== lastDisplayTimelineIds) {
           lastDisplayTimelineIds = snapshot.displayTimelineIds;
+          syncMenuDisabled(dbState.getSnapshot());
+        }
+        if (snapshot.timelinePasteLayer !== lastTimelinePasteLayer) {
+          lastTimelinePasteLayer = snapshot.timelinePasteLayer;
           syncMenuDisabled(dbState.getSnapshot());
         }
         const resourceSelectionSignature = getResourceSelectionSignature(snapshot.resourceSelection);
@@ -782,8 +888,8 @@ export function createAppShell(root: HTMLElement): AppShell {
         }
         if (command === 'copy') return;
 
-        event.preventDefault();
-        runClipboardCommand(command);
+        // Let the browser emit the trusted paste event so every Cacablu tab
+        // can read the rich, cross-project payload synchronously.
       });
 
       window.addEventListener('keydown', (event) => {
@@ -874,7 +980,13 @@ export function createAppShell(root: HTMLElement): AppShell {
         return { ...action, disabled: state.getSnapshot().assetSelection.kind === 'none' };
       }
       if (state.getSnapshot().activePanelId === 'resources' && action.id === 'edit-paste') {
-        return { ...action, disabled: assetClipboard.getSnapshot() === null };
+        return { ...action, disabled: !hasFile };
+      }
+      if (state.getSnapshot().activePanelId === 'timeline' && action.id === 'edit-copy') {
+        return { ...action, disabled: getSelectedBarIds().length === 0 };
+      }
+      if (state.getSnapshot().activePanelId === 'timeline' && action.id === 'edit-paste') {
+        return { ...action, disabled: !hasFile || state.getSnapshot().timelinePasteLayer === null };
       }
       if (fileActionDisabled) return { ...action, disabled: true };
       return action;

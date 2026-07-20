@@ -18,6 +18,11 @@ import { createPhoenixRuntimeLoopClient } from '../phoenix/runtime-loop-client';
 import { primePhoenixLogEvents, recordPhoenixLogsAsEvents } from '../phoenix/log-events';
 import { ProjectSectionSyncError, syncProjectBarToPhoenix } from '../services/project-section-sync';
 import { computeLoopIntervalFromMarkers } from '../services/timeline-loop-markers';
+import type { BarClipboardPayload } from '../services/cross-project-clipboard';
+import {
+  assertPastedBarsUnchanged,
+  preparePastedTimelineBars,
+} from '../services/timeline-bar-paste';
 import { createContentRenderer } from './base-panel';
 
 const CLIP_COLOR = '#5e86b8';
@@ -28,6 +33,7 @@ const TIMELINE_LAYER_HEIGHT = 18;
 const MARKER_DOUBLE_CLICK_MS = 450;
 const MOVE_SYNC_DELAY_MS = 850;
 const TRANSPORT_SYNC_GRACE_MS = 1200;
+const TIMELINE_HORIZONTAL_TAIL_VIEWPORTS = 1;
 const timelineScrollMemory = {
   left: 0,
   top: 0,
@@ -114,6 +120,7 @@ export function createTimelinePanel(
   let lastRenderedSelectionSignature = '';
   let lastRenderedErrorSignature = '';
   let lastRenderedDisplayTimelineIds = false;
+  let lastRenderedPasteLayer: number | null = null;
   let lastRenderedMarkerSignature = '';
   let lastAppTimelineSignature = '';
   let lastViewportScrollLeft = timelineScrollMemory.left;
@@ -339,7 +346,7 @@ export function createTimelinePanel(
     if (!Number.isFinite(effectivePixelsPerSecond) || effectivePixelsPerSecond <= 0) {
       return 0;
     }
-    return Math.min(Math.max(x / effectivePixelsPerSecond, 0), state.transport.duration);
+    return Math.max(x / effectivePixelsPerSecond, 0);
   }
 
   function isLowerRulerZone(ruler: HTMLElement, clientY: number): boolean {
@@ -945,6 +952,7 @@ export function createTimelinePanel(
         selectionSignature === lastRenderedSelectionSignature &&
         errorSignature === lastRenderedErrorSignature &&
         displayTimelineIds === lastRenderedDisplayTimelineIds &&
+        snapshot.timelinePasteLayer === lastRenderedPasteLayer &&
         markerSignature === lastRenderedMarkerSignature
       ) {
         updatePlaybackVisualState();
@@ -958,6 +966,7 @@ export function createTimelinePanel(
       lastRenderedSelectionSignature = selectionSignature;
       lastRenderedErrorSignature = errorSignature;
       lastRenderedDisplayTimelineIds = displayTimelineIds;
+      lastRenderedPasteLayer = snapshot.timelinePasteLayer;
       lastRenderedMarkerSignature = markerSignature;
 
       const effectivePixelsPerSecond = state.viewport.pixelsPerSecond * state.viewport.zoom;
@@ -971,9 +980,14 @@ export function createTimelinePanel(
       const previousScrollTop = previousViewport?.scrollTop ?? lastViewportScrollTop;
       const viewportWidth = previousViewport?.clientWidth ?? element.clientWidth;
       const playheadLeft = state.transport.currentTime * effectivePixelsPerSecond;
-      const timelineWidth = Math.max(state.transport.duration * effectivePixelsPerSecond, viewportWidth);
+      const contentWidth = state.transport.duration * effectivePixelsPerSecond;
+      const timelineWidth = Math.max(
+        contentWidth + viewportWidth * TIMELINE_HORIZONTAL_TAIL_VIEWPORTS,
+        viewportWidth,
+      );
+      const editingSurfaceDuration = timelineWidth / effectivePixelsPerSecond;
       const markerStep = getMarkerStep(effectivePixelsPerSecond);
-      const markerCount = Math.floor(state.transport.duration / markerStep) + 1;
+      const markerCount = Math.floor(editingSurfaceDuration / markerStep) + 1;
       const activeLoop = state.transport.loop ? normalizeRange(state.transport.loop) : null;
       const loopLeft = activeLoop ? activeLoop.start * effectivePixelsPerSecond : 0;
       const loopWidth = activeLoop ? Math.max((activeLoop.end - activeLoop.start) * effectivePixelsPerSecond, 1) : 0;
@@ -1033,7 +1047,7 @@ export function createTimelinePanel(
                       .sort((a, b) => a.start - b.start);
 
                     return `
-                      <div class="timeline-panel__lane" data-layer="${getLayerFromTrackId(track.id)}" style="height:${track.height}px">
+                      <div class="timeline-panel__lane ${snapshot.timelinePasteLayer === getLayerFromTrackId(track.id) ? 'is-paste-target is-layer-selected' : ''}" data-layer="${getLayerFromTrackId(track.id)}" style="height:${track.height}px">
                         ${trackClips
                           .map((clip) => {
                             const left = clip.start * state.viewport.pixelsPerSecond * state.viewport.zoom;
@@ -1262,6 +1276,7 @@ export function createTimelinePanel(
             ? `bars:${[...snapshot.resourceSelection.ids].sort((a, b) => a - b).join(',')}`
             : 'none',
         snapshot.sectionErrorIds.join(','),
+        snapshot.timelinePasteLayer === null ? 'no-paste-layer' : `paste-layer:${snapshot.timelinePasteLayer}`,
         snapshot.activeLoop ? `loop:${snapshot.activeLoop.startTime}:${snapshot.activeLoop.endTime}` : 'no-loop',
       ].join('|');
       if (nextSignature === lastAppTimelineSignature) return;
@@ -1716,12 +1731,24 @@ export function createTimelinePanel(
     function endEmptyBarCreation(): void {
       const finishedCreation = emptyBarCreationState;
       emptyBarCreationState = null;
-      if (!finishedCreation?.hasMoved) {
+      if (!finishedCreation) {
         return;
       }
 
       const effectivePixelsPerSecond = state.viewport.pixelsPerSecond * state.viewport.zoom;
       if (!Number.isFinite(effectivePixelsPerSecond) || effectivePixelsPerSecond <= 0) {
+        render(true);
+        return;
+      }
+      if (!finishedCreation.hasMoved) {
+        const clickedTime = Math.max(finishedCreation.startX / effectivePixelsPerSecond, 0);
+        appState.setTimelinePasteLayer(finishedCreation.layer);
+        state.transport.currentTime = clickedTime;
+        runtimeAnchorTime = clickedTime;
+        runtimeAnchorTimestamp = performance.now();
+        if (connection.isConnected()) {
+          connection.send({ type: 'runtime.seek', time: clickedTime });
+        }
         render(true);
         return;
       }
@@ -1792,6 +1819,82 @@ export function createTimelinePanel(
       render(true);
     };
     window.addEventListener('cacablu:timeline-bars-changed', handleBarsChanged);
+
+    const handleTimelineClipboardPaste = (event: Event): void => {
+      if (appState.getSnapshot().activePanelId !== 'timeline') return;
+      const detail = event instanceof CustomEvent
+        ? event.detail as { payload?: BarClipboardPayload }
+        : null;
+      if (!detail?.payload) return;
+
+      const session = sessionRef.current;
+      const targetLayer = appState.getSnapshot().timelinePasteLayer;
+      if (!session || targetLayer === null) {
+        appState.addEvent({
+          severity: 'error',
+          source: 'Timeline clipboard',
+          description: 'Select a Timeline layer before pasting bars.',
+        });
+        return;
+      }
+
+      try {
+        const wasDirty = dbState.getSnapshot().isDirty;
+        const inputs = preparePastedTimelineBars(
+          detail.payload,
+          state.transport.currentTime,
+          targetLayer,
+          session.data.bars,
+        );
+        const pasted = session.insertTimelineBars(inputs).map((bar) => ({ ...bar }));
+        const pastedIds = pasted.map((bar) => bar.id);
+        dbState.setDirty();
+        appState.setResourceSelection(
+          pastedIds.length === 1
+            ? { kind: 'bar', id: pastedIds[0] }
+            : { kind: 'bars', ids: pastedIds },
+        );
+        undoManager.push({
+          label: `Paste ${pasted.length} Timeline ${pasted.length === 1 ? 'bar' : 'bars'}`,
+          undo: async () => {
+            assertPastedBarsUnchanged(session.data.bars, pasted);
+            session.deleteTimelineBars(pastedIds);
+            if (wasDirty) dbState.setDirty();
+            else dbState.setSaved();
+            appState.clearResourceSelection();
+            loadFromDb({ preserveTransport: true });
+            render(true);
+            if (connection.isConnected()) {
+              try {
+                await phoenixSections.deleteMany(pastedIds.map(String));
+                appState.clearSectionErrors(pastedIds);
+                appState.clearEventsForSubjects(pastedIds.map(String), ['Phoenix section sync']);
+              } catch (error) {
+                appState.addEvents(pastedIds.map((id) => ({
+                  severity: 'error',
+                  source: 'Phoenix section sync',
+                  subjectId: String(id),
+                  description: error instanceof Error
+                    ? error.message
+                    : `Could not remove pasted Timeline bar ${id} from Phoenix.`,
+                })));
+                appState.markSectionErrors(pastedIds);
+              }
+            }
+          },
+        });
+        loadFromDb({ preserveTransport: true });
+        render(true);
+        for (const id of pastedIds) void syncMovedBarToPhoenix(id);
+      } catch (error) {
+        appState.addEvent({
+          severity: 'error',
+          source: 'Timeline clipboard',
+          description: error instanceof Error ? error.message : 'Could not paste Timeline bars.',
+        });
+      }
+    };
+    window.addEventListener('cacablu:timeline-clipboard-paste', handleTimelineClipboardPaste);
 
     const handleMarkersChanged = (): void => {
       render(true);
@@ -1877,7 +1980,24 @@ export function createTimelinePanel(
         return;
       }
 
+      const lane = (event.target as HTMLElement | null)?.closest<HTMLElement>('.timeline-panel__lane');
       const clip = (event.target as HTMLElement | null)?.closest<HTMLElement>('[data-bar-id]');
+      if (lane?.dataset.layer) {
+        const layer = Number(lane.dataset.layer);
+        if (Number.isInteger(layer)) appState.setTimelinePasteLayer(layer);
+        if (!clip) {
+          const viewport = element.querySelector<HTMLElement>('.timeline-panel__viewport');
+          if (viewport) {
+            const nextTime = getTimelineTimeAtClientX(viewport, event.clientX);
+            state.transport.currentTime = nextTime;
+            runtimeAnchorTime = nextTime;
+            runtimeAnchorTimestamp = performance.now();
+            if (connection.isConnected()) {
+              connection.send({ type: 'runtime.seek', time: nextTime });
+            }
+          }
+        }
+      }
       if (clip?.dataset.barId) {
         const barId = Number(clip.dataset.barId);
         if (Number.isInteger(barId)) {
@@ -1937,11 +2057,6 @@ export function createTimelinePanel(
     );
 
     element.addEventListener('click', (event) => {
-      if (consumeSuppressedClick()) {
-        event.stopImmediatePropagation();
-        return;
-      }
-
       const ruler = (event.target as HTMLElement | null)?.closest<HTMLElement>('.timeline-panel__ruler');
       if (!ruler) {
         return;
@@ -2031,6 +2146,7 @@ export function createTimelinePanel(
       pendingMovedBarIds.clear();
       window.removeEventListener('cacablu:edit-delete', handleDeleteAction);
       window.removeEventListener('cacablu:timeline-bars-changed', handleBarsChanged);
+      window.removeEventListener('cacablu:timeline-clipboard-paste', handleTimelineClipboardPaste);
       window.removeEventListener('cacablu:timeline-markers-changed', handleMarkersChanged);
       window.removeEventListener('cacablu:timeline-reveal-bar', handleRevealBar);
       element.removeEventListener('scroll', handleTimelineScroll, true);

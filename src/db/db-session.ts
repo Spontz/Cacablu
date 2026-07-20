@@ -8,7 +8,7 @@ import { buildResourcePath, type AssetClipboardNode } from '../resources/asset-c
 type EditableDbValue = string | number | boolean | null;
 type DbTableName = string;
 type DbTableCellValue = string | number | boolean | Uint8Array | null;
-type NewTimelineBar = Pick<DbBar, 'layer' | 'startTime' | 'endTime'> & Partial<Omit<DbBar, 'layer' | 'startTime' | 'endTime'>>;
+export type NewTimelineBar = Pick<DbBar, 'layer' | 'startTime' | 'endTime'> & Partial<Omit<DbBar, 'layer' | 'startTime' | 'endTime'>>;
 type NewTimelineMarker = Pick<DbMarker, 'time'> & Partial<Pick<DbMarker, 'id' | 'label'>>;
 type NewResourceFile = Pick<DbFile, 'name' | 'parent' | 'bytes' | 'type' | 'data' | 'format'> & Partial<Pick<DbFile, 'enabled'>>;
 type NewResourceFolder = Pick<DbFolder, 'name' | 'parent'> & Partial<Pick<DbFolder, 'enabled'>>;
@@ -42,6 +42,7 @@ export interface DbSession {
   getTableNames(): string[];
   getTableSnapshot(tableName: string): DbTableSnapshot;
   insertTimelineBar(input: NewTimelineBar): DbBar;
+  insertTimelineBars(inputs: NewTimelineBar[]): DbBar[];
   deleteTimelineBars(ids: number[]): DbBar[];
   restoreTimelineBars(bars: DbBar[]): DbBar[];
   setTimelineBarEnabled(barId: number, enabled: boolean): DbBar;
@@ -227,6 +228,28 @@ function makeSession(handle: FileSystemFileHandle, db: SqlDatabase, data: Projec
         ...bar,
       };
       data.bars.push(inserted);
+      return inserted;
+    },
+
+    insertTimelineBars(inputs): DbBar[] {
+      if (inputs.length === 0) return [];
+      if (inputs.some((input) => input.id !== undefined)) {
+        throw new Error('Pasted Timeline bars must receive new destination ids.');
+      }
+      const inserted: DbBar[] = [];
+      db.run('BEGIN TRANSACTION');
+      try {
+        for (const input of inputs) {
+          const bar = normalizeNewTimelineBar(input);
+          insertNewTimelineBarRow(db, bar);
+          inserted.push({ id: lastInsertRowId(db), ...bar });
+        }
+        db.run('COMMIT');
+      } catch (error) {
+        rollbackQuietly(db);
+        throw error;
+      }
+      data.bars.push(...inserted);
       return inserted;
     },
 
@@ -1119,6 +1142,45 @@ function insertTimelineBarRow(db: SqlDatabase, bar: DbBar): void {
     'INSERT INTO "BARS" ("id", "name", "type", "layer", "startTime", "endTime", "enabled", "selected", "script", "srcBlending", "dstBlending", "blendingEQ", "srcAlpha", "dstAlpha") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
     [
       bar.id,
+      bar.name,
+      bar.type,
+      bar.layer,
+      bar.startTime,
+      bar.endTime,
+      bar.enabled ? 1 : 0,
+      bar.selected ? 1 : 0,
+      bar.script,
+      bar.srcBlending,
+      bar.dstBlending,
+      bar.blendingEQ,
+      bar.srcAlpha,
+      bar.dstAlpha,
+    ],
+  );
+}
+
+function normalizeNewTimelineBar(input: NewTimelineBar): Omit<DbBar, 'id'> {
+  return {
+    name: input.name ?? '',
+    type: input.type ?? '',
+    layer: input.layer,
+    startTime: input.startTime,
+    endTime: input.endTime,
+    enabled: input.enabled ?? true,
+    selected: input.selected ?? false,
+    script: input.script ?? '',
+    srcBlending: input.srcBlending ?? 'ONE',
+    dstBlending: input.dstBlending ?? 'ZERO',
+    blendingEQ: input.blendingEQ ?? '',
+    srcAlpha: input.srcAlpha ?? '',
+    dstAlpha: input.dstAlpha ?? '',
+  };
+}
+
+function insertNewTimelineBarRow(db: SqlDatabase, bar: Omit<DbBar, 'id'>): void {
+  db.run(
+    'INSERT INTO "BARS" ("name", "type", "layer", "startTime", "endTime", "enabled", "selected", "script", "srcBlending", "dstBlending", "blendingEQ", "srcAlpha", "dstAlpha") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    [
       bar.name,
       bar.type,
       bar.layer,

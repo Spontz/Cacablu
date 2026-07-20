@@ -41,6 +41,17 @@ describe('createAppState', () => {
 
     expect(state.getSnapshot().resourceSelection).toEqual({ kind: 'none' });
     expect(state.getSnapshot().assetSelection).toEqual({ kind: 'none' });
+    expect(state.getSnapshot().timelinePasteLayer).toBeNull();
+  });
+
+  it('stores and validates the Timeline paste layer', () => {
+    const state = createAppState();
+
+    state.setTimelinePasteLayer(4);
+    expect(state.getSnapshot().timelinePasteLayer).toBe(4);
+    state.setTimelinePasteLayer(null);
+    expect(state.getSnapshot().timelinePasteLayer).toBeNull();
+    expect(() => state.setTimelinePasteLayer(-1)).toThrow(/non-negative integer/i);
   });
 
   it('updates and clears file asset selection', () => {

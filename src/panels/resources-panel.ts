@@ -11,7 +11,7 @@ import { createPhoenixSectionClient } from '../phoenix/section-client';
 import { addAssetImpactEvents } from '../phoenix/asset-impact-events';
 import { deleteAllowedAssetFile, writeAllowedAssetFile } from '../phoenix/asset-operations';
 import { buildResourceTree, type ResourceTreeNode } from '../resources/resource-tree';
-import type { AssetClipboard } from '../resources/asset-clipboard';
+import type { AssetClipboard, AssetClipboardNode } from '../resources/asset-clipboard';
 import {
   normalizePoolPath,
   pendingCutKeys,
@@ -29,6 +29,11 @@ import type { AssetSelectionItem } from '../app/types';
 import { syncResourceClipboardMutation } from '../services/resource-clipboard-sync';
 import { ProjectSectionSyncError, syncProjectBarToPhoenix } from '../services/project-section-sync';
 import { writeSystemClipboardText } from '../resources/system-clipboard';
+import {
+  createPoolClipboardEnvelope,
+  writeEnvelopeToDataTransfer,
+  writeEnvelopeToSystemClipboard,
+} from '../services/cross-project-clipboard';
 import { ASSET_FILE_DRAG_TYPE } from '../resources/pool-path-drop';
 import { createMenuIcon } from '../menu/menu-icon';
 import { createContentRenderer } from './base-panel';
@@ -537,11 +542,15 @@ export function createResourcesPanel(
     const handleClipboardCommand = (event: Event) => {
       if (state.getSnapshot().activePanelId !== 'resources') return;
       const detail = event instanceof CustomEvent
-        ? event.detail as { command?: unknown; clipboardData?: DataTransfer | null }
+        ? event.detail as {
+            command?: unknown;
+            clipboardData?: DataTransfer | null;
+            externalRoots?: AssetClipboardNode[];
+          }
         : null;
       if (detail?.command !== 'copy' && detail?.command !== 'cut' && detail?.command !== 'paste') return;
       event.preventDefault();
-      if (detail.command === 'paste') void pasteAssetClipboard();
+      if (detail.command === 'paste') void pasteAssetClipboard(undefined, detail.externalRoots);
       else void captureAssetClipboard(detail.command, detail.clipboardData);
     };
     window.addEventListener('cacablu:asset-clipboard-command', handleClipboardCommand);
@@ -830,6 +839,15 @@ export function createResourcesPanel(
 
       try {
         const snapshot = assetClipboard.capture(operation, session, session.data, selected);
+        if (operation === 'copy') {
+          const envelope = createPoolClipboardEnvelope(snapshot.roots);
+          if (clipboardData) {
+            writeEnvelopeToDataTransfer(clipboardData, envelope);
+            return;
+          }
+          await writeEnvelopeToSystemClipboard(envelope);
+          return;
+        }
         if (clipboardData) {
           clipboardData.setData('text/plain', snapshot.text);
           return;
@@ -844,19 +862,25 @@ export function createResourcesPanel(
       }
     }
 
-    async function pasteAssetClipboard(explicitParentId?: number): Promise<void> {
+    async function pasteAssetClipboard(
+      explicitParentId?: number,
+      externalRoots?: AssetClipboardNode[],
+    ): Promise<void> {
       const session = sessionRef.current;
       const snapshot = assetClipboard.getSnapshot();
-      if (!session || !snapshot) {
+      if (!session || (!snapshot && !externalRoots)) {
         setSyncStatus('error', 'The Pool clipboard is empty.');
         return;
       }
 
       try {
         const parentId = explicitParentId ?? resolveAssetPasteParent(session.data, state.getSnapshot().assetSelection);
+        const operation = externalRoots ? 'copy' : snapshot!.operation;
+        const roots = externalRoots ?? snapshot!.roots;
+        const sourceSession = externalRoots ? null : snapshot!.sourceSession;
         const wasDirty = dbState.getSnapshot().isDirty;
-        const previousParents = snapshot.operation === 'cut'
-          ? snapshot.roots.map((root) => {
+        const previousParents = operation === 'cut'
+          ? roots.map((root) => {
               const row = root.kind === 'file'
                 ? session.data.files.find((candidate) => candidate.id === root.sourceId)
                 : session.data.folders.find((candidate) => candidate.id === root.sourceId);
@@ -865,25 +889,25 @@ export function createResourcesPanel(
             })
           : [];
         let result: ResourceClipboardMutation;
-        if (snapshot.operation === 'copy') {
-          if (snapshot.sourceSession === session) {
-            validateAssetCopyDestination(session.data, snapshot.roots, parentId);
+        if (operation === 'copy') {
+          if (sourceSession === session) {
+            validateAssetCopyDestination(session.data, roots, parentId);
           }
-          result = session.copyResourceItems(snapshot.roots, parentId);
+          result = session.copyResourceItems(roots, parentId);
         } else {
-          if (snapshot.sourceSession !== session) {
+          if (sourceSession !== session) {
             assetClipboard.clear();
             throw new Error('The cut Pool items belong to a project that is no longer open.');
           }
           result = session.moveResourceItems(
-            snapshot.roots.map((root) => ({ kind: root.kind, id: root.sourceId })),
+            roots.map((root) => ({ kind: root.kind, id: root.sourceId })),
             parentId,
           );
         }
 
         dbState.setDirty();
         state.setAssetSelection(createAssetSelection(result.roots.map((root) => resourceRefToSelection(session, root))));
-        if (snapshot.operation === 'cut') assetClipboard.consumeCut();
+        if (operation === 'cut') assetClipboard.consumeCut();
         if (result.operation === 'copy') {
           const pastedSnapshot = session.snapshotResourceItems(result.roots);
           undoManager.push({
@@ -910,7 +934,7 @@ export function createResourcesPanel(
         await syncResourceClipboardMutation(result, phoenixAssets, state, connection.isConnected());
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Could not paste Pool items.';
-        if (snapshot.operation === 'cut' && /no longer|no longer open/i.test(message)) assetClipboard.clear();
+        if (snapshot?.operation === 'cut' && /no longer|no longer open/i.test(message)) assetClipboard.clear();
         setSyncStatus('error', message);
       }
     }

@@ -13,6 +13,7 @@ export interface AppState {
   clearAssetSelection(): void;
   setDisplayTimelineIds(display: boolean): void;
   toggleDisplayTimelineIds(): void;
+  setTimelinePasteLayer(layer: number | null): void;
   addEvent(event: Omit<AppEvent, 'id' | 'timestamp'> & { id?: string; timestamp?: number }): void;
   addEvents(events: Array<Omit<AppEvent, 'id' | 'timestamp'> & { id?: string; timestamp?: number }>): void;
   markSectionErrors(ids: number[]): void;
@@ -36,6 +37,7 @@ const INITIAL_SNAPSHOT: AppSnapshot = {
   hasUnreadErrors: false,
   errorEventRevision: 0,
   displayTimelineIds: false,
+  timelinePasteLayer: null,
   sectionErrorIds: [],
   activeLoop: null,
 };
@@ -134,6 +136,15 @@ export function createAppState(): AppState {
 
     toggleDisplayTimelineIds(): void {
       this.setDisplayTimelineIds(!snapshot.displayTimelineIds);
+    },
+
+    setTimelinePasteLayer(layer): void {
+      if (layer !== null && (!Number.isInteger(layer) || layer < 0)) {
+        throw new Error('The Timeline paste layer must be a non-negative integer.');
+      }
+      if (snapshot.timelinePasteLayer === layer) return;
+      snapshot = { ...snapshot, timelinePasteLayer: layer };
+      publish();
     },
 
     addEvent(event): void {

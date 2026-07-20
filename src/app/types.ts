@@ -58,6 +58,7 @@ export interface AppSnapshot {
   hasUnreadErrors: boolean;
   errorEventRevision: number;
   displayTimelineIds: boolean;
+  timelinePasteLayer: number | null;
   sectionErrorIds: number[];
   activeLoop: { startTime: number; endTime: number } | null;
 }

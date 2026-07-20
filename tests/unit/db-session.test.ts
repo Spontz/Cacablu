@@ -105,6 +105,29 @@ describe('DbSession markers', () => {
 });
 
 describe('DbSession timeline bar deletion', () => {
+  it('inserts a pasted bar group transactionally with fresh destination ids', async () => {
+    const handle = new MemoryFileHandle(await createLegacyProjectBytes()) as unknown as FileSystemFileHandle;
+    const session = await openDbSession(handle);
+    session.insertTimelineBar({ id: 20, layer: 0, startTime: 0, endTime: 1 });
+
+    const inserted = session.insertTimelineBars([
+      { name: 'one', layer: 3, startTime: 5, endTime: 6, script: 'first' },
+      { name: 'two', layer: 4, startTime: 7, endTime: 9, enabled: false, script: 'second' },
+    ]);
+
+    expect(inserted.map((bar) => bar.id)).toEqual([21, 22]);
+    expect(inserted).toEqual([
+      expect.objectContaining({ id: 21, name: 'one', layer: 3, script: 'first' }),
+      expect.objectContaining({ id: 22, name: 'two', layer: 4, enabled: false, script: 'second' }),
+    ]);
+    expect(() => session.insertTimelineBars([
+      { id: 99, layer: 0, startTime: 0, endTime: 1 },
+      { layer: 0, startTime: 1, endTime: 2 },
+    ])).toThrow(/new destination ids/i);
+    expect(session.data.bars.map((bar) => bar.id)).toEqual([20, 21, 22]);
+    session.close();
+  });
+
   it('deletes and atomically restores complete bars with stable ids', async () => {
     const handle = new MemoryFileHandle(await createLegacyProjectBytes()) as unknown as FileSystemFileHandle;
     let session = await openDbSession(handle);
