@@ -13,6 +13,7 @@ import { createPhoenixLogClient } from '../phoenix/log-client';
 import { installPoolPathDrop } from '../resources/pool-path-drop';
 import { primePhoenixLogEvents, recordPhoenixLogsAsEvents } from '../phoenix/log-events';
 import { ProjectSectionSyncError, syncProjectBarToPhoenix, type ProjectSectionSyncIssue } from '../services/project-section-sync';
+import { prepareMultiBarTimeEdit } from '../services/multi-bar-time-edit';
 import { createContentRenderer } from './base-panel';
 import { CACABLU_CODE_THEME, registerCacabluCodeTheme } from './code-editor-theme';
 import { installSelectionOccurrenceHighlighting } from './selection-occurrence-highlighting';
@@ -598,13 +599,15 @@ export function createSectionEditorPanel(
 
       const groupStart = Math.min(...selectedBars.map((bar) => bar.startTime));
       const groupEnd = Math.max(...selectedBars.map((bar) => bar.endTime));
+      const initialEditorStart = roundEditorTime(groupStart);
+      const initialEditorEnd = roundEditorTime(groupEnd);
 
       const startField = createField('Start Time');
-      const startInput = createTimeInput(groupStart);
+      const startInput = createTimeInput(initialEditorStart);
       startField.append(startInput);
 
       const endField = createField('End Time');
-      const endInput = createTimeInput(groupEnd);
+      const endInput = createTimeInput(initialEditorEnd);
       endField.append(endInput);
 
       const apply = document.createElement('button');
@@ -645,25 +648,27 @@ export function createSectionEditorPanel(
         }
 
         const previous = takeBarSnapshots(currentBars);
-        const previousGroupStart = Math.min(...previous.map((bar) => bar.startTime));
-        const previousGroupEnd = Math.max(...previous.map((bar) => bar.endTime));
-        const startDelta = roundEditorTime(nextGroupStart - previousGroupStart);
-        const endDelta = roundEditorTime(nextGroupEnd - previousGroupEnd);
-        const next = previous.map((bar) => ({
-          ...bar,
-          startTime: roundEditorTime(bar.startTime + startDelta),
-          endTime: roundEditorTime(bar.endTime + endDelta),
-        }));
-
-        if (!barSnapshotsChanged(previous, next)) return;
-        if (!canApplyBarPlacements(next)) {
+        const session = sessionRef.current;
+        if (!session) return;
+        const plan = prepareMultiBarTimeEdit(previous, session.data.bars, {
+          ...(nextGroupStart !== initialEditorStart ? { startTime: nextGroupStart } : {}),
+          ...(nextGroupEnd !== initialEditorEnd ? { endTime: nextGroupEnd } : {}),
+        });
+        if (!plan.ok) {
           state.addEvent({
             severity: 'warning',
             source: 'Bar Editor',
-            description: 'Selected bars were not updated because at least one proposed range conflicts with another bar.',
+            description: plan.reason === 'overlap'
+              ? 'Selected bars were not updated because at least one proposed range overlaps another bar.'
+              : 'Selected bars were not updated because at least one proposed time range is invalid.',
           });
           return;
         }
+        if (!plan.changed) return;
+        const placementById = new Map(plan.placements.map((placement) => [placement.id, placement]));
+        const next = previous.map((bar) => ({ ...bar, ...placementById.get(bar.id) }));
+
+        if (!barSnapshotsChanged(previous, next)) return;
 
         const changedIds = next.map((bar) => bar.id);
         applyBarSnapshots(next);
