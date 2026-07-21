@@ -10,6 +10,7 @@
 - [x] T008 Test both fields, no-op, negative/invalid ranges, selected-selected overlap, external overlap, and adjacency.
 - [x] T009 Run typecheck, scoped lint, full tests, and production build.
 - [ ] T010 Record validation and close the spec.
+- [x] T011 Validate absolute Start, absolute End, Undo, persisted SQLite values, and overlap rejection with Selenium in Microsoft Edge.
 
 ## Automated Validation
 
@@ -19,6 +20,7 @@
 - Scoped ESLint: passed.
 - Production build: passed with only the existing Mantine directive and bundle-size warnings.
 - Full Microsoft Edge Timeline/Pool Playwright regression: passed.
+- Selenium in Microsoft Edge: absolute Start/End, preserved endpoints, persisted SQLite values, atomic Undo, and atomic overlap rejection passed.
 
 ## Pending Manual Validation
 
