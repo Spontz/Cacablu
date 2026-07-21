@@ -31,6 +31,11 @@ As an editor with different projects open in separate tabs, I want to copy selec
 3. **Given** a valid bar payload copied in project A, **When** project B pastes it into Timeline, **Then** project B creates new destination ids and preserves each bar's name, type, duration, enabled state, script, blend values, blend equation, and alpha metadata.
 4. **Given** the source project or tab is later closed or changed, **When** the destination pastes the copied payload, **Then** paste remains possible because the clipboard snapshot does not depend on source session memory.
 5. **Given** bar Copy is invoked, **When** the clipboard also exposes plain text, **Then** the application-specific payload remains distinguishable from ordinary text and does not cause arbitrary text to be interpreted as project data.
+6. **Given** selected bars are copied and a free Timeline target is chosen in the same loaded project, **When** the user invokes Paste in that same tab, **Then** Cacablu creates independent destination bars with new ids even when the browser preserves only the recognizable plain-text representation of the local clipboard snapshot.
+7. **Given** Timeline bars are selected and the user works only with the keyboard, **When** the user presses `Ctrl+C`, selects a free time/layer target, and presses `Ctrl+V`, **Then** Cacablu performs Copy and Paste through its explicit keyboard route without requiring the browser to dispatch native clipboard events to the focused bar node.
+8. **Given** one or more Timeline bars are selected and focus has drifted to a non-editable browser or Dockview element, **When** the user presses `Ctrl+C`, **Then** the valid bar selection owns Copy without requiring a preceding `Shift` gesture or an active bar DOM node.
+9. **Given** a keyboard Paste succeeds and selects the newly created bars, **When** the user selects another free time/layer target and presses `Ctrl+V` again, **Then** Timeline retains keyboard ownership and reuses the copied snapshot for another independent Paste.
+10. **Given** the user presses `Ctrl+C` or `Ctrl+V` in Edge, **When** the browser dispatches its trusted native `copy` or `paste` event, **Then** Cacablu processes that event without cancelling and replacing the shortcut from `keydown`, and the clipboard remains reusable for subsequent Paste operations.
 
 ---
 

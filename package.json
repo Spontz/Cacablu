@@ -38,6 +38,7 @@
     "eslint": ">=9 <10",
     "globals": ">=15 <16",
     "playwright": "^1.61.1",
+    "selenium-webdriver": "^4.46.0",
     "typescript": ">=5 <6",
     "typescript-eslint": ">=8 <9",
     "vite": ">=7 <8",

@@ -1308,7 +1308,16 @@ export function createTimelinePanel(
         return;
       }
 
-      const markerElement = (event.target as HTMLElement | null)?.closest<HTMLElement>('[data-marker-id]');
+      const interactionTarget = event.target as HTMLElement | null;
+      if (interactionTarget?.closest('.timeline-panel__viewport')) {
+        appState.setActivePanel('timeline');
+        // Timeline rendering replaces lane and bar nodes after selection. Keep
+        // keyboard ownership on the stable panel root so Ctrl+C/Ctrl+V still
+        // target the Timeline after an ordinary pointer click.
+        element.focus({ preventScroll: true });
+      }
+
+      const markerElement = interactionTarget?.closest<HTMLElement>('[data-marker-id]');
       if (markerElement?.dataset.markerId) {
         const markerId = Number(markerElement.dataset.markerId);
         const marker = Number.isInteger(markerId) ? findMarker(markerId) : null;
@@ -1342,7 +1351,7 @@ export function createTimelinePanel(
         return;
       }
 
-      const clip = (event.target as HTMLElement | null)?.closest<HTMLElement>('[data-bar-id]');
+      const clip = interactionTarget?.closest<HTMLElement>('[data-bar-id]');
       if (!clip?.dataset.barId) {
         if (event.shiftKey) {
           beginBoxSelection(event);
@@ -1821,7 +1830,6 @@ export function createTimelinePanel(
     window.addEventListener('cacablu:timeline-bars-changed', handleBarsChanged);
 
     const handleTimelineClipboardPaste = (event: Event): void => {
-      if (appState.getSnapshot().activePanelId !== 'timeline') return;
       const detail = event instanceof CustomEvent
         ? event.detail as { payload?: BarClipboardPayload }
         : null;
@@ -1848,6 +1856,11 @@ export function createTimelinePanel(
         );
         const pasted = session.insertTimelineBars(inputs).map((bar) => ({ ...bar }));
         const pastedIds = pasted.map((bar) => bar.id);
+        appState.addEvent({
+          severity: 'info',
+          source: 'Timeline clipboard',
+          description: `Pasted ${pasted.length} Timeline ${pasted.length === 1 ? 'bar' : 'bars'} with Ctrl+V.`,
+        });
         dbState.setDirty();
         appState.setResourceSelection(
           pastedIds.length === 1
@@ -1885,6 +1898,7 @@ export function createTimelinePanel(
         });
         loadFromDb({ preserveTransport: true });
         render(true);
+        element.focus({ preventScroll: true });
         for (const id of pastedIds) void syncMovedBarToPhoenix(id);
       } catch (error) {
         appState.addEvent({
@@ -2003,11 +2017,13 @@ export function createTimelinePanel(
         if (Number.isInteger(barId)) {
           appState.setResourceSelection({ kind: 'bar', id: barId });
         }
+        element.focus({ preventScroll: true });
         return;
       }
 
       if ((event.target as HTMLElement | null)?.closest('.timeline-panel__viewport')) {
         appState.clearResourceSelection();
+        element.focus({ preventScroll: true });
       }
     });
 

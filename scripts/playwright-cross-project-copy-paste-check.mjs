@@ -1,6 +1,6 @@
-/* global process, console, window, File, fetch, document, navigator, Buffer, getComputedStyle */
+/* global process, console, window, File, document, navigator, Buffer, getComputedStyle, HTMLElement, atob */
 
-import { access } from 'node:fs/promises';
+import { access, readFile } from 'node:fs/promises';
 import { chromium } from 'playwright';
 import initSqlJs from 'sql.js';
 
@@ -21,9 +21,15 @@ async function createFixtureProject() {
   return Buffer.from(bytes);
 }
 
-const fixtureProject = projectPath ? null : await createFixtureProject();
+const fixtureProject = projectPath ? await readFile(projectPath) : await createFixtureProject();
+const fixtureProjectBase64 = fixtureProject.toString('base64');
 
-const browser = await chromium.launch({ headless: true });
+const browser = await chromium.launch({
+  headless: process.env.CACABLU_HEADLESS !== 'false',
+  ...(process.env.CACABLU_BROWSER_CHANNEL
+    ? { channel: process.env.CACABLU_BROWSER_CHANNEL }
+    : {}),
+});
 const context = await browser.newContext({
   permissions: ['clipboard-read', 'clipboard-write'],
   viewport: { width: 1400, height: 900 },
@@ -40,12 +46,13 @@ for (const page of [source, destination]) {
 }
 
 async function installProjectPicker(page, name) {
-  await page.addInitScript((projectName) => {
+  await page.addInitScript(({ projectName, projectBase64 }) => {
+    const projectBytes = Uint8Array.from(atob(projectBase64), (character) => character.charCodeAt(0));
     const createHandle = () => ({
       kind: 'file',
       name: projectName,
       getFile: async () => new File(
-        [await (await fetch('/__cross_project.sqlite')).arrayBuffer()],
+        [projectBytes],
         projectName,
         { type: 'application/x-sqlite3' },
       ),
@@ -53,7 +60,7 @@ async function installProjectPicker(page, name) {
     });
     window.showOpenFilePicker = async () => [createHandle()];
     window.showSaveFilePicker = async () => createHandle();
-  }, name);
+  }, { projectName: name, projectBase64: fixtureProjectBase64 });
 }
 
 async function openProject(page) {
@@ -64,6 +71,13 @@ async function openProject(page) {
 
 async function createBar(page) {
   await page.locator('.dv-tab', { hasText: 'Timeline' }).click();
+  const existing = page.locator('.timeline-panel__clip');
+  if (await existing.count()) {
+    const first = existing.first();
+    await first.click();
+    await first.waitFor();
+    return;
+  }
   const viewport = page.locator('.timeline-panel__viewport');
   const lane = page.locator('.timeline-panel__lane').first();
   const [viewportBox, laneBox] = await Promise.all([viewport.boundingBox(), lane.boundingBox()]);
@@ -78,19 +92,22 @@ async function createBar(page) {
   const selected = page.locator('.timeline-panel__clip.is-selected');
   await selected.waitFor();
   await selected.click();
-  await selected.focus();
 }
 
 async function selectPasteTarget(page) {
   await page.locator('.dv-tab', { hasText: 'Timeline' }).click();
   const viewport = page.locator('.timeline-panel__viewport');
+  await viewport.evaluate((element) => {
+    element.scrollLeft = element.scrollWidth - element.clientWidth;
+  });
+  await page.waitForTimeout(100);
   const lanes = page.locator('.timeline-panel__lane');
   const target = lanes.nth(Math.min(2, (await lanes.count()) - 1));
   const [viewportBox, laneBox] = await Promise.all([viewport.boundingBox(), target.boundingBox()]);
   if (!viewportBox || !laneBox) throw new Error('Timeline paste target is not visible.');
   await page.waitForTimeout(250);
   await page.mouse.click(
-    laneBox.x + Math.min(620, Math.max(2, laneBox.width - 2)),
+    viewportBox.x + viewportBox.width * 0.65,
     laneBox.y + laneBox.height / 2,
   );
   await target.waitFor({ state: 'visible' });
@@ -101,6 +118,11 @@ async function selectPasteTarget(page) {
     })));
     throw new Error(`The clicked Timeline lane was not selected as the paste target: ${JSON.stringify(debug)}`);
   }
+}
+
+async function runEditMenuAction(page, label) {
+  await page.getByRole('button', { name: 'Edit', exact: true }).click();
+  await page.locator('.menu-bar__item', { hasText: label }).click();
 }
 
 async function createBarInHorizontalTail(page) {
@@ -174,15 +196,82 @@ try {
   if (!sourceSelectedLayer.selected || !sourceSelectedLayer.background.startsWith('rgba(255, 200, 28')) {
     throw new Error(`Clicking a bar did not select its layer in yellow: ${JSON.stringify(sourceSelectedLayer)}`);
   }
+  await source.locator('.dv-tab', { hasText: 'Pool' }).click();
+  await source.evaluate(() => {
+    window.__timelineCopyDebug = [];
+    document.addEventListener('copy', (event) => {
+      window.__timelineCopyDebug.push({
+        target: event.target instanceof HTMLElement ? `${event.target.tagName}.${event.target.className}` : String(event.target),
+        targetHtml: event.target instanceof HTMLElement ? event.target.outerHTML : '',
+        editableAncestor: event.target instanceof HTMLElement
+          ? event.target.closest('input, textarea, select, [contenteditable="true"], .monaco-editor')?.outerHTML.slice(0, 300) ?? null
+          : null,
+        active: document.activeElement instanceof HTMLElement
+          ? `${document.activeElement.tagName}.${document.activeElement.className}`
+          : String(document.activeElement),
+        types: event.clipboardData ? [...event.clipboardData.types] : [],
+      });
+    });
+    window.addEventListener('copy', (event) => {
+      window.__timelineCopyDebug.push({
+        windowListener: true,
+        types: event.clipboardData ? [...event.clipboardData.types] : [],
+      });
+    });
+  });
   await source.keyboard.press('Control+C');
   const clipboardAfterBarCopy = await source.evaluate(async () => ({
     text: await navigator.clipboard.readText(),
     types: (await navigator.clipboard.read()).flatMap((item) => item.types),
+    active: document.activeElement instanceof HTMLElement
+      ? `${document.activeElement.tagName}.${document.activeElement.className}`
+      : String(document.activeElement),
+    selected: document.querySelectorAll('.timeline-panel__clip.is-selected').length,
+    copyEvents: window.__timelineCopyDebug,
   }));
   if (!clipboardAfterBarCopy.text.startsWith('Cacablu Timeline bars')) {
     throw new Error(`Timeline Copy did not publish a rich payload: ${JSON.stringify(clipboardAfterBarCopy)}`);
   }
+  const sameProjectBarsBefore = await source.locator('.timeline-panel__clip').count();
+  await selectPasteTarget(source);
+  await source.keyboard.press('Control+V');
+  await source.waitForFunction(
+    (count) => document.querySelectorAll('.timeline-panel__clip').length === count + 1,
+    sameProjectBarsBefore,
+  );
+  await selectPasteTarget(source);
+  await source.keyboard.press('Control+V');
+  await source.waitForFunction(
+    (count) => document.querySelectorAll('.timeline-panel__clip').length === count + 2,
+    sameProjectBarsBefore,
+  );
+  await source.keyboard.press('Control+Z');
+  await source.waitForFunction(
+    (count) => document.querySelectorAll('.timeline-panel__clip').length === count + 1,
+    sameProjectBarsBefore,
+  );
+  await source.keyboard.press('Control+Z');
+  await source.waitForFunction(
+    (count) => document.querySelectorAll('.timeline-panel__clip').length === count,
+    sameProjectBarsBefore,
+  );
+  await source.locator('.timeline-panel__clip').first().click();
+  await runEditMenuAction(source, 'Copy');
+  const menuPasteBarsBefore = await source.locator('.timeline-panel__clip').count();
+  await selectPasteTarget(source);
+  await runEditMenuAction(source, 'Paste');
+  await source.waitForFunction(
+    (count) => document.querySelectorAll('.timeline-panel__clip').length === count + 1,
+    menuPasteBarsBefore,
+  );
+  await source.keyboard.press('Control+Z');
+  await source.waitForFunction(
+    (count) => document.querySelectorAll('.timeline-panel__clip').length === count,
+    menuPasteBarsBefore,
+  );
   const destinationBarsBefore = await destination.locator('.timeline-panel__clip').count();
+  await source.locator('.timeline-panel__clip').first().click();
+  await source.keyboard.press('Control+C');
   await selectPasteTarget(destination);
   await destination.keyboard.press('Control+V');
   await destination.waitForFunction(
@@ -225,6 +314,10 @@ try {
   await destinationFolder.waitFor({ state: 'detached' });
 
   console.log(JSON.stringify({
+    timelineMenuCopyPaste: true,
+    timelineCopyAfterNonEditableFocusDrift: true,
+    timelineRepeatedKeyboardPaste: true,
+    timelineSameProjectPaste: true,
     timelineCrossTabPaste: true,
     timelineLayerTarget: true,
     yellowLayerBehindBar: sourceSelectedLayer.selected,

@@ -63,10 +63,25 @@
 
 Follow-up validation: the two-tab Playwright check confirms selection from a real mouse click on an empty lane, yellow selection from a bar click, and successfully creates a bar beyond the previous content end while retaining another full viewport of trailing editing space.
 
+## Follow-up: Same-Project Timeline Clipboard Fallback
+
+- [x] T032 Preserve the latest Timeline bar snapshot in memory for same-tab Paste when the browser strips Cacablu's rich clipboard formats.
+- [x] T033 Accept the in-memory snapshot only when the current clipboard plain text matches its Cacablu bar summary, avoiding stale Paste after unrelated Copy operations.
+- [x] T034 Validate same-project Paste and Undo with a plain-text-only system clipboard while retaining the existing cross-tab behavior.
+- [x] T035 Keep keyboard focus on the stable Timeline panel after real bar/lane clicks and route native clipboard events by their owning panel so Copy/Paste does not depend on artificial element focus.
+- [x] T036 Handle Timeline `Ctrl+C` directly from `keydown`, capture the selected bars synchronously, and publish the rich system clipboard payload without relying on the browser's implicit Copy routing.
+- [x] T037 Handle Timeline `Ctrl+V` directly for a validated same-tab bar snapshot while preserving native rich Paste for cross-tab transfers.
+- [x] T039 Capture Timeline clipboard shortcuts before child components can consume them, recognize physical `KeyC`/`KeyV`, and record explicit Copy/Paste success events.
+- [x] T041 Let a valid selected-bar snapshot own keyboard Copy when focus drifts to a non-editable Edge/Dockview element, without requiring Shift-drag.
+- [x] T042 Let native Edge Copy use the valid selected-bar snapshot even when keydown is consumed, and restore Timeline focus after Paste so repeated `Ctrl+V` remains available.
+- [x] T043 Remove the divergent keyboard-only clipboard path and let Edge's trusted native `copy`/`paste` events handle `Ctrl+C`/`Ctrl+V` without programmatic keydown replacement.
+
+Follow-up validation: scoped ESLint, all 183 unit tests, production build, and the Playwright check pass. The browser check uses only real `page.keyboard.press('Control+C')` / `page.keyboard.press('Control+V')` shortcuts without forced focus, strips rich formats before same-project Paste, verifies insertion and Undo, restores a rich keyboard Copy, and then verifies cross-tab keyboard Paste still works.
+
 ## Closure
 
 - **Status**: Closed
-- **Closed**: 2026-07-20
+- **Closed**: 2026-07-21
 - **Result**: All planned and follow-up tasks are complete; automated unit, type, lint, build, and two-tab browser validations passed.
 
 ## Dependencies & Execution Order
