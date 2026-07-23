@@ -42,9 +42,9 @@ Users can create folders and rename assets, optionally updating exact `/pool/...
 
 ### User Story 3 - Delete And Move With Undo (Priority: P1)
 
-Delete, Copy/Paste, and Cut/Paste mutations participate in one conflict-safe application history.
+Delete, Copy/Paste, Cut/Paste, and direct file/folder drag moves participate in one conflict-safe application history.
 
-**Independent Test**: Delete subtrees and perform clipboard mutations, then Undo exact ids, hierarchy, bytes, metadata, and parents.
+**Independent Test**: Delete subtrees, perform clipboard mutations, and directly drag multiple items or a folder; then Undo exact ids, hierarchy, bytes, metadata, and original parents.
 
 ## Requirements
 
@@ -57,11 +57,12 @@ Delete, Copy/Paste, and Cut/Paste mutations participate in one conflict-safe app
 - **FR-007**: Rename MUST offer update, keep, and cancel choices when exact normalized script references are affected.
 - **FR-008**: Folder-prefix rewrites MUST preserve descendant suffixes and avoid longer unrelated literals.
 - **FR-009**: Recursive Delete MUST retain a complete immutable restoration payload.
-- **FR-010**: Create, rename, delete, Copy/Paste, Cut/Paste, and their inverses MUST be atomic Undo commands.
+- **FR-010**: Create, rename, delete, Copy/Paste, Cut/Paste, direct drag moves, and their inverses MUST be atomic Undo commands.
 - **FR-011**: Undo conflicts MUST leave project state untouched and retain the history entry.
 - **FR-012**: Connected Phoenix reconciliation MUST publish all destinations before resending rewritten sections and deleting obsolete paths.
 - **FR-013**: Phoenix failure MUST be reported in Events without rolling back authoritative local state.
 - **FR-014**: Menu commands MUST show decorative icons; menu-bar trigger labels remain text-only.
+- **FR-015**: A successful multi-item or folder drag move MUST create one reversible command that restores every moved root to its original parent without partial restoration.
 
 ## Success Criteria
 
@@ -69,6 +70,7 @@ Delete, Copy/Paste, and Cut/Paste mutations participate in one conflict-safe app
 - **SC-002**: Database tests prove exact recursive restore and atomic failure behavior.
 - **SC-003**: Rename path updates cannot reload Phoenix sections against a partially published destination.
 - **SC-004**: Typecheck, tests, lint, build, and manual loaded-project validation pass.
+- **SC-005**: Browser regression verifies that one Undo restores a complete multi-item or folder drag move and its selection-consistent local state.
 
 ## Assumptions
 

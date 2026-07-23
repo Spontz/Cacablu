@@ -13,6 +13,8 @@ import { deleteAllowedAssetFile, writeAllowedAssetFile } from '../phoenix/asset-
 import { buildResourceTree, type ResourceTreeNode } from '../resources/resource-tree';
 import type { AssetClipboard, AssetClipboardNode } from '../resources/asset-clipboard';
 import {
+  buildResourcePath,
+  canonicalizeSelection,
   normalizePoolPath,
   pendingCutKeys,
   resolveAssetPasteParent,
@@ -182,7 +184,7 @@ export function createResourcesPanel(
     const expandedIds = new Set<number>();
     const phoenixAssets = createPhoenixAssetClient();
     const phoenixSections = createPhoenixSectionClient();
-    let draggingAssetFile: AssetFileDragPayload | null = null;
+    let draggingAssetItems: AssetDragPayload | null = null;
     let selectionAnchor: AssetSelectionItem | null = null;
     let actionMenu: HTMLElement | null = null;
     let actionTarget: ResourceActionTarget | null = null;
@@ -207,6 +209,7 @@ export function createResourcesPanel(
 
         const row = document.createElement('div');
         row.className = 'resources__folder-row';
+        row.draggable = true;
         row.dataset.resourceKind = 'folder';
         row.dataset.resourceId = String(node.id);
         row.dataset.poolPath = `pool/${node.path}`;
@@ -369,7 +372,7 @@ export function createResourcesPanel(
       if (!dropTarget) return;
       event.preventDefault();
       if (event.dataTransfer) {
-        event.dataTransfer.dropEffect = draggingAssetFile || hasAssetFileDrag(event.dataTransfer) ? 'move' : 'copy';
+        event.dataTransfer.dropEffect = draggingAssetItems || hasAssetFileDrag(event.dataTransfer) ? 'move' : 'copy';
       }
     });
 
@@ -398,9 +401,9 @@ export function createResourcesPanel(
       if (!dropTarget || !event.dataTransfer) return;
       event.preventDefault();
       dropTarget.element.classList.remove('is-drop-target');
-      const assetMove = draggingAssetFile ?? getAssetFileDrag(event.dataTransfer);
+      const assetMove = draggingAssetItems ?? getAssetDrag(event.dataTransfer);
       if (assetMove) {
-        void moveAssetFile(dropTarget, assetMove);
+        void moveAssetItems(dropTarget, assetMove);
         return;
       }
       if (event.dataTransfer.files.length) {
@@ -411,24 +414,38 @@ export function createResourcesPanel(
     treeEl.addEventListener('dragstart', (event) => {
       const target = getEventElement(event);
       if (target?.closest('.resources__enabled, .resources__actions-button')) return;
-      const file = target?.closest<HTMLElement>('[data-resource-kind="file"]');
-      if (!file?.dataset.resourceId || !file.dataset.resourceName || !file.dataset.poolPath || !event.dataTransfer) return;
+      const resource = target?.closest<HTMLElement>('[data-resource-kind]');
+      const draggedItem = resource ? resourceElementToSelection(resource) : null;
+      const session = sessionRef.current;
+      if (!resource || !draggedItem || !session || !event.dataTransfer) return;
 
-      const payload: AssetFileDragPayload = {
-        id: Number(file.dataset.resourceId),
-        name: file.dataset.resourceName,
-        sourcePath: file.dataset.poolPath,
+      const selection = state.getSnapshot().assetSelection;
+      const selectedItems = isAssetSelected(selection, draggedItem.kind, draggedItem.id)
+        ? getAssetSelectionItems(selection)
+        : [draggedItem];
+      const payload: AssetDragPayload = {
+        items: canonicalizeSelection(session.data, selectedItems).map((item) => ({
+          kind: item.kind,
+          id: item.id,
+          name: item.name,
+          sourcePath: buildResourcePath(session.data, item.kind, item.id),
+        })),
       };
+      if (payload.items.length === 0) return;
       const serialized = JSON.stringify(payload);
-      draggingAssetFile = payload;
+      draggingAssetItems = payload;
       event.dataTransfer.effectAllowed = 'copyMove';
       event.dataTransfer.setData(ASSET_FILE_DRAG_TYPE, serialized);
-      event.dataTransfer.setData('text/plain', normalizePoolPath(payload.sourcePath));
-      file.classList.add('is-dragging');
+      event.dataTransfer.setData('text/plain', normalizePoolPath(
+        payload.items.find((item) => item.kind === 'file')?.sourcePath ?? payload.items[0].sourcePath,
+      ));
+      for (const item of payload.items) {
+        treeEl.querySelector(`[data-resource-kind="${item.kind}"][data-resource-id="${item.id}"]`)?.classList.add('is-dragging');
+      }
     });
 
     treeEl.addEventListener('dragend', () => {
-      draggingAssetFile = null;
+      draggingAssetItems = null;
       treeEl.querySelectorAll('.is-dragging, .is-drop-target').forEach((node) => {
         node.classList.remove('is-dragging', 'is-drop-target');
       });
@@ -940,7 +957,9 @@ export function createResourcesPanel(
     }
 
     function getDropTarget(target: HTMLElement): DropTarget | null {
-      const assetFolder = target.closest<HTMLElement>('[data-resource-kind="folder"]');
+      const assetFolder = target.closest<HTMLElement>('[data-resource-kind="folder"]')
+        ?? target.closest<HTMLElement>('.resources__folder')
+          ?.querySelector<HTMLElement>(':scope > .resources__folder-row');
       if (assetFolder?.dataset.resourceId && assetFolder.dataset.poolPath) {
         return {
           kind: 'pool',
@@ -1001,7 +1020,7 @@ export function createResourcesPanel(
       }
     }
 
-    async function moveAssetFile(target: DropTarget, payload: AssetFileDragPayload): Promise<void> {
+    async function moveAssetItems(target: DropTarget, payload: AssetDragPayload): Promise<void> {
       const session = sessionRef.current;
       if (!session) {
         setSyncStatus('blocked', 'Load a project before moving assets.');
@@ -1012,51 +1031,48 @@ export function createResourcesPanel(
         return;
       }
 
-      const sourceFile = session.data.files.find((file) => file.id === payload.id);
-      if (!sourceFile) {
-        setSyncStatus('error', 'The dragged asset no longer exists in the project.');
-        return;
-      }
-      if (sourceFile.parent === target.parentId) {
-        return;
-      }
-      const destinationConflict = session.data.files.some((file) => (
-        file.id !== payload.id
-        && file.parent === target.parentId
-        && file.name === payload.name
-      ));
-      if (destinationConflict) {
-        setSyncStatus('error', `A file named ${payload.name} already exists in the destination folder.`);
-        return;
-      }
+      const roots = payload.items.filter((item) => {
+        const source = item.kind === 'file'
+          ? session.data.files.find((file) => file.id === item.id)
+          : session.data.folders.find((folder) => folder.id === item.id);
+        return source?.parent !== target.parentId;
+      });
+      if (roots.length === 0) return;
 
-      const destinationPath = `${target.targetPath}/${payload.name}`;
-      const bytes = new Uint8Array(sourceFile.data);
+      const previousParents = roots.map((item) => {
+        const source = item.kind === 'file'
+          ? session.data.files.find((file) => file.id === item.id)
+          : session.data.folders.find((folder) => folder.id === item.id);
+        return source ? { kind: item.kind, id: item.id, parentId: source.parent } : null;
+      }).filter((item): item is NonNullable<typeof item> => item !== null);
+      if (previousParents.length !== roots.length) {
+        setSyncStatus('error', 'One or more dragged Pool items no longer exist in the project.');
+        return;
+      }
+      const wasDirty = dbState.getSnapshot().isDirty;
 
       try {
-        setSyncStatus('applying', `Moving ${payload.name}...`);
-        session.moveResourceFile(payload.id, target.parentId);
+        setSyncStatus('applying', `Moving ${roots.length} Pool item${roots.length === 1 ? '' : 's'}...`);
+        const result = session.moveResourceItems(
+          roots.map((item) => ({ kind: item.kind, id: item.id })),
+          target.parentId,
+        );
         dbState.setDirty();
-
-        if (connection.isConnected() && sourceFile.enabled) {
-          try {
-            addAssetImpactEvents(state, await writeAllowedAssetFile(phoenixAssets, destinationPath, bytes), `Moved ${payload.name}`);
-          } catch (err) {
-            setSyncStatus('error', err instanceof Error ? err.message : 'Could not write Phoenix destination asset.');
-          }
-        }
-
-        if (connection.isConnected() && sourceFile.enabled) {
-          try {
-            addAssetImpactEvents(state, await deleteAllowedAssetFile(phoenixAssets, payload.sourcePath), `Moved ${payload.name}`);
-          } catch (err) {
-            setSyncStatus('error', err instanceof Error ? err.message : 'Could not delete Phoenix source asset.');
-          }
-        }
-
+        state.setAssetSelection(createAssetSelection(result.roots.map((root) => resourceRefToSelection(session, root))));
+        undoManager.push({
+          label: `Move ${result.roots.length} Pool item${result.roots.length === 1 ? '' : 's'}`,
+          undo: async () => {
+            const inverse = session.moveResourceItemsToParents(previousParents);
+            restoreDirtyState(wasDirty);
+            state.setAssetSelection(createAssetSelection(inverse.roots.map((root) => resourceRefToSelection(session, root))));
+            await syncResourceClipboardMutation(inverse, phoenixAssets, state, connection.isConnected());
+            render();
+          },
+        });
         render();
+        await syncResourceClipboardMutation(result, phoenixAssets, state, connection.isConnected());
       } catch (err) {
-        setSyncStatus('error', err instanceof Error ? err.message : 'Could not move asset.');
+        setSyncStatus('error', err instanceof Error ? err.message : 'Could not move Pool items.');
       }
     }
 
@@ -1276,10 +1292,15 @@ interface DropTarget {
   parentId?: number;
 }
 
-interface AssetFileDragPayload {
+interface AssetDragItem {
+  kind: 'file' | 'folder';
   id: number;
   name: string;
   sourcePath: string;
+}
+
+interface AssetDragPayload {
+  items: AssetDragItem[];
 }
 
 function getEventElement(event: Event): HTMLElement | null {
@@ -1322,27 +1343,28 @@ function hasAssetFileDrag(dataTransfer: DataTransfer | null): boolean {
   return Boolean(dataTransfer && Array.from(dataTransfer.types).includes(ASSET_FILE_DRAG_TYPE));
 }
 
-function getAssetFileDrag(dataTransfer: DataTransfer): AssetFileDragPayload | null {
+function getAssetDrag(dataTransfer: DataTransfer): AssetDragPayload | null {
   const custom = dataTransfer.getData(ASSET_FILE_DRAG_TYPE);
   const plain = dataTransfer.getData('text/plain');
   const raw = custom || (plain.startsWith(ASSET_FILE_TEXT_PREFIX) ? plain.slice(ASSET_FILE_TEXT_PREFIX.length) : '');
   if (!raw) return null;
 
   try {
-    const payload = JSON.parse(raw) as Partial<AssetFileDragPayload>;
-    if (
-      typeof payload.id !== 'number'
-      || !Number.isFinite(payload.id)
-      || typeof payload.name !== 'string'
-      || typeof payload.sourcePath !== 'string'
-    ) {
-      return null;
-    }
-    return {
-      id: payload.id,
-      name: payload.name,
-      sourcePath: payload.sourcePath,
-    };
+    const payload = JSON.parse(raw) as Partial<AssetDragPayload> & Partial<AssetDragItem>;
+    const candidates = Array.isArray(payload.items)
+      ? payload.items
+      : payload.id !== undefined
+        ? [{ kind: 'file' as const, id: payload.id, name: payload.name, sourcePath: payload.sourcePath }]
+        : [];
+    const items = candidates.filter((item): item is AssetDragItem => Boolean(
+      item
+      && (item.kind === 'file' || item.kind === 'folder')
+      && typeof item.id === 'number'
+      && Number.isFinite(item.id)
+      && typeof item.name === 'string'
+      && typeof item.sourcePath === 'string',
+    ));
+    return items.length === candidates.length && items.length > 0 ? { items } : null;
   } catch {
     return null;
   }

@@ -82,6 +82,7 @@ Research is captured in [research.md](./research.md). Decisions:
 - Represent expected published pool files and Phoenix asset trees as normalized manifests.
 - Compare initial pool manifests by normalized relative path and size metadata.
 - Send explicit operations rather than uploading entire subtrees.
+- Reconcile a committed multi-item or folder move as one scoped mutation set, publishing every enabled destination before removing obsolete source paths; do not notify Phoenix for locally rejected batches.
 - Serialize database bars into Phoenix-compatible section payloads and use full section replacement on mismatch rather than browser-side incremental patching.
 - Treat `config` and path traversal attempts as blocked before sending to Phoenix.
 

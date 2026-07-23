@@ -122,6 +122,7 @@ Object URL lifecycle:
 
 - Revoke previous object URL before rendering a new preview.
 - Revoke current object URL when the panel is disposed, if the renderer lifecycle supports disposal; otherwise revoke before every replacement and on DB/selection reset.
+- Scope every image load/error callback to the preview element and object URL that created it; ignore callbacks from disconnected elements or URLs superseded by a later render.
 - Do not retain copied binary data beyond the selected file reference.
 
 ### Image Recognition
@@ -150,6 +151,7 @@ Automated tests should cover:
 Manual visual verification should cover:
 
 - Selecting an image in Resources updates Inspector.
+- A single primary click is sufficient, and a stale callback from an earlier render cannot replace the current preview.
 - Selecting a folder/non-image clears a previous preview.
 - Large image stays inside Inspector bounds.
 - Closing/reopening a project clears stale selection.

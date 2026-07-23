@@ -4,14 +4,14 @@
 
 ## Summary
 
-Route clipboard commands by active editing context, store an application clipboard snapshot for Pool roots, implement atomic recursive copy/move operations in `DbSession`, and reuse scoped Phoenix asset reconciliation and shared Undo.
+Route clipboard commands by active editing context, store an application clipboard snapshot for Pool roots, implement atomic recursive copy/move operations in `DbSession`, and reuse the same batch mutation path for internal file/folder drag, scoped Phoenix asset reconciliation, and shared Undo.
 
 ## Technical Context
 
 **Language/Version**: TypeScript 5.x, ES2022 browser target  
 **Primary Dependencies**: Existing Vite app, `sql.js`, Monaco, browser clipboard and drag APIs  
 **Storage**: Loaded in-memory project database; no schema change  
-**Testing**: Vitest and Playwright  
+**Testing**: Vitest, Edge Playwright, and native Selenium Edge against an actual SQLite project
 **Target Platform**: Browser with File System Access API  
 **Performance Goals**: Immediate selection/cut feedback; atomic mutations without blocking pointer interaction  
 **Constraints**: Static browser-only runtime; no native filesystem clipboard guarantee
@@ -43,3 +43,6 @@ tests/unit/
 3. Apply recursive copy/move plans atomically with destination validation.
 4. Reconcile enabled paths with Phoenix after local success and add focused Undo payloads.
 5. Verify root paste/drop, editor paste/drop, stale/conflicting operations, and clipboard lifecycle.
+6. Build internal drag payloads from the canonical selection when the dragged item is selected, while retaining legacy single-file payload compatibility.
+7. Resolve a drop anywhere inside an expanded folder to that folder and execute the batch with `DbSession.moveResourceItems` as one atomic operation.
+8. Preserve moved selection, register one inverse Undo command, reconcile Phoenix after commit, and verify both synthetic and native Edge pointer flows.

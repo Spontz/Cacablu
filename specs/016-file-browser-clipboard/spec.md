@@ -45,6 +45,21 @@ Users can paste internal items or drop external files directly into the Pool roo
 
 **Independent Test**: Paste and drop files on the explicit root row and verify parent id `0` and normalized paths.
 
+### User Story 4 - Move Selected Pool Items By Dragging (Priority: P1)
+
+Users can drag files or folders inside the Pool and move the complete canonical selection to an exact folder or root destination as one reversible operation.
+
+**Independent Test**: Select multiple files, drag one selected file into another folder, then drag a folder with descendants onto content inside a destination folder; verify exact hierarchy, selection, Undo, validation, and Phoenix reconciliation.
+
+**Acceptance Scenarios**:
+
+1. **Given** multiple canonical Pool roots are selected, **When** the user drags any selected root to a valid destination, **Then** every selected root moves together and remains selected after the move.
+2. **Given** an unselected file or folder is dragged, **When** the drag begins, **Then** only that item is moved.
+3. **Given** a folder with descendants is dragged, **When** it is dropped on another valid folder, **Then** the folder and its complete subtree move without changing their ids or contents.
+4. **Given** a folder is expanded, **When** the user drops on its row, a contained file, or empty space within its rendered interior, **Then** that folder is the exact destination.
+5. **Given** a conflict, stale source, self destination, or descendant destination, **When** a batch drag is dropped, **Then** the complete operation is rejected with no partial mutation.
+6. **Given** a batch drag succeeds, **When** the user invokes Undo, **Then** all moved roots return to their original parents in one action and enabled Phoenix paths are reconciled.
+
 ## Requirements
 
 ### Functional Requirements
@@ -61,12 +76,19 @@ Users can paste internal items or drop external files directly into the Pool roo
 - **FR-010**: Copy/Paste and Cut/Paste MUST participate in application Undo without rewinding external clipboard ownership.
 - **FR-011**: Native operating-system file export MAY remain unavailable in a browser-only runtime; internal paste and text paths are mandatory.
 - **FR-012**: The feature MUST preserve static deployment and add no Phoenix C++ or database-schema dependency.
+- **FR-013**: Starting an internal drag on a selected Pool item MUST carry every canonical selected root; starting it on an unselected item MUST carry only that item.
+- **FR-014**: Both file and folder rows MUST be draggable, and moving a folder MUST preserve its complete descendant hierarchy, ids, bytes, metadata, and enabled state.
+- **FR-015**: A destination folder MUST accept internal drops on its row, on contained files, and on visible whitespace inside its expanded rendered area; the explicit Pool root MUST continue to target the root.
+- **FR-016**: Internal drag moves MUST use one atomic database operation, preserve the moved batch as the current selection, and create one Undo entry that restores every original parent.
+- **FR-017**: Successful internal drag moves MUST reconcile every affected enabled asset path with Phoenix only after the local batch commit succeeds.
 
 ## Success Criteria
 
 - **SC-001**: Automated browser tests pass for keyboard/menu Copy, Cut, Paste, pending opacity, root destinations, editor paste, and editor drop.
 - **SC-002**: Invalid destinations produce zero partial project mutations.
 - **SC-003**: Typecheck, lint, tests, and production build pass.
+- **SC-004**: Edge Playwright verifies multi-file drag, preserved selection, folder-subtree drag, inner-folder drop targets, and single-step Undo.
+- **SC-005**: Native Selenium Edge validation against an actual SQLite project confirms that a folder can be moved into another folder by pointer drag.
 
 ## Assumptions
 

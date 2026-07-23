@@ -10,3 +10,4 @@
 - [x] T008 Add reload-barrier Phoenix reconciliation and Events failure reporting.
 - [x] T009 Add database, Undo, reconciliation, and Playwright regression coverage.
 - [x] T010 Run typecheck, tests, lint, build, and manual visual validation.
+- [x] T011 Integrate multi-item and folder drag moves as one conflict-safe Undo command and cover full-batch restoration in the Edge drag regression.

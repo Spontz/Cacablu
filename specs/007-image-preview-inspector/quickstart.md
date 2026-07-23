@@ -13,8 +13,8 @@ Selecting an image file in the Resources file explorer updates the Inspector pan
 2. Open the app in a browser.
 3. Open a project database containing image files in the `FILES` table.
 4. In the Resources panel, expand folders until an image file is visible.
-5. Select a PNG, JPEG, GIF, WebP, BMP, or SVG file.
-6. Confirm the Inspector panel shows the selected file name and image preview.
+5. Select a PNG, JPEG, GIF, WebP, BMP, or SVG file with one primary click.
+6. Confirm the Inspector panel immediately shows the selected file name and image preview, without a second click and without remaining in a preview-unavailable state.
 7. Select a folder.
 8. Confirm the previous image preview is cleared.
 9. Select a non-image file.
@@ -49,4 +49,5 @@ Selecting an image file in the Resources file explorer updates the Inspector pan
 - `npm test`
 - `npm run lint`
 - `npm run build`
+- `node scripts/playwright-first-click-inspector-preview-check.mjs` against the real loaded project used for browser validation
 - Manual browser validation of Resources-to-Inspector preview behavior

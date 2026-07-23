@@ -25,9 +25,10 @@ As a user, I want the Inspector panel to show a preview of the image file I sele
 
 **Acceptance Scenarios**:
 
-1. **Given** a project is open and the Resources file explorer lists an image file, **When** the user selects that image file, **Then** the Inspector panel shows a preview of that image.
+1. **Given** a project is open and the Resources file explorer lists an image file, **When** the user selects that image with one primary click, **Then** the Inspector panel immediately shows its preview without requiring a second click or leaving a transient preview-unavailable state.
 2. **Given** an image preview is visible, **When** the user selects a different image file, **Then** the Inspector panel replaces the preview with the newly selected image.
 3. **Given** an image file is selected, **When** the Inspector panel is visible, **Then** the preview is clearly associated with the selected file name.
+4. **Given** a previous preview element has been superseded or disconnected, **When** its asynchronous load or error callback arrives, **Then** that stale callback does not replace the current Inspector preview.
 
 ---
 
@@ -85,6 +86,7 @@ As a user, I want the Inspector panel to show a clear fallback when a selected i
 - What happens when an image is selected and then the project window is closed?
 - What happens when the Inspector panel is hidden or resized while an image is selected?
 - What happens when the user rapidly changes selection across multiple files?
+- What happens when an object URL is revoked while a superseded image element still has a pending load or error callback?
 - What happens when the selected file has a null, empty, or duplicate name?
 
 ## Requirements *(mandatory)*
@@ -103,6 +105,7 @@ As a user, I want the Inspector panel to show a clear fallback when a selected i
 - **FR-010**: Each project window MUST keep its Resources selection and Inspector preview isolated from every other project window.
 - **FR-011**: The preview behavior MUST remain part of the static deployable application with no backend dependency.
 - **FR-012**: The Inspector panel MUST remain usable when resized, with image previews constrained to the panel bounds.
+- **FR-013**: Preview load and error callbacks MUST affect the Inspector only while their image element and object URL still belong to the current preview; callbacks from disconnected or superseded previews MUST be ignored.
 
 ### Key Entities *(include if feature involves data)*
 
@@ -122,6 +125,7 @@ As a user, I want the Inspector panel to show a clear fallback when a selected i
 - **SC-004**: At least six common image types (PNG, JPEG, GIF, WebP, BMP, SVG) are either previewed successfully when valid or produce a clear preview-unavailable state when invalid.
 - **SC-005**: Image previews fit within the Inspector panel at common desktop panel sizes without overflowing, cropping unintentionally, or distorting aspect ratio.
 - **SC-006**: Project lint, typecheck, and build checks complete without new errors for this feature.
+- **SC-007**: An Edge browser regression using a real loaded project confirms that one click displays the image and that a delayed stale error cannot replace the current preview.
 
 ## Assumptions
 
@@ -129,5 +133,5 @@ As a user, I want the Inspector panel to show a clear fallback when a selected i
 - The feature previews image files already stored in the project database; importing new images is out of scope.
 - The Inspector panel may show minimal metadata for non-image selections, but detailed metadata editing is out of scope.
 - Browser-previewable formats are sufficient for this version; specialized image formats that require custom decoders are out of scope.
-- The Resources file explorer remains read-only, matching the current project file explorer scope.
+- The Inspector preview remains read-only; later file-browser specs govern create, rename, delete, clipboard, and drag mutations without expanding this preview feature's responsibilities.
 - Typical embedded project images are small enough to preview directly in the browser without a dedicated thumbnail cache in this first version.

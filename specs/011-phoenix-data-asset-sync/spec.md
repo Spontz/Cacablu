@@ -65,6 +65,7 @@ As a user, I want asset changes made in Cacablu under `pool` or `resources` to b
 4. **Given** a project is loaded and Phoenix is connected, **When** a directory is created or deleted under local `pool` or `resources`, **Then** Cacablu sends the corresponding Phoenix directory operation.
 5. **Given** Phoenix rejects an operation, **When** Cacablu receives the error, **Then** Cacablu shows a non-blocking operation error and refreshes discrepancy state.
 6. **Given** a project is loaded and Phoenix is connected, **When** a pool file is moved to another folder, **Then** Cacablu updates the database hierarchy and mirrors the resulting Phoenix file path change.
+7. **Given** multiple selected files or a folder with enabled descendants are moved by one internal drag, **When** the atomic local move succeeds, **Then** Cacablu mirrors every affected enabled destination path and removes every obsolete enabled source path without exposing a partially synchronized batch.
 
 ---
 
@@ -147,6 +148,7 @@ As a user, I want Cacablu to publish the loaded project's bars to Phoenix as run
 - **FR-015**: The system MUST handle Phoenix asset success and error responses without crashing the shell.
 - **FR-015a**: When browser networking blocks Phoenix requests, the system MUST show a clear Phoenix connection error instead of only surfacing a raw `Failed to fetch` message when enough context is available.
 - **FR-016**: The system MUST refresh or update discrepancy state after Phoenix confirms or rejects an asset operation.
+- **FR-016a**: After a successful atomic Pool batch or folder move, the system MUST reconcile every affected enabled descendant path with Phoenix, publishing all destinations before deleting obsolete source paths; a rejected local move MUST produce no Phoenix mutation.
 - **FR-017**: The system MUST preserve the static browser-only deployment model and MUST NOT add a Cacablu backend.
 - **FR-018**: The system MUST keep existing Phoenix time sync and preview behavior separate from asset sync state.
 - **FR-019**: On project open, after the initial pool sync completes or is skipped, the system MUST build an expected section snapshot from every database bar.
@@ -186,7 +188,7 @@ As a user, I want Cacablu to publish the loaded project's bars to Phoenix as run
 - **SC-001**: With no project loaded, 100% of asset sync attempts are blocked before any Phoenix transfer request is sent.
 - **SC-002**: With a loaded project and matching Phoenix data, Cacablu reports synchronized state after manifest comparison.
 - **SC-003**: With a loaded project and intentionally different Phoenix pool data, Cacablu clears Phoenix pool and copies every enabled project pool file in manual validation.
-- **SC-004**: File create, replace, delete, directory create, and directory delete actions under `pool` or `resources` produce the expected Phoenix operation in manual validation.
+- **SC-004**: File create, replace, delete, directory create/delete, multi-item move, and folder-subtree move actions under `pool` or `resources` produce the expected complete Phoenix operation set in manual validation.
 - **SC-005**: Attempts involving `config`, absolute paths, or traversal paths produce no Phoenix mutation request.
 - **SC-006**: Phoenix disconnection or operation failure leaves Cacablu usable and shows a recoverable state.
 - **SC-007**: `npm run typecheck`, `npm run lint`, and `npm run build` complete without new errors after implementation.

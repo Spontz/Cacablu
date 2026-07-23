@@ -97,6 +97,7 @@
 - [x] T025a [US3] Toggle pool file enabled state from Assets and write/delete the corresponding Phoenix file when connected
 - [x] T025b [US3] Support dragging files into pool folders and mirror created files to Phoenix when enabled
 - [x] T025c [US3] Support moving pool files between folders and mirror the move to Phoenix
+- [x] T025d [US3] Reconcile atomic multi-item and folder drag moves, including every enabled descendant destination and obsolete source path, only after local commit
 - [x] T026 [US3] Send create directory operations for allowed loaded-project asset paths
 - [x] T027 [US3] Send delete directory operations for allowed loaded-project asset paths with explicit recursive behavior when needed
 - [x] T028 [US3] Correlate Phoenix operation responses/events by request id where available

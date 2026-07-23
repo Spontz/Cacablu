@@ -144,6 +144,10 @@
 - [x] T043 Run `npm run build` to verify typecheck, Vite build, and static bundle generation
 - [ ] T044 Run final manual browser validation of all quickstart scenarios in `C:\Users\merlu\Documents\GitHub\Cacablu\specs\007-image-preview-inspector\quickstart.md`
 - [x] T045 Verify no backend, network, local engine, or new runtime dependency was introduced by inspecting `C:\Users\merlu\Documents\GitHub\Cacablu\package.json` and changed source files
+- [x] T046 [US1] Guard image load/error callbacks so disconnected or superseded preview elements cannot replace the current Inspector state in `src/panels/inspector-panel.ts`
+- [x] T047 [US1] Add an Edge Playwright regression for first-click preview and delayed stale image errors in `scripts/playwright-first-click-inspector-preview-check.mjs`
+- [x] T048 [US1] Validate the first-click preview against a real desktop SQLite project in Edge
+- [x] T049 Run scoped lint, typecheck, the full 194-test suite, and the production build after the regression fix
 
 ---
 

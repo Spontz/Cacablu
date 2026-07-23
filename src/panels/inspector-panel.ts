@@ -107,8 +107,10 @@ export function createInspectorPanel(
       const image = document.createElement('img');
       image.className = 'inspector__image';
       image.alt = file.name || 'Selected image preview';
-      image.src = previewUrl;
+      const imageUrl = previewUrl;
+      image.src = imageUrl;
       image.addEventListener('error', () => {
+        if (!image.isConnected || previewUrl !== imageUrl) return;
         renderUnavailable(file.name, 'Preview unavailable for this image.');
       }, { once: true });
 

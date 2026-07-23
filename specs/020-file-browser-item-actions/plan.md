@@ -4,7 +4,7 @@
 
 ## Summary
 
-Replace direct delete controls with captured-target ellipsis menus, add validated database mutations and immutable inverse payloads, and reconcile enabled path changes through existing Phoenix operations after local success.
+Replace direct delete controls with captured-target ellipsis menus, add validated database mutations and immutable inverse payloads, make direct multi-item/folder drag reuse the same reversible move command model, and reconcile enabled path changes through existing Phoenix operations after local success.
 
 ## Technical Context
 
@@ -43,3 +43,4 @@ scripts/playwright-file-browser-item-actions-check.mjs
 3. Render a captured-target document overlay with actions, separators, and icons.
 4. Publish complete destinations, resend rewritten sections, then remove obsolete Phoenix paths.
 5. Verify all mutations, Undo, menu lifecycle, and clipping behavior.
+6. Represent each successful internal batch drag as one history entry containing every original parent, so its inverse restores the complete move atomically.

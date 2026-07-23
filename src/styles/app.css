@@ -2172,14 +2172,17 @@ button.events-listbox__severity:focus-visible {
   cursor: pointer;
 }
 
+.resources__folder-row[draggable="true"],
 .resources__file[draggable="true"] {
   cursor: grab;
 }
 
+.resources__folder-row[draggable="true"]:active,
 .resources__file[draggable="true"]:active {
   cursor: grabbing;
 }
 
+.resources__folder-row.is-dragging,
 .resources__file.is-dragging {
   opacity: 0.55;
 }
