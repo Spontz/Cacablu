@@ -83,6 +83,7 @@ Research is captured in [research.md](./research.md). Decisions:
 - Compare initial pool manifests by normalized relative path and size metadata.
 - Send explicit operations rather than uploading entire subtrees.
 - Reconcile a committed multi-item or folder move as one scoped mutation set, publishing every enabled destination before removing obsolete source paths; do not notify Phoenix for locally rejected batches.
+- Treat duplicate-file replacement as a content update: preserve database identity/enabled state, write the complete enabled asset with Phoenix section reload disabled, await success, then explicitly replace every locally identified referencing section.
 - Serialize database bars into Phoenix-compatible section payloads and use full section replacement on mismatch rather than browser-side incremental patching.
 - Treat `config` and path traversal attempts as blocked before sending to Phoenix.
 
@@ -101,6 +102,7 @@ Post-design constitution check remains PASS:
 - File transfer requires project context.
 - Section replacement requires project context and runs after pool sync completes or is skipped.
 - Asset sync is scoped to `pool` and `resources`.
+- Replacement ordering prevents sections from observing old or partially transmitted asset bytes.
 - Existing time sync and preview remain separate.
 
 ## Complexity Tracking

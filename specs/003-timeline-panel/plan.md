@@ -11,7 +11,7 @@ dedicated demo surface.
 
 Build a dense, studio-style timeline panel that can scrub from the ruler,
 control playback through a transport bar, zoom with `Shift + wheel`, scroll
-with the plain wheel, and evolve toward property keyframes and richer clip
+without allowing native scrollbar gestures to mutate time or content, and evolve toward property keyframes and richer clip
 editing. The implementation should keep the current static browser app usable
 without a backend while organizing the timeline logic into a reusable package
 and keeping the UI typography on a shared JetBrains baseline.
@@ -21,7 +21,7 @@ and keeping the UI typography on a shared JetBrains baseline.
 **Language/Version**: TypeScript 5.x  
 **Primary Dependencies**: Vite, dockview-core, existing browser DOM/CSS runtime  
 **Storage**: N/A for v1; in-memory timeline state only  
-**Testing**: Typecheck, lint, unit tests for timeline model/helpers, manual visual validation in the shell and local build  
+**Testing**: Typecheck, lint, unit tests for timeline model/helpers, headed Edge regression for native scrollbar interaction, and manual visual validation in the shell and local build
 **Target Platform**: Modern desktop browsers that satisfy the repository File System Access API baseline  
 **Project Type**: Static web application with a reusable internal UI package  
 **Performance Goals**: Maintain interactive scrubbing and transport feedback at roughly 60 fps, preserve scroll responsiveness, and avoid main-thread blocking during zoom and navigation interactions  

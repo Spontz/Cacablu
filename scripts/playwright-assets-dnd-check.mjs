@@ -1,4 +1,4 @@
-/* global process, console, window, document, File */
+/* global process, console, window, document, File, DragEvent, DataTransfer */
 
 import { chromium } from 'playwright';
 
@@ -6,6 +6,8 @@ const baseUrl = process.env.CACABLU_E2E_URL ?? 'http://127.0.0.1:5177/';
 
 const browser = await chromium.launch({ channel: 'msedge', headless: true });
 const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+const pageErrors = [];
+page.on('pageerror', (error) => pageErrors.push(error.message));
 
 try {
   await page.goto(baseUrl, { waitUntil: 'networkidle' });
@@ -171,6 +173,15 @@ try {
         db.files.push(file);
         return file;
       },
+      updateResourceFileContent(fileId, input) {
+        const file = db.files.find((candidate) => candidate.id === fileId);
+        if (!file) throw new Error(`missing file ${fileId}`);
+        Object.assign(file, input);
+        return file;
+      },
+      findResourceScriptReferences() {
+        return [];
+      },
       insertResourceFolder(input) {
         const folder = { id: 100 + db.folders.length, enabled: true, ...input };
         db.folders.push(folder);
@@ -239,6 +250,7 @@ try {
     const root = document.querySelector('#app');
     root.innerHTML = '';
     window.__assetDndFixture.state = state;
+    window.__assetDndFixture.dbState = dbState;
     window.__assetDndFixture.undo = undo;
     const renderer = createResourcesPanel(state, dbState, sessionRef, connection, undo, createAssetClipboard());
     root.append(renderer.element);
@@ -300,6 +312,74 @@ try {
   await page.evaluate(() => window.__assetDndFixture.undo.undo());
   await page.waitForFunction(() => window.__assetDndFixture.db.folders.find((folder) => folder.id === 1)?.parent === 0);
   result.folderParentAfterUndo = await page.evaluate(() => window.__assetDndFixture.db.folders.find((folder) => folder.id === 1)?.parent);
+
+  const dropExternalFile = async (bytes) => {
+    await page.evaluate((content) => {
+      document.querySelector('.resources__tree')
+        ?.dispatchEvent(new DragEvent('dragend', { bubbles: true, cancelable: true }));
+      const transfer = new DataTransfer();
+      transfer.items.add(new File([new Uint8Array(content)], 'destination.txt', { type: 'text/plain' }));
+      const target = document.querySelector('[data-resource-kind="folder"][data-resource-id="2"]');
+      if (!target) throw new Error('Missing target folder for external file drop.');
+      target.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: transfer }));
+    }, bytes);
+  };
+
+  await dropExternalFile([88]);
+  const replaceDialog = page.locator('[data-resource-replace-dialog]');
+  await replaceDialog.waitFor({ state: 'visible', timeout: 2000 }).catch(async () => {
+    const diagnostics = await page.evaluate(() => ({
+      files: window.__assetDndFixture.db.files.map((file) => ({ id: file.id, name: file.name, parent: file.parent, data: [...file.data] })),
+      status: document.querySelector('.resources__sync-status')?.textContent,
+      dialogs: [...document.querySelectorAll('dialog')].map((dialog) => dialog.textContent),
+    }));
+    throw new Error(`Replacement prompt did not open: ${JSON.stringify({ diagnostics, pageErrors })}`);
+  });
+  result.replacePrompt = await replaceDialog.textContent();
+  await replaceDialog.getByRole('button', { name: 'Cancel' }).click();
+  result.fileAfterCancel = await page.evaluate(() => {
+    const file = window.__assetDndFixture.db.files.find((candidate) => candidate.id === 20);
+    return file ? {
+      id: file.id,
+      enabled: file.enabled,
+      data: [...file.data],
+      dirty: window.__assetDndFixture.dbState.getSnapshot().isDirty,
+    } : null;
+  });
+
+  await dropExternalFile([89, 90]);
+  await replaceDialog.waitFor({ state: 'visible' });
+  await replaceDialog.getByRole('button', { name: 'Replace' }).click();
+  await page.waitForFunction(() => {
+    const file = window.__assetDndFixture.db.files.find((candidate) => candidate.id === 20);
+    return file?.data?.length === 2 && file.data[0] === 89 && file.data[1] === 90;
+  });
+  result.fileAfterReplace = await page.evaluate(() => {
+    const file = window.__assetDndFixture.db.files.find((candidate) => candidate.id === 20);
+    return file ? {
+      id: file.id,
+      enabled: file.enabled,
+      parent: file.parent,
+      name: file.name,
+      data: [...file.data],
+      dirty: window.__assetDndFixture.dbState.getSnapshot().isDirty,
+    } : null;
+  });
+
+  if (
+    !result.replacePrompt?.includes('already exists')
+    || JSON.stringify(result.fileAfterCancel) !== JSON.stringify({ id: 20, enabled: true, data: [68], dirty: false })
+    || JSON.stringify(result.fileAfterReplace) !== JSON.stringify({
+      id: 20,
+      enabled: true,
+      parent: 2,
+      name: 'destination.txt',
+      data: [89, 90],
+      dirty: true,
+    })
+  ) {
+    throw new Error(`Duplicate Pool import workflow failed: ${JSON.stringify(result)}`);
+  }
 
   console.log(JSON.stringify(result, null, 2));
 } finally {

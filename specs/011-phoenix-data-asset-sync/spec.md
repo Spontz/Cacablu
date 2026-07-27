@@ -66,6 +66,9 @@ As a user, I want asset changes made in Cacablu under `pool` or `resources` to b
 5. **Given** Phoenix rejects an operation, **When** Cacablu receives the error, **Then** Cacablu shows a non-blocking operation error and refreshes discrepancy state.
 6. **Given** a project is loaded and Phoenix is connected, **When** a pool file is moved to another folder, **Then** Cacablu updates the database hierarchy and mirrors the resulting Phoenix file path change.
 7. **Given** multiple selected files or a folder with enabled descendants are moved by one internal drag, **When** the atomic local move succeeds, **Then** Cacablu mirrors every affected enabled destination path and removes every obsolete enabled source path without exposing a partially synchronized batch.
+8. **Given** a same-name Pool file replacement is confirmed and the file is enabled, **When** Cacablu synchronizes it, **Then** Cacablu first waits for Phoenix to persist the new bytes and only afterwards updates every project bar containing an exact reference to that Pool path.
+9. **Given** Phoenix rejects the replacement file write, **When** synchronization fails, **Then** Cacablu does not update any referencing Phoenix section and reports the discrepancy.
+10. **Given** the replaced Pool file is disabled, **When** its local content is updated, **Then** neither the file nor its referencing bars are sent to Phoenix until normal enable/synchronization behavior publishes it.
 
 ---
 
@@ -149,6 +152,9 @@ As a user, I want Cacablu to publish the loaded project's bars to Phoenix as run
 - **FR-015a**: When browser networking blocks Phoenix requests, the system MUST show a clear Phoenix connection error instead of only surfacing a raw `Failed to fetch` message when enough context is available.
 - **FR-016**: The system MUST refresh or update discrepancy state after Phoenix confirms or rejects an asset operation.
 - **FR-016a**: After a successful atomic Pool batch or folder move, the system MUST reconcile every affected enabled descendant path with Phoenix, publishing all destinations before deleting obsolete source paths; a rejected local move MUST produce no Phoenix mutation.
+- **FR-016b**: Replacing an enabled Pool file MUST write the new file to Phoenix with automatic section reload disabled, await successful persistence, and then explicitly update every project bar containing an exact reference to that unchanged Pool path.
+- **FR-016c**: If the Phoenix file write fails or is rejected, no referencing section update may begin; the local project remains authoritative and the failure MUST be surfaced as a recoverable discrepancy.
+- **FR-016d**: Replacing a disabled Pool file MUST remain local and preserve its disabled state without sending the file or referencing sections to Phoenix.
 - **FR-017**: The system MUST preserve the static browser-only deployment model and MUST NOT add a Cacablu backend.
 - **FR-018**: The system MUST keep existing Phoenix time sync and preview behavior separate from asset sync state.
 - **FR-019**: On project open, after the initial pool sync completes or is skipped, the system MUST build an expected section snapshot from every database bar.
@@ -197,6 +203,7 @@ As a user, I want Cacablu to publish the loaded project's bars to Phoenix as run
 - **SC-010**: Invalid section replacement errors leave Cacablu usable and do not mark project-open sync as complete.
 - **SC-011**: After section replacement, Phoenix's active `data` folder contains `<id>.spo` files for the received sections and their content matches the canonical bar serialization.
 - **SC-012**: After a replacement removes a previously published section, Phoenix's active `data` folder no longer contains that removed section's `<id>.spo` file.
+- **SC-013**: Automated tests prove the observable request order is one successful Phoenix file write followed by exactly one section update for each unique referencing bar, with no section calls after a rejected write.
 
 ## Assumptions
 

@@ -28,3 +28,10 @@
 - [x] T015 Move selected roots atomically through `DbSession.moveResourceItems`, preserve selection, create one Undo entry, and reconcile all affected Phoenix paths after commit.
 - [x] T016 Extend Edge Playwright coverage for multi-file drag, folder-subtree drag, inner-folder drop targets, preserved selection, and Undo in `scripts/playwright-assets-dnd-check.mjs`.
 - [x] T017 Add native Selenium Edge validation with an actual SQLite project in `scripts/selenium-edge-folder-dnd-check.mjs`.
+
+## External Import Conflicts
+
+- [x] T018 Detect case-insensitive file/folder conflicts before importing an external file.
+- [x] T019 Show an accessible Cancel/Replace dialog for same-name files and keep cancellation side-effect free.
+- [x] T020 Replace existing content through `updateResourceFileContent` while preserving id, path, parent, name, and enabled state.
+- [x] T021 Add unit and Edge regression coverage for conflict detection, cancellation, identity-preserving replacement, and Phoenix ordering.

@@ -30,6 +30,10 @@ import {
 import type { AssetSelectionItem } from '../app/types';
 import { syncResourceClipboardMutation } from '../services/resource-clipboard-sync';
 import { ProjectSectionSyncError, syncProjectBarToPhoenix } from '../services/project-section-sync';
+import {
+  findResourceImportConflict,
+  syncImportedResourceFileToPhoenix,
+} from '../services/resource-file-import';
 import { writeSystemClipboardText } from '../resources/system-clipboard';
 import {
   createPoolClipboardEnvelope,
@@ -994,27 +998,52 @@ export function createResourcesPanel(
 
       try {
         setSyncStatus('applying', `Importing ${regularFiles.length} file${regularFiles.length === 1 ? '' : 's'}...`);
+        let importedCount = 0;
         for (const file of regularFiles) {
-          const bytes = new Uint8Array(await file.arrayBuffer());
-          const relativePath = `${target.targetPath}/${file.name}`;
+          const conflict = findResourceImportConflict(session.data, target.parentId ?? 0, file.name);
+          if (conflict?.kind === 'folder') {
+            setSyncStatus('error', `A folder named ${conflict.folder.name} already exists in this Pool folder.`);
+            continue;
+          }
+          if (conflict?.kind === 'file' && !await showReplaceFileDialog(conflict.file.name)) {
+            continue;
+          }
 
-          session.upsertResourceFile({
-            name: file.name,
-            parent: target.parentId ?? 0,
+          const bytes = new Uint8Array(await file.arrayBuffer());
+          const content = {
             bytes: bytes.byteLength,
             type: file.type || inferMimeType(file.name),
             data: bytes,
             format: inferFormat(file.name),
-            enabled: true,
-          });
+          };
+          const imported = conflict?.kind === 'file'
+            ? session.updateResourceFileContent(conflict.file.id, content)
+            : session.upsertResourceFile({
+              name: validateResourceItemName(session.data, target.parentId ?? 0, file.name),
+              parent: target.parentId ?? 0,
+              ...content,
+              enabled: true,
+            });
+          const relativePath = buildResourcePath(session.data, 'file', imported.id);
+          const referencedBarIds = session
+            .findResourceScriptReferences({ kind: 'file', id: imported.id })
+            .map((reference) => reference.barId);
 
-          if (connection.isConnected()) {
-            addAssetImpactEvents(state, await writeAllowedAssetFile(phoenixAssets, relativePath, bytes), `Imported ${file.name}`);
-          }
+          dbState.setDirty();
+          importedCount += 1;
+          await syncImportedResourceFileToPhoenix(
+            session.data,
+            imported,
+            relativePath,
+            referencedBarIds,
+            phoenixAssets,
+            phoenixSections,
+            state,
+            connection.isConnected(),
+          );
         }
 
-        dbState.setDirty();
-        render();
+        if (importedCount > 0) render();
       } catch (err) {
         setSyncStatus('error', err instanceof Error ? err.message : 'Could not import dropped files.');
       }
@@ -1282,6 +1311,47 @@ function showRenamePathDialog(referenceCount: number): Promise<'update' | 'keep'
       finish(null);
     });
     dialog.showModal();
+  });
+}
+
+function showReplaceFileDialog(fileName: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    const dialog = document.createElement('dialog');
+    dialog.className = 'resources__dialog';
+    dialog.dataset.resourceReplaceDialog = 'true';
+    const heading = document.createElement('h3');
+    heading.textContent = 'Replace existing file?';
+    const message = document.createElement('p');
+    message.textContent = `A file named ${fileName} already exists in this Pool folder. Do you want to replace it?`;
+    const actions = document.createElement('div');
+    actions.className = 'resources__dialog-actions';
+    const cancel = document.createElement('button');
+    cancel.type = 'button';
+    cancel.textContent = 'Cancel';
+    const replace = document.createElement('button');
+    replace.type = 'button';
+    replace.textContent = 'Replace';
+    replace.className = 'is-primary';
+    replace.dataset.resourceReplaceConfirm = 'true';
+    actions.append(cancel, replace);
+    dialog.append(heading, message, actions);
+    document.body.append(dialog);
+    let settled = false;
+    const finish = (choice: boolean) => {
+      if (settled) return;
+      settled = true;
+      dialog.close();
+      dialog.remove();
+      resolve(choice);
+    };
+    cancel.addEventListener('click', () => finish(false));
+    replace.addEventListener('click', () => finish(true));
+    dialog.addEventListener('cancel', (event) => {
+      event.preventDefault();
+      finish(false);
+    });
+    dialog.showModal();
+    replace.focus();
   });
 }
 

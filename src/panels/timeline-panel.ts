@@ -24,6 +24,7 @@ import {
   preparePastedTimelineBars,
 } from '../services/timeline-bar-paste';
 import { createContentRenderer } from './base-panel';
+import { isTimelineViewportScrollbarInteraction } from './timeline-scrollbar';
 
 const CLIP_COLOR = '#5e86b8';
 const MIN_MARKER_LABEL_SPACING = 88;
@@ -1309,7 +1310,15 @@ export function createTimelinePanel(
       }
 
       const interactionTarget = event.target as HTMLElement | null;
-      if (interactionTarget?.closest('.timeline-panel__viewport')) {
+      const interactionViewport = interactionTarget?.closest<HTMLElement>('.timeline-panel__viewport');
+      if (
+        interactionViewport
+        && isTimelineViewportScrollbarInteraction(interactionViewport, event.clientX, event.clientY)
+      ) {
+        return;
+      }
+
+      if (interactionViewport) {
         appState.setActivePanel('timeline');
         // Timeline rendering replaces lane and bar nodes after selection. Keep
         // keyboard ownership on the stable panel root so Ctrl+C/Ctrl+V still

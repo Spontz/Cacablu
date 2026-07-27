@@ -28,6 +28,8 @@ npm run dev
 - click-scrub works on the ruler
 - `Shift + wheel` zooms
 - the plain wheel scrolls
+- dragging the native horizontal scrollbar moves the viewport without changing
+  the current demo time or playhead
 
 3. Build a portable static output:
 
@@ -43,5 +45,7 @@ supported browser and confirm the app still loads.
 - Timeline panel opens without helper copy above the ruler
 - Transport buttons move the current time correctly
 - Selection and editing interactions remain available in the panel model
+- Native horizontal/vertical scrollbar gutters never create bars, select lanes,
+  scrub the playhead, or send a seek
 - Static build remains openable from the filesystem
 - Lint, typecheck, and build all succeed

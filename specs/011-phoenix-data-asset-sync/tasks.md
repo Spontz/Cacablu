@@ -98,6 +98,9 @@
 - [x] T025b [US3] Support dragging files into pool folders and mirror created files to Phoenix when enabled
 - [x] T025c [US3] Support moving pool files between folders and mirror the move to Phoenix
 - [x] T025d [US3] Reconcile atomic multi-item and folder drag moves, including every enabled descendant destination and obsolete source path, only after local commit
+- [x] T025e [US3] Replace duplicate Pool files only after user confirmation while preserving file id, path, parent, name, and enabled state
+- [x] T025f [US3] Write confirmed enabled replacements to Phoenix with section reload disabled, then update every unique exact-reference bar only after the write succeeds
+- [x] T025g [US3] Add tests for write-before-sections ordering, write rejection, disabled files, and case-insensitive conflicts
 - [x] T026 [US3] Send create directory operations for allowed loaded-project asset paths
 - [x] T027 [US3] Send delete directory operations for allowed loaded-project asset paths with explicit recursive behavior when needed
 - [x] T028 [US3] Correlate Phoenix operation responses/events by request id where available

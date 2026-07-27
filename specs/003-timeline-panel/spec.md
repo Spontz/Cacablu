@@ -87,6 +87,9 @@ dragging, and keyboard or clipboard actions to change the arrangement of clips.
    items.
 4. **Given** the timeline panel is visible, **When** the user duplicates or
    pastes selected items, **Then** the new items preserve relative timing.
+5. **Given** the timeline has horizontal overflow, **When** the user clicks or
+   drags its native horizontal scrollbar, **Then** only the visible viewport
+   moves and the demo current time, playhead, selection, and bars remain unchanged.
 
 ---
 
@@ -122,6 +125,8 @@ verify that the panel can represent them without breaking the existing view.
   a standalone panel?
 - What happens when a browser wheel event is unmodified and must be used for
   scroll rather than zoom?
+- What happens when native scrollbar pointer events target the same viewport
+  element that owns lane editing interactions?
 
 ## Requirements *(mandatory)*
 
@@ -171,6 +176,9 @@ verify that the panel can represent them without breaking the existing view.
 - **FR-021**: Shift + wheel zoom MUST NOT impose product-level minimum or
   maximum zoom limits; implementation may only guard against invalid numeric
   values such as zero, negatives, or non-finite zoom.
+- **FR-022**: Native horizontal or vertical scrollbar interaction MUST be
+  navigation-only and MUST NOT initiate lane selection, bar creation, bar
+  movement, playhead scrubbing, or a Phoenix runtime seek.
 
 ### Key Entities *(include if feature involves data)*
 
@@ -215,6 +223,8 @@ verify that the panel can represent them without breaking the existing view.
   zero visible layer labels.
 - **SC-012**: Repeated Shift + wheel zoom-in and zoom-out continues changing
   the timeline scale beyond the earlier fixed limits in manual validation.
+- **SC-013**: A headed Edge regression moves the native horizontal scrollbar
+  while the playhead time remains byte-for-byte unchanged.
 
 ## Assumptions
 

@@ -4,7 +4,7 @@
 
 ## Summary
 
-Route clipboard commands by active editing context, store an application clipboard snapshot for Pool roots, implement atomic recursive copy/move operations in `DbSession`, and reuse the same batch mutation path for internal file/folder drag, scoped Phoenix asset reconciliation, and shared Undo.
+Route clipboard commands by active editing context, store an application clipboard snapshot for Pool roots, implement atomic recursive copy/move operations in `DbSession`, reuse the same batch mutation path for internal file/folder drag, and make external duplicate imports an explicit confirmed content update with scoped Phoenix reconciliation.
 
 ## Technical Context
 
@@ -46,3 +46,5 @@ tests/unit/
 6. Build internal drag payloads from the canonical selection when the dragged item is selected, while retaining legacy single-file payload compatibility.
 7. Resolve a drop anywhere inside an expanded folder to that folder and execute the batch with `DbSession.moveResourceItems` as one atomic operation.
 8. Preserve moved selection, register one inverse Undo command, reconcile Phoenix after commit, and verify both synthetic and native Edge pointer flows.
+9. Detect external import conflicts case-insensitively, reject folder conflicts, and show a modal Cancel/Replace choice for file conflicts before mutation.
+10. Replace only file content metadata so database identity and enabled state remain stable, then delegate ordered Phoenix publication to the asset-sync service.

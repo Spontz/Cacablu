@@ -45,6 +45,14 @@ Users can paste internal items or drop external files directly into the Pool roo
 
 **Independent Test**: Paste and drop files on the explicit root row and verify parent id `0` and normalized paths.
 
+**Acceptance Scenarios**:
+
+1. **Given** no same-name item exists in the destination, **When** an external file is dropped, **Then** Cacablu imports it normally.
+2. **Given** a same-name file already exists in the destination, **When** an external file is dropped, **Then** Cacablu shows a replacement confirmation before reading or mutating the project file.
+3. **Given** replacement is cancelled, **When** the dialog closes, **Then** the existing file, dirty state, Phoenix state, and referencing bars remain unchanged.
+4. **Given** replacement is confirmed, **When** the import completes, **Then** Cacablu updates the existing file content while preserving its id, path, parent, and enabled state.
+5. **Given** a same-name folder exists, **When** an external file is dropped, **Then** Cacablu reports the non-replaceable conflict and performs no mutation.
+
 ### User Story 4 - Move Selected Pool Items By Dragging (Priority: P1)
 
 Users can drag files or folders inside the Pool and move the complete canonical selection to an exact folder or root destination as one reversible operation.
@@ -81,6 +89,10 @@ Users can drag files or folders inside the Pool and move the complete canonical 
 - **FR-015**: A destination folder MUST accept internal drops on its row, on contained files, and on visible whitespace inside its expanded rendered area; the explicit Pool root MUST continue to target the root.
 - **FR-016**: Internal drag moves MUST use one atomic database operation, preserve the moved batch as the current selection, and create one Undo entry that restores every original parent.
 - **FR-017**: Successful internal drag moves MUST reconcile every affected enabled asset path with Phoenix only after the local batch commit succeeds.
+- **FR-018**: External file import MUST detect same-destination file and folder name conflicts case-insensitively before mutation.
+- **FR-019**: A same-name file MUST require an explicit Replace confirmation; cancellation MUST be side-effect free.
+- **FR-020**: Confirmed replacement MUST update the existing database file content and metadata without changing its id, path, parent, name, or enabled state.
+- **FR-021**: A folder conflict MUST be reported and MUST NOT be converted, deleted, or replaced by the imported file.
 
 ## Success Criteria
 
@@ -89,6 +101,7 @@ Users can drag files or folders inside the Pool and move the complete canonical 
 - **SC-003**: Typecheck, lint, tests, and production build pass.
 - **SC-004**: Edge Playwright verifies multi-file drag, preserved selection, folder-subtree drag, inner-folder drop targets, and single-step Undo.
 - **SC-005**: Native Selenium Edge validation against an actual SQLite project confirms that a folder can be moved into another folder by pointer drag.
+- **SC-006**: Edge browser validation confirms both Cancel and Replace paths for a duplicate external file and proves replacement preserves file identity.
 
 ## Assumptions
 

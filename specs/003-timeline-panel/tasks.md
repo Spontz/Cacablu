@@ -81,6 +81,8 @@ scrolling, and verify the modeled edit actions remain available.
 - [ ] T016 [US3] Keep the selection, box-select, move, trim, resize, split, duplicate, copy, paste, and snap semantics represented in `packages/timeline/src/model.ts`
 - [ ] T017 [US3] Validate compact timeline density and interaction affordances in `specs/003-timeline-panel/quickstart.md`
 - [x] T017a [US3] Remove fixed Shift + wheel zoom-in and zoom-out limits from `src/panels/timeline-panel.ts`
+- [x] T017b [US3] Exclude native viewport scrollbar gutters from Timeline editing gestures and cover horizontal/vertical hit testing in `tests/unit/timeline-scrollbar.test.ts`
+- [x] T017c [US3] Verify in headed Edge with a real SQLite project that dragging the horizontal scrollbar changes `scrollLeft` without changing current time in `scripts/playwright-edge-timeline-scrollbar-time-check.mjs`
 
 **Checkpoint**: Story 3 interaction model is independent of keyframes
 

@@ -26,14 +26,20 @@
 15. Cancel the initial sync during section synchronization in a separate run and confirm the opened project is not loaded into the workspace.
 16. Toggle a pool file checkbox and confirm Cacablu writes or deletes that file in Phoenix.
 17. Drag a file into an Assets folder and confirm the database and Phoenix receive the new file.
-18. Select multiple pool files, drag one selected item into another Assets folder, and confirm every selected enabled file moves in the database and Phoenix.
-19. Drag a folder containing enabled descendants onto a destination folder row, a contained file, or visible whitespace inside that expanded folder; confirm Phoenix reflects every descendant path change.
-20. Invoke Undo once and confirm the complete moved batch returns locally and Phoenix receives the inverse path reconciliation.
-21. Attempt a conflicting, self, or descendant folder drop and confirm neither the database nor Phoenix receives a partial mutation.
-22. Delete a file or folder under `pool` or `resources`.
-23. Confirm Phoenix receives and applies the matching delete operation.
-24. Try to sync a path under `config`.
-25. Confirm Cacablu blocks or warns and no Phoenix mutation is sent.
+18. Drop a different file with the same name into that Assets folder and confirm Cacablu asks whether to replace it before changing the project.
+19. Cancel once and confirm the original bytes, identity, dirty state, Phoenix file, and bars remain unchanged.
+20. Repeat and choose Replace; confirm the database file keeps its id/path/enabled state while its bytes and metadata change.
+21. Confirm Phoenix receives the complete file write first and only after success receives one update per unique bar that exactly references the path.
+22. Simulate a rejected Phoenix file write and confirm no referencing section update is sent.
+23. Replace a disabled file and confirm the change remains local without publishing the file or sections.
+24. Select multiple pool files, drag one selected item into another Assets folder, and confirm every selected enabled file moves in the database and Phoenix.
+25. Drag a folder containing enabled descendants onto a destination folder row, a contained file, or visible whitespace inside that expanded folder; confirm Phoenix reflects every descendant path change.
+26. Invoke Undo once and confirm the complete moved batch returns locally and Phoenix receives the inverse path reconciliation.
+27. Attempt a conflicting, self, or descendant folder drop and confirm neither the database nor Phoenix receives a partial mutation.
+28. Delete a file or folder under `pool` or `resources`.
+29. Confirm Phoenix receives and applies the matching delete operation.
+30. Try to sync a path under `config`.
+31. Confirm Cacablu blocks or warns and no Phoenix mutation is sent.
 
 ## Expected User-Visible States
 
