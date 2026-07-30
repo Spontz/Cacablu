@@ -324,17 +324,44 @@ try {
   await page.waitForFunction(() => window.__assetDndFixture.db.folders.find((folder) => folder.id === 1)?.parent === 0);
   result.folderParentAfterUndo = await page.evaluate(() => window.__assetDndFixture.db.folders.find((folder) => folder.id === 1)?.parent);
 
-  const dropExternalFile = async (bytes) => {
-    await page.evaluate((content) => {
-      document.querySelector('.resources__tree')
-        ?.dispatchEvent(new DragEvent('dragend', { bubbles: true, cancelable: true }));
+  const primeStaleInternalDrag = async () => {
+    await page.evaluate(() => {
       const transfer = new DataTransfer();
-      transfer.items.add(new File([new Uint8Array(content)], 'destination.txt', { type: 'text/plain' }));
-      const target = document.querySelector('[data-resource-kind="folder"][data-resource-id="2"]');
+      const staleFile = document.querySelector('[data-resource-kind="file"][data-resource-id="20"]');
+      if (!staleFile) throw new Error('Missing file used to prime the stale internal drag.');
+      staleFile.dispatchEvent(new DragEvent('dragstart', { bubbles: true, cancelable: true, dataTransfer: transfer }));
+    });
+  };
+
+  const dropExternalFile = async (bytes, name = 'destination.txt', targetId = 2) => {
+    await page.evaluate(({ content, fileName, folderId }) => {
+      const transfer = new DataTransfer();
+      transfer.items.add(new File([new Uint8Array(content)], fileName, { type: 'text/plain' }));
+      const target = document.querySelector(`[data-resource-kind="folder"][data-resource-id="${folderId}"]`);
       if (!target) throw new Error('Missing target folder for external file drop.');
       target.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: transfer }));
-    }, bytes);
+    }, { content: bytes, fileName: name, folderId: targetId });
   };
+
+  await primeStaleInternalDrag();
+  await dropExternalFile([1, 2, 3], 'first.glsl', 2);
+  await page.waitForFunction(() => window.__assetDndFixture.db.files.some((file) => (
+    file.name === 'first.glsl' && file.parent === 2
+  )));
+  await dropExternalFile([4, 5, 6], 'second.glsl', 1);
+  await page.waitForFunction(() => window.__assetDndFixture.db.files.some((file) => (
+    file.name === 'second.glsl' && file.parent === 1
+  )));
+  const staleDropRegression = await page.evaluate(() => ({
+    destinationParent: window.__assetDndFixture.db.files.find((file) => file.id === 20)?.parent,
+    imported: window.__assetDndFixture.db.files
+      .filter((file) => file.name === 'first.glsl' || file.name === 'second.glsl')
+      .map((file) => [file.name, file.parent]),
+  }));
+  if (staleDropRegression.destinationParent !== 2 || staleDropRegression.imported.length !== 2) {
+    throw new Error(`External file drop reused a stale internal drag: ${JSON.stringify(staleDropRegression)}`);
+  }
+  await page.evaluate(() => window.__assetDndFixture.dbState.setSaved());
 
   await dropExternalFile([88]);
   const replaceDialog = page.locator('[data-resource-replace-dialog]');

@@ -376,7 +376,9 @@ export function createResourcesPanel(
       if (!dropTarget) return;
       event.preventDefault();
       if (event.dataTransfer) {
-        event.dataTransfer.dropEffect = draggingAssetItems || hasAssetFileDrag(event.dataTransfer) ? 'move' : 'copy';
+        event.dataTransfer.dropEffect = hasExternalFileDrag(event.dataTransfer)
+          ? 'copy'
+          : draggingAssetItems || hasAssetFileDrag(event.dataTransfer) ? 'move' : 'copy';
       }
     });
 
@@ -405,13 +407,22 @@ export function createResourcesPanel(
       if (!dropTarget || !event.dataTransfer) return;
       event.preventDefault();
       dropTarget.element.classList.remove('is-drop-target');
-      const assetMove = draggingAssetItems ?? getAssetDrag(event.dataTransfer);
+      const droppedFiles = [...event.dataTransfer.files];
+      const isExternalFileDrop = hasExternalFileDrag(event.dataTransfer);
+      const assetMove = isExternalFileDrop
+        ? null
+        : getAssetDrag(event.dataTransfer) ?? draggingAssetItems;
+      clearAssetDragState();
+
+      if (isExternalFileDrop) {
+        if (droppedFiles.length > 0) {
+          void importDroppedFiles(dropTarget, droppedFiles);
+        }
+        return;
+      }
       if (assetMove) {
         void moveAssetItems(dropTarget, assetMove);
         return;
-      }
-      if (event.dataTransfer.files.length) {
-        void importDroppedFiles(dropTarget, [...event.dataTransfer.files]);
       }
     });
 
@@ -448,12 +459,15 @@ export function createResourcesPanel(
       }
     });
 
-    treeEl.addEventListener('dragend', () => {
+    function clearAssetDragState(): void {
       draggingAssetItems = null;
       treeEl.querySelectorAll('.is-dragging, .is-drop-target').forEach((node) => {
         node.classList.remove('is-dragging', 'is-drop-target');
       });
-    });
+    }
+
+    treeEl.addEventListener('dragend', clearAssetDragState);
+    document.addEventListener('dragend', clearAssetDragState, true);
 
     treeEl.addEventListener('click', (event) => {
       const target = event.target as HTMLElement;
@@ -584,6 +598,7 @@ export function createResourcesPanel(
       window.removeEventListener('cacablu:asset-clipboard-command', handleClipboardCommand);
       document.removeEventListener('pointerdown', dismissActionMenu);
       document.removeEventListener('keydown', dismissActionMenuOnEscape);
+      document.removeEventListener('dragend', clearAssetDragState, true);
       closeActionMenu();
     };
 
@@ -1411,6 +1426,10 @@ function resourceRefToSelection(session: DbSession, ref: ResourceItemRef): Asset
 
 function hasAssetFileDrag(dataTransfer: DataTransfer | null): boolean {
   return Boolean(dataTransfer && Array.from(dataTransfer.types).includes(ASSET_FILE_DRAG_TYPE));
+}
+
+function hasExternalFileDrag(dataTransfer: DataTransfer | null): boolean {
+  return Boolean(dataTransfer && Array.from(dataTransfer.types).includes('Files'));
 }
 
 function getAssetDrag(dataTransfer: DataTransfer): AssetDragPayload | null {
