@@ -78,11 +78,12 @@ export function readDatabase(db: SqlDatabase): ProjectDatabase {
 
   const markers: DbMarker[] = queryRows(
     db,
-    'SELECT id, time, label FROM MARKERS ORDER BY time, id',
+    'SELECT id, time, label, enabled FROM MARKERS ORDER BY time, id',
   ).map((r) => ({
     id: r[0] as number,
     time: r[1] as number,
     label: toText(r[2]),
+    enabled: Boolean(r[3]),
   }));
 
   return { variables, bars, fbos, files, folders, markers };

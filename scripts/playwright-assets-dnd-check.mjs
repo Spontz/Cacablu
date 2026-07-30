@@ -264,6 +264,17 @@ try {
   const secondSourceFile = page.locator('[data-resource-kind="file"]', { hasText: 'mask.png' });
   const targetFolder = page.locator('[data-resource-kind="folder"]', { hasText: 'target' });
 
+  await page.evaluate(() => {
+    const { dbState } = window.__assetDndFixture;
+    dbState.setDirty();
+    dbState.setSaving();
+    dbState.setSaved();
+  });
+  const sourceDisclosure = page.locator('[data-resource-kind="folder"][data-resource-id="1"] .resources__disclosure');
+  if (await sourceDisclosure.getAttribute('data-expanded') !== 'true' || !await sourceFile.isVisible()) {
+    throw new Error('Saving the project collapsed the expanded Pool tree.');
+  }
+
   await sourceFile.click();
   await secondSourceFile.click({ modifiers: ['Control'] });
   await sourceFile.dragTo(targetFolder);

@@ -334,7 +334,7 @@ export function createResourcesPanel(
     render();
 
     const unsubscribeDb = dbState.subscribe((snapshot) => {
-      if (snapshot.status !== 'open') {
+      if (snapshot.status === 'none' || snapshot.status === 'opening') {
         expandedIds.clear();
       }
       render();

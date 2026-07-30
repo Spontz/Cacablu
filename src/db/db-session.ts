@@ -9,7 +9,7 @@ type EditableDbValue = string | number | boolean | null;
 type DbTableName = string;
 type DbTableCellValue = string | number | boolean | Uint8Array | null;
 export type NewTimelineBar = Pick<DbBar, 'layer' | 'startTime' | 'endTime'> & Partial<Omit<DbBar, 'layer' | 'startTime' | 'endTime'>>;
-type NewTimelineMarker = Pick<DbMarker, 'time'> & Partial<Pick<DbMarker, 'id' | 'label'>>;
+type NewTimelineMarker = Pick<DbMarker, 'time'> & Partial<Pick<DbMarker, 'id' | 'label' | 'enabled'>>;
 type NewResourceFile = Pick<DbFile, 'name' | 'parent' | 'bytes' | 'type' | 'data' | 'format'> & Partial<Pick<DbFile, 'enabled'>>;
 type NewResourceFolder = Pick<DbFolder, 'name' | 'parent'> & Partial<Pick<DbFolder, 'enabled'>>;
 type GraphicsContextUpdate = {
@@ -47,7 +47,7 @@ export interface DbSession {
   restoreTimelineBars(bars: DbBar[]): DbBar[];
   setTimelineBarEnabled(barId: number, enabled: boolean): DbBar;
   insertTimelineMarker(input: NewTimelineMarker): DbMarker;
-  updateTimelineMarker(markerId: number, input: Partial<Pick<DbMarker, 'time' | 'label'>>): DbMarker;
+  updateTimelineMarker(markerId: number, input: Partial<Pick<DbMarker, 'time' | 'label' | 'enabled'>>): DbMarker;
   deleteTimelineMarker(markerId: number): DbMarker;
   restoreTimelineMarker(marker: DbMarker): DbMarker;
   upsertResourceFile(input: NewResourceFile): DbFile;
@@ -307,17 +307,20 @@ function makeSession(handle: FileSystemFileHandle, db: SqlDatabase, data: Projec
 
     insertTimelineMarker(input): DbMarker {
       validateMarkerTime(input.time);
+      const time = normalizeMarkerTime(input.time);
       const label = input.label ?? '';
+      const enabled = input.enabled ?? true;
       if (input.id !== undefined) {
-        db.run('INSERT INTO "MARKERS" ("id", "time", "label") VALUES (?, ?, ?)', [input.id, input.time, label]);
+        db.run('INSERT INTO "MARKERS" ("id", "time", "label", "enabled") VALUES (?, ?, ?, ?)', [input.id, time, label, enabled ? 1 : 0]);
       } else {
-        db.run('INSERT INTO "MARKERS" ("time", "label") VALUES (?, ?)', [input.time, label]);
+        db.run('INSERT INTO "MARKERS" ("time", "label", "enabled") VALUES (?, ?, ?)', [time, label, enabled ? 1 : 0]);
       }
 
       const marker: DbMarker = {
         id: input.id ?? lastInsertRowId(db),
-        time: input.time,
+        time,
         label,
+        enabled,
       };
       data.markers.push(marker);
       sortMarkers(data.markers);
@@ -330,12 +333,14 @@ function makeSession(handle: FileSystemFileHandle, db: SqlDatabase, data: Projec
         throw new Error(`Timeline marker ${markerId} was not found.`);
       }
 
-      const nextTime = input.time ?? marker.time;
+      const nextTime = input.time === undefined ? marker.time : normalizeMarkerTime(input.time);
       const nextLabel = input.label ?? marker.label;
+      const nextEnabled = input.enabled ?? marker.enabled;
       validateMarkerTime(nextTime);
-      db.run('UPDATE "MARKERS" SET "time" = ?, "label" = ? WHERE "id" = ?', [nextTime, nextLabel, markerId]);
+      db.run('UPDATE "MARKERS" SET "time" = ?, "label" = ?, "enabled" = ? WHERE "id" = ?', [nextTime, nextLabel, nextEnabled ? 1 : 0, markerId]);
       marker.time = nextTime;
       marker.label = nextLabel;
+      marker.enabled = nextEnabled;
       sortMarkers(data.markers);
       return marker;
     },
@@ -1214,6 +1219,7 @@ function migrateDatabaseSchema(db: SqlDatabase): void {
   }
 
   migrateMarkersTableName(db);
+  ensureMarkersEnabledColumn(db);
 }
 
 function migrateMarkersTableName(db: SqlDatabase): void {
@@ -1237,7 +1243,14 @@ function migrateMarkersTableName(db: SqlDatabase): void {
 }
 
 function createMarkersTable(db: SqlDatabase): void {
-  db.run('CREATE TABLE IF NOT EXISTS "MARKERS" ("id" INTEGER PRIMARY KEY, "time" REAL NOT NULL, "label" TEXT NOT NULL DEFAULT "")');
+  db.run('CREATE TABLE IF NOT EXISTS "MARKERS" ("id" INTEGER PRIMARY KEY, "time" REAL NOT NULL, "label" TEXT NOT NULL DEFAULT "", "enabled" INTEGER NOT NULL DEFAULT 1)');
+}
+
+function ensureMarkersEnabledColumn(db: SqlDatabase): void {
+  const columns = getTableColumnNames(db, 'MARKERS');
+  if (!columns.some((column) => column.toLowerCase() === 'enabled')) {
+    db.run('ALTER TABLE "MARKERS" ADD COLUMN "enabled" INTEGER NOT NULL DEFAULT 1');
+  }
 }
 
 function getTableColumnNames(db: SqlDatabase, tableName: string): string[] {
@@ -1295,6 +1308,11 @@ function validateMarkerTime(time: number): void {
   if (!Number.isFinite(time)) {
     throw new Error('Timeline marker time must be finite.');
   }
+}
+
+function normalizeMarkerTime(time: number): number {
+  validateMarkerTime(time);
+  return Number(time.toFixed(3));
 }
 
 function sortMarkers(markers: DbMarker[]): void {

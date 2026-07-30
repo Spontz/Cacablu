@@ -17,7 +17,7 @@ import { createPhoenixLogClient } from '../phoenix/log-client';
 import { createPhoenixRuntimeLoopClient } from '../phoenix/runtime-loop-client';
 import { primePhoenixLogEvents, recordPhoenixLogsAsEvents } from '../phoenix/log-events';
 import { ProjectSectionSyncError, syncProjectBarToPhoenix } from '../services/project-section-sync';
-import { computeLoopIntervalFromMarkers } from '../services/timeline-loop-markers';
+import { computeLoopIntervalFromMarkers, wrapTimeWithinLoop } from '../services/timeline-loop-markers';
 import type { BarClipboardPayload } from '../services/cross-project-clipboard';
 import {
   assertPastedBarsUnchanged,
@@ -328,7 +328,7 @@ export function createTimelinePanel(
     const markers = sessionRef.current?.data.markers ?? [];
     return [
       selectedMarkerId ?? 'none',
-      ...markers.map((marker) => `${marker.id}:${marker.time}:${marker.label}`),
+      ...markers.map((marker) => `${marker.id}:${marker.time}:${marker.label}:${marker.enabled !== false ? 'enabled' : 'disabled'}`),
     ].join('|');
   }
 
@@ -548,10 +548,12 @@ export function createTimelinePanel(
         dbState.setDirty();
         notifyMarkersChanged();
         renderTimeline?.(true);
+        void reconcileActiveLoopWithMarkers();
       },
     });
     dbState.setDirty();
     notifyMarkersChanged();
+    void reconcileActiveLoopWithMarkers(state.transport.currentTime);
     return marker;
   }
 
@@ -574,9 +576,11 @@ export function createTimelinePanel(
         dbState.setDirty();
         notifyMarkersChanged();
         renderTimeline?.(true);
+        void reconcileActiveLoopWithMarkers();
       },
     });
     notifyMarkersChanged();
+    void reconcileActiveLoopWithMarkers();
     return true;
   }
 
@@ -594,10 +598,12 @@ export function createTimelinePanel(
         dbState.setDirty();
         notifyMarkersChanged();
         renderTimeline?.(true);
+        void reconcileActiveLoopWithMarkers();
       },
     });
     notifyMarkersChanged();
     renderTimeline?.(true);
+    void reconcileActiveLoopWithMarkers();
     return true;
   }
 
@@ -619,11 +625,44 @@ export function createTimelinePanel(
     runtimeAnchorTimestamp = performance.now();
     renderTimeline?.(true);
 
+    const loopRequest = phoenixLoop.putLoop(interval);
+    if (connection.isConnected()) {
+      connection.send({ type: 'runtime.seek', time: interval.startTime });
+    }
+
     try {
-      await phoenixLoop.putLoop(interval);
+      await loopRequest;
+      // Confirm the position after Phoenix has applied the loop too. This
+      // prevents an in-flight runtime update from restoring the clicked time.
       if (connection.isConnected()) {
         connection.send({ type: 'runtime.seek', time: interval.startTime });
       }
+    } catch (err) {
+      appState.addEvent({
+        severity: 'error',
+        source: 'Phoenix runtime loop',
+        description: err instanceof Error ? err.message : 'Could not update Phoenix runtime loop.',
+      });
+    }
+  }
+
+  async function reconcileActiveLoopWithMarkers(referenceTime?: number): Promise<void> {
+    const activeLoop = state.transport.loop;
+    if (!activeLoop) return;
+
+    const markers = sessionRef.current?.data.markers ?? [];
+    const loopReferenceTime = referenceTime !== undefined && Number.isFinite(referenceTime)
+      ? referenceTime
+      : (activeLoop.start + activeLoop.end) / 2;
+    const interval = computeLoopIntervalFromMarkers(markers, loopReferenceTime, 0, state.transport.duration);
+    if (!interval || (interval.startTime === activeLoop.start && interval.endTime === activeLoop.end)) return;
+
+    state.transport.loop = { start: interval.startTime, end: interval.endTime };
+    appState.setActiveLoop(interval);
+    renderTimeline?.(true);
+
+    try {
+      await phoenixLoop.putLoop(interval);
     } catch (err) {
       appState.addEvent({
         severity: 'error',
@@ -1012,9 +1051,10 @@ export function createTimelinePanel(
                     ? `${marker.label.trim()} (${formatTime(marker.time)}s)`
                     : `${formatTime(marker.time)}s`;
                   const label = marker.label.trim();
+                  const isEnabled = marker.enabled !== false;
                   const isSelected = selectedMarkerId === marker.id;
                   const isDragging = markerDragState?.markerId === marker.id;
-                  return `<button type="button" class="timeline-panel__loop-marker ${isSelected ? 'is-selected' : ''} ${isDragging ? 'is-dragging' : ''}" data-marker-id="${marker.id}" style="left:${left}px" title="${escapeHtml(title)}" aria-label="${escapeHtml(title)}">${label ? `<span>${escapeHtml(label)}</span>` : ''}</button>`;
+                  return `<button type="button" class="timeline-panel__loop-marker ${isEnabled ? '' : 'is-disabled'} ${isSelected ? 'is-selected' : ''} ${isDragging ? 'is-dragging' : ''}" data-marker-id="${marker.id}" style="left:${left}px" title="${escapeHtml(title)}" aria-label="${escapeHtml(title)}">${label ? `<span>${escapeHtml(label)}</span>` : ''}</button>`;
                 }).join('')}
               </div>
 
@@ -1025,8 +1065,9 @@ export function createTimelinePanel(
                 }).join('')}
                 ${markers.map((marker) => {
                   const left = marker.time * effectivePixelsPerSecond;
+                  const isEnabled = marker.enabled !== false;
                   const isSelected = selectedMarkerId === marker.id;
-                  return `<span class="timeline-panel__loop-guide ${isSelected ? 'is-selected' : ''}" data-marker-guide-id="${marker.id}" style="left:${left}px"></span>`;
+                  return `<span class="timeline-panel__loop-guide ${isEnabled ? '' : 'is-disabled'} ${isSelected ? 'is-selected' : ''}" data-marker-guide-id="${marker.id}" style="left:${left}px"></span>`;
                 }).join('')}
               </div>
 
@@ -1196,10 +1237,13 @@ export function createTimelinePanel(
       if (connection.isConnected()) {
         if (state.transport.isPlaying) {
           const elapsedSeconds = (performance.now() - runtimeAnchorTimestamp) / 1000;
-          state.transport.currentTime = Math.min(
-            Math.max(runtimeAnchorTime + elapsedSeconds * state.transport.playbackRate, 0),
-            state.transport.duration,
-          );
+          const projectedTime = runtimeAnchorTime + elapsedSeconds * state.transport.playbackRate;
+          state.transport.currentTime = state.transport.loop
+            ? wrapTimeWithinLoop(projectedTime, {
+                startTime: state.transport.loop.start,
+                endTime: state.transport.loop.end,
+              })
+            : Math.min(Math.max(projectedTime, 0), state.transport.duration);
           updatePlayhead();
         }
 
@@ -1244,7 +1288,13 @@ export function createTimelinePanel(
     connection.subscribeRuntime((runtime) => {
       const duration = state.transport.duration;
 
-      state.transport.currentTime = Math.min(Math.max(runtime.time, 0), Math.max(duration, 0));
+      const boundedRuntimeTime = Math.min(Math.max(runtime.time, 0), Math.max(duration, 0));
+      state.transport.currentTime = state.transport.loop
+        ? wrapTimeWithinLoop(boundedRuntimeTime, {
+            startTime: state.transport.loop.start,
+            endTime: state.transport.loop.end,
+          })
+        : boundedRuntimeTime;
       runtimeAnchorTime = state.transport.currentTime;
       runtimeAnchorTimestamp = performance.now();
 
@@ -1919,8 +1969,14 @@ export function createTimelinePanel(
     };
     window.addEventListener('cacablu:timeline-clipboard-paste', handleTimelineClipboardPaste);
 
-    const handleMarkersChanged = (): void => {
+    const handleMarkersChanged = (event: Event): void => {
       render(true);
+      const detail = event instanceof CustomEvent
+        ? event.detail as { reconcileActiveLoop?: unknown } | undefined
+        : undefined;
+      if (detail?.reconcileActiveLoop === true) {
+        void reconcileActiveLoopWithMarkers();
+      }
     };
     window.addEventListener('cacablu:timeline-markers-changed', handleMarkersChanged);
 

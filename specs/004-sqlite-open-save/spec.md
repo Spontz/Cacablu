@@ -44,6 +44,7 @@ As a user, I want to save changes back into the same database file so that my ed
 1. **Given** a `.sqlite` file is already open, **When** the user selects the save option, **Then** the app writes the current data back to the same file.
 2. **Given** the app has unsaved changes, **When** the save action completes successfully, **Then** the app shows that the database is synchronized with the file on disk.
 3. **Given** the open file is no longer writable or available, **When** the user tries to save, **Then** the app reports the problem clearly and keeps the current working state intact.
+4. **Given** the user has expanded folders in the Pool tree, **When** Save or Save As runs, **Then** the same folders remain expanded after the operation completes.
 
 ---
 
@@ -131,6 +132,7 @@ As a user, I want the app to make file access limits clear so that I understand 
 - **FR-018**: Each timeline bar MUST be placed on the track row corresponding to its `layer` field value; multiple bars MAY share the same track row and MUST all be rendered on it.
 - **FR-019**: The system MUST handle an empty or absent BARS table gracefully by showing an empty timeline without errors.
 - **FR-020**: The system MUST retain the database `id` of each BARS row in the in-memory representation of every timeline bar so that future edits can be written back to the correct row in the database.
+- **FR-021**: Save and Save As MUST preserve which Pool folders are expanded; this UI state MUST only reset when the active project is closed or a different project starts opening.
 
 ### Key Entities *(include if feature involves data)*
 
@@ -248,6 +250,7 @@ Known keys and their meaning:
 - **SC-008**: A user can open a `.sqlite` file with BARS data and see the bars appear in the timeline at the correct positions with their type labels visible.
 - **SC-009**: Manual validation confirms the timeline clears and shows an empty state when a database with no BARS rows is opened.
 - **SC-006**: Project lint, typecheck, and build checks complete without new errors for the file open/save feature.
+- **SC-010**: Automated Edge browser validation confirms that an expanded Pool folder and its children remain visible across the `saving` to `open` state transition.
 
 ## Assumptions
 

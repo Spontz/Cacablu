@@ -1097,6 +1097,14 @@ button.events-listbox__severity:focus-visible {
   color: #f5fbff;
 }
 
+.markers-panel__option[data-marker-enabled="false"] {
+  color: #777f8d;
+}
+
+.markers-panel__option[data-marker-enabled="false"] .markers-panel__option-time {
+  color: #69717d;
+}
+
 .markers-panel__option-label {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1396,6 +1404,16 @@ button.events-listbox__severity:focus-visible {
   cursor: grabbing;
 }
 
+.timeline-panel__loop-marker.is-disabled,
+.timeline-panel__loop-marker.is-disabled:hover,
+.timeline-panel__loop-marker.is-disabled:focus-visible,
+.timeline-panel__loop-marker.is-disabled span,
+.timeline-panel__loop-marker.is-disabled:hover span,
+.timeline-panel__loop-marker.is-disabled:focus-visible span {
+  color: #747b87;
+  transition: none;
+}
+
 .timeline-panel__grid {
   position: absolute;
   top: 2.4rem;
@@ -1472,6 +1490,21 @@ button.events-listbox__severity:focus-visible {
     0 0 0 1px rgba(var(--marker-guide-color), 0.14),
     0 0 8px rgba(var(--marker-guide-color), 0.38),
     0 0 20px rgba(var(--marker-guide-color), 0.2);
+}
+
+.timeline-panel__loop-guide.is-disabled {
+  --marker-guide-color: 116, 123, 135;
+  background: rgba(var(--marker-guide-color), 0.28);
+  box-shadow: none;
+}
+
+.timeline-panel__loop-guide.is-disabled::before {
+  opacity: 0.35;
+}
+
+.timeline-panel__loop-guide.is-disabled::after {
+  animation: none;
+  opacity: 0.25;
 }
 
 .timeline-panel__playhead {

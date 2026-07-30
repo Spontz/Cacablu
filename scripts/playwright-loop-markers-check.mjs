@@ -1,4 +1,4 @@
-/* global process, console, window, document, CustomEvent */
+/* global process, console, window, document, CustomEvent, HTMLElement, getComputedStyle, setTimeout */
 
 import { chromium } from 'playwright';
 
@@ -16,6 +16,7 @@ function expectClose(actual, expected, label, tolerance = 0.15) {
 try {
   await page.route('http://127.0.0.1:29100/api/runtime/loop', async (route) => {
     const body = route.request().postDataJSON();
+    await new Promise((resolve) => setTimeout(resolve, 150));
     await route.fulfill({
       status: 200,
       headers: {
@@ -69,12 +70,12 @@ try {
       fbos: [],
       files: [],
       folders: [],
-      markers: [{ id: 99, time: 40, label: 'Persisted' }],
+      markers: [{ id: 99, time: 40, label: 'Persisted', enabled: true }],
     };
 
     let nextMarkerId = 100;
     const sortMarkers = () => db.markers.sort((left, right) => left.time - right.time || left.id - right.id);
-    const clone = (marker) => ({ id: marker.id, time: marker.time, label: marker.label });
+    const clone = (marker) => ({ id: marker.id, time: marker.time, label: marker.label, enabled: marker.enabled !== false });
     const session = {
       fileName: 'fixture.sqlite',
       data: db,
@@ -83,6 +84,7 @@ try {
           id: Number.isInteger(input.id) ? input.id : nextMarkerId,
           time: input.time,
           label: input.label ?? '',
+          enabled: input.enabled ?? true,
         };
         nextMarkerId = Math.max(nextMarkerId, marker.id + 1);
         db.markers.push(marker);
@@ -94,6 +96,7 @@ try {
         if (!marker) throw new Error(`Missing marker ${markerId}`);
         if (Object.hasOwn(input, 'time')) marker.time = input.time;
         if (Object.hasOwn(input, 'label')) marker.label = input.label;
+        if (Object.hasOwn(input, 'enabled')) marker.enabled = input.enabled;
         sortMarkers();
         return marker;
       },
@@ -264,6 +267,16 @@ try {
     window.__markerFixture.sent.length = 0;
   });
   await clickRulerAt(5, 'lower');
+  const immediateLoopStartSeek = await page.evaluate(() => window.__markerFixture.sent.some((message) => (
+    message.type === 'runtime.seek' && Math.abs(message.time - 4) < 0.001
+  )));
+  if (!immediateLoopStartSeek) {
+    throw new Error('Expected loop activation to seek to its start before Phoenix acknowledged the loop.');
+  }
+  const immediatePlayheadTime = await page.locator('.timeline-panel__playhead').evaluate((node) => (
+    Number.parseFloat(node.style.left) / 88
+  ));
+  expectClose(immediatePlayheadTime, 4, 'immediate loop activation playhead', 0.01);
   await page.waitForSelector('.timeline-panel__loop-range');
   await page.waitForFunction(() => window.__markerFixture.sent.some((message) => (
     message.type === 'runtime.seek' && Math.abs(message.time - 4) < 0.001
@@ -282,6 +295,138 @@ try {
   }));
   expectClose(loop.left / 88, 4, 'lower-zone loop start');
   expectClose((loop.left + loop.width) / 88, 7, 'lower-zone loop end');
+
+  await page.evaluate(() => {
+    window.__markerFixture.emitRuntime({
+      time: 6.95,
+      playing: true,
+      fps: 60,
+      startTime: 4,
+      endTime: 7,
+      receivedAt: Date.now(),
+    });
+  });
+  await page.waitForTimeout(250);
+  const wrappedPlaybackTime = Number.parseFloat(await page.locator('.timeline-panel__playhead span').innerText());
+  if (wrappedPlaybackTime < 4 || wrappedPlaybackTime >= 7) {
+    throw new Error(`Expected interpolated playback time to stay inside [4, 7), got ${wrappedPlaybackTime}`);
+  }
+
+  await page.evaluate(() => {
+    window.__markerFixture.emitRuntime({
+      time: 5,
+      playing: false,
+      fps: 60,
+      startTime: 4,
+      endTime: 7,
+      receivedAt: Date.now(),
+    });
+  });
+  await clickRulerAt(6, 'lower', { modifiers: ['Shift'] });
+  await page.waitForFunction(() => window.__markerFixture.db.markers.some((candidate) => Math.abs(candidate.time - 6) < 0.15));
+  await page.waitForFunction(() => {
+    const range = document.querySelector('.timeline-panel__loop-range');
+    if (!(range instanceof HTMLElement)) return false;
+    const left = Number.parseFloat(range.style.left) / 88;
+    const end = (Number.parseFloat(range.style.left) + Number.parseFloat(range.style.width)) / 88;
+    return Math.abs(left - 4) < 0.15 && Math.abs(end - 6) < 0.15;
+  });
+  await page.evaluate(() => window.__markerFixture.undoManager.undo());
+  await page.waitForFunction(() => window.__markerFixture.db.markers.length === 2);
+
+  await page.evaluate(() => {
+    window.__markerFixture.emitRuntime({
+      time: 6,
+      playing: false,
+      fps: 60,
+      startTime: 4,
+      endTime: 7,
+      receivedAt: Date.now(),
+    });
+  });
+  await clickRulerAt(5, 'lower', { modifiers: ['Shift'] });
+  await page.waitForFunction(() => window.__markerFixture.db.markers.some((candidate) => Math.abs(candidate.time - 5) < 0.15));
+  await page.waitForFunction(() => {
+    const range = document.querySelector('.timeline-panel__loop-range');
+    if (!(range instanceof HTMLElement)) return false;
+    const left = Number.parseFloat(range.style.left) / 88;
+    const end = (Number.parseFloat(range.style.left) + Number.parseFloat(range.style.width)) / 88;
+    return Math.abs(left - 5) < 0.15 && Math.abs(end - 7) < 0.15;
+  });
+  await page.evaluate(() => window.__markerFixture.undoManager.undo());
+  await page.waitForFunction(() => window.__markerFixture.db.markers.length === 2);
+  await page.waitForFunction(() => {
+    const range = document.querySelector('.timeline-panel__loop-range');
+    if (!(range instanceof HTMLElement)) return false;
+    const left = Number.parseFloat(range.style.left) / 88;
+    const end = (Number.parseFloat(range.style.left) + Number.parseFloat(range.style.width)) / 88;
+    return Math.abs(left - 4) < 0.15 && Math.abs(end - 7) < 0.15;
+  });
+
+  const enabledCheckbox = page.getByLabel('Enabled');
+  await enabledCheckbox.uncheck();
+  await page.waitForFunction(() => window.__markerFixture.db.markers.find((marker) => marker.id === 1)?.enabled === false);
+  await page.waitForFunction(() => {
+    const range = document.querySelector('.timeline-panel__loop-range');
+    if (!(range instanceof HTMLElement)) return false;
+    return Math.abs(Number.parseFloat(range.style.left)) < 0.001
+      && Math.abs(Number.parseFloat(range.style.width) / 88 - 7) < 0.15;
+  });
+  await page.waitForSelector('.timeline-panel__loop-marker[data-marker-id="1"].is-disabled');
+  const disabledAnimation = await page.locator('.timeline-panel__loop-guide[data-marker-guide-id="1"]')
+    .evaluate((node) => getComputedStyle(node, '::after').animationName);
+  if (disabledAnimation !== 'none') {
+    throw new Error(`Expected disabled marker animation to be none, got ${disabledAnimation}`);
+  }
+  await enabledCheckbox.check();
+  await page.waitForFunction(() => window.__markerFixture.db.markers.find((marker) => marker.id === 1)?.enabled === true);
+
+  await clickRulerAt(5, 'lower');
+  const movedMarker = page.locator('.timeline-panel__loop-marker[data-marker-id="1"]');
+  const movedMarkerBox = await movedMarker.boundingBox();
+  if (!movedMarkerBox) throw new Error('Missing marker before active-loop move');
+  await page.mouse.move(movedMarkerBox.x + movedMarkerBox.width / 2, movedMarkerBox.y + movedMarkerBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(movedMarkerBox.x + movedMarkerBox.width / 2 - 88, movedMarkerBox.y + movedMarkerBox.height / 2, { steps: 4 });
+  await page.mouse.up();
+  await page.waitForFunction(() => Math.abs(window.__markerFixture.db.markers.find((marker) => marker.id === 1)?.time - 3) < 0.15);
+  await page.waitForFunction(() => {
+    const range = document.querySelector('.timeline-panel__loop-range');
+    if (!(range instanceof HTMLElement)) return false;
+    const left = Number.parseFloat(range.style.left) / 88;
+    const end = (Number.parseFloat(range.style.left) + Number.parseFloat(range.style.width)) / 88;
+    return Math.abs(left - 3) < 0.15 && Math.abs(end - 7) < 0.15;
+  });
+
+  await page.locator('.panel--timeline').focus();
+  await page.keyboard.press('Delete');
+  await page.waitForFunction(() => !window.__markerFixture.db.markers.some((marker) => marker.id === 1));
+  await page.waitForFunction(() => {
+    const range = document.querySelector('.timeline-panel__loop-range');
+    if (!(range instanceof HTMLElement)) return false;
+    return Math.abs(Number.parseFloat(range.style.left)) < 0.001
+      && Math.abs(Number.parseFloat(range.style.width) / 88 - 7) < 0.15;
+  });
+
+  await page.evaluate(() => window.__markerFixture.undoManager.undo());
+  await page.waitForFunction(() => window.__markerFixture.db.markers.some((marker) => marker.id === 1));
+  await page.waitForFunction(() => {
+    const range = document.querySelector('.timeline-panel__loop-range');
+    if (!(range instanceof HTMLElement)) return false;
+    const left = Number.parseFloat(range.style.left) / 88;
+    const end = (Number.parseFloat(range.style.left) + Number.parseFloat(range.style.width)) / 88;
+    return Math.abs(left - 3) < 0.15 && Math.abs(end - 7) < 0.15;
+  });
+
+  await page.evaluate(() => window.__markerFixture.undoManager.undo());
+  await page.waitForFunction(() => Math.abs(window.__markerFixture.db.markers.find((marker) => marker.id === 1)?.time - 4) < 0.15);
+  await page.waitForFunction(() => {
+    const range = document.querySelector('.timeline-panel__loop-range');
+    if (!(range instanceof HTMLElement)) return false;
+    const left = Number.parseFloat(range.style.left) / 88;
+    const end = (Number.parseFloat(range.style.left) + Number.parseFloat(range.style.width)) / 88;
+    return Math.abs(left - 4) < 0.15 && Math.abs(end - 7) < 0.15;
+  });
 
   await page.evaluate(() => {
     window.__markerFixture.emitRuntime({

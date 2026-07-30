@@ -5,8 +5,16 @@ export interface TimelineLoopInterval {
   endTime: number;
 }
 
+export function wrapTimeWithinLoop(time: number, loop: TimelineLoopInterval): number {
+  const duration = loop.endTime - loop.startTime;
+  if (!Number.isFinite(time) || !Number.isFinite(duration) || duration <= 0) return time;
+  if (time < loop.startTime) return loop.startTime;
+  if (time < loop.endTime) return time;
+  return loop.startTime + ((time - loop.startTime) % duration);
+}
+
 export function computeLoopIntervalFromMarkers(
-  markers: Pick<DbMarker, 'time'>[],
+  markers: Array<Pick<DbMarker, 'time'> & Partial<Pick<DbMarker, 'enabled'>>>,
   clickedTime: number,
   demoStart: number,
   demoEnd: number,
@@ -16,6 +24,7 @@ export function computeLoopIntervalFromMarkers(
   }
 
   const sortedTimes = markers
+    .filter((marker) => marker.enabled !== false)
     .map((marker) => marker.time)
     .filter((time) => Number.isFinite(time) && time > demoStart && time < demoEnd)
     .sort((left, right) => left - right);

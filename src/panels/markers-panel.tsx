@@ -1,7 +1,7 @@
 import '@mantine/core/styles.css';
 
 import type { IContentRenderer } from 'dockview-core';
-import { Combobox, MantineProvider, NumberInput, ScrollArea, Text, TextInput, useCombobox } from '@mantine/core';
+import { Checkbox, Combobox, MantineProvider, NumberInput, ScrollArea, Text, TextInput, useCombobox } from '@mantine/core';
 import { createRoot, type Root } from 'react-dom/client';
 import { useEffect, useMemo, useState } from 'react';
 
@@ -149,6 +149,28 @@ function MarkersPanelView({ dbState, sessionRef, undoManager }: MarkersPanelView
     refresh();
   }
 
+  function commitEnabled(markerId: number, enabled: boolean): void {
+    const marker = findMarker(sessionRef, markerId);
+    const session = sessionRef.current;
+    if (!marker || !session || (marker.enabled !== false) === enabled) return;
+
+    const previous = { ...marker };
+    session.updateTimelineMarker(markerId, { enabled });
+    dbState.setDirty();
+    undoManager.push({
+      label: `${enabled ? 'Enable' : 'Disable'} marker ${markerId}`,
+      undo: async () => {
+        if (!sessionRef.current || !findMarker(sessionRef, markerId)) return;
+        sessionRef.current.updateTimelineMarker(markerId, previous);
+        dbState.setDirty();
+        notifyMarkersChanged({ reconcileActiveLoop: previous.enabled === false });
+        refresh();
+      },
+    });
+    notifyMarkersChanged({ reconcileActiveLoop: !enabled });
+    refresh();
+  }
+
   return (
     <section className="markers-panel">
       <TextInput
@@ -169,6 +191,7 @@ function MarkersPanelView({ dbState, sessionRef, undoManager }: MarkersPanelView
                 <Combobox.Option
                   active={marker.id === selectedMarkerId}
                   className="markers-panel__option"
+                  data-marker-enabled={marker.enabled !== false}
                   data-marker-option-id={marker.id}
                   key={marker.id}
                   value={String(marker.id)}
@@ -199,6 +222,7 @@ function MarkersPanelView({ dbState, sessionRef, undoManager }: MarkersPanelView
             />
             <NumberInput
               key={`time-${selectedMarker.id}-${selectedMarker.time}`}
+              decimalScale={3}
               defaultValue={selectedMarker.time}
               label="Time"
               min={0}
@@ -207,7 +231,13 @@ function MarkersPanelView({ dbState, sessionRef, undoManager }: MarkersPanelView
                 if (event.key === 'Enter') event.currentTarget.blur();
               }}
               size="xs"
-              step={0.1}
+              step={0.001}
+            />
+            <Checkbox
+              checked={selectedMarker.enabled !== false}
+              label="Enabled"
+              onChange={(event) => commitEnabled(selectedMarker.id, event.currentTarget.checked)}
+              size="xs"
             />
           </>
         ) : (
@@ -222,8 +252,8 @@ function findMarker(sessionRef: DbSessionRef, markerId: number): DbMarker | null
   return sessionRef.current?.data.markers.find((marker) => marker.id === markerId) ?? null;
 }
 
-function notifyMarkersChanged(): void {
-  window.dispatchEvent(new CustomEvent('cacablu:timeline-markers-changed'));
+function notifyMarkersChanged(detail?: { reconcileActiveLoop?: boolean }): void {
+  window.dispatchEvent(new CustomEvent('cacablu:timeline-markers-changed', { detail }));
 }
 
 function compareMarkers(left: DbMarker, right: DbMarker): number {

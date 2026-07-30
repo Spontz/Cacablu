@@ -88,6 +88,39 @@ describe('DbSession markers', () => {
     session.close();
   });
 
+  it('stores marker times with at most three decimal places', async () => {
+    const handle = new MemoryFileHandle(await createLegacyProjectBytes()) as unknown as FileSystemFileHandle;
+    const session = await openDbSession(handle);
+
+    const marker = session.insertTimelineMarker({ time: 1.23456, label: 'Precise' });
+    expect(marker.time).toBe(1.235);
+    expect(session.getTableSnapshot('MARKERS').rows).toContainEqual({
+      id: marker.id,
+      time: 1.235,
+      label: 'Precise',
+      enabled: 1,
+    });
+
+    session.updateTimelineMarker(marker.id, { time: 9.87654 });
+    expect(marker.time).toBe(9.877);
+    expect(session.getTableSnapshot('MARKERS').rows).toContainEqual({
+      id: marker.id,
+      time: 9.877,
+      label: 'Precise',
+      enabled: 1,
+    });
+
+    session.updateTimelineMarker(marker.id, { enabled: false });
+    expect(marker.enabled).toBe(false);
+    expect(session.getTableSnapshot('MARKERS').rows[0]?.enabled).toBe(0);
+    await session.save();
+    session.close();
+
+    const reopened = await openDbSession(handle);
+    expect(reopened.data.markers[0]?.enabled).toBe(false);
+    reopened.close();
+  });
+
   it('renames lowercase marker tables to uppercase MARKERS while preserving rows', async () => {
     const handle = new MemoryFileHandle(await createLowercaseMarkersProjectBytes()) as unknown as FileSystemFileHandle;
     const session = await openDbSession(handle);
@@ -96,10 +129,10 @@ describe('DbSession markers', () => {
     expect(session.getTableNames()).not.toContain('markers');
     expect(session.getTableSnapshot('MARKERS')).toEqual({
       name: 'MARKERS',
-      columns: ['id', 'time', 'label'],
-      rows: [{ id: 1, time: 12.5, label: 'legacy' }],
+      columns: ['id', 'time', 'label', 'enabled'],
+      rows: [{ id: 1, time: 12.5, label: 'legacy', enabled: 1 }],
     });
-    expect(session.data.markers).toEqual([{ id: 1, time: 12.5, label: 'legacy' }]);
+    expect(session.data.markers).toEqual([{ id: 1, time: 12.5, label: 'legacy', enabled: true }]);
     session.close();
   });
 });

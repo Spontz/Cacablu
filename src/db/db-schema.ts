@@ -47,6 +47,7 @@ export interface DbMarker {
   id: number;
   time: number;
   label: string;
+  enabled: boolean;
 }
 
 export interface ProjectDatabase {
