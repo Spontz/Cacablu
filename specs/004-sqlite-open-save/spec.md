@@ -133,6 +133,12 @@ As a user, I want the app to make file access limits clear so that I understand 
 - **FR-019**: The system MUST handle an empty or absent BARS table gracefully by showing an empty timeline without errors.
 - **FR-020**: The system MUST retain the database `id` of each BARS row in the in-memory representation of every timeline bar so that future edits can be written back to the correct row in the database.
 - **FR-021**: Save and Save As MUST preserve which Pool folders are expanded; this UI state MUST only reset when the active project is closed or a different project starts opening.
+- **FR-022**: The project schema MUST persist timeline markers with id, time,
+  label, and enabled state.
+- **FR-023**: Opening a project with a legacy `MARKERS` table lacking `enabled`
+  MUST add the column with enabled-by-default semantics while preserving rows.
+- **FR-024**: Marker insert and update operations MUST store times normalized to
+  at most three decimal places.
 
 ### Key Entities *(include if feature involves data)*
 
@@ -141,6 +147,8 @@ As a user, I want the app to make file access limits clear so that I understand 
 - **Save Status**: The visible state of whether the active database is synchronized, pending save, or failed to save.
 - **File Access Permission**: The browser-granted ability to read from or write to the selected local file.
 - **Timeline Bar**: A visual block in the timeline derived from a BARS row, positioned by `startTime`/`endTime`, placed on the track given by `layer`, and labelled with `type`.
+- **Timeline Marker**: A persisted loop boundary derived from a MARKERS row,
+  including stable id, millisecond-precision time, label, and enabled state.
 
 ### Database Schema
 
@@ -199,6 +207,21 @@ Known keys and their meaning:
 
 ---
 
+#### `MARKERS` — Timeline loop boundaries
+
+| Column    | Type    | Constraints                      | Description                                |
+|-----------|---------|----------------------------------|--------------------------------------------|
+| `id`      | INTEGER | PRIMARY KEY                      | Stable marker identifier                   |
+| `time`    | REAL    | NOT NULL; max 3 decimal places   | Marker position in seconds                 |
+| `label`   | TEXT    | NOT NULL; default empty string   | User-visible marker label                  |
+| `enabled` | INTEGER | NOT NULL; default `1`            | Whether marker participates in loop bounds |
+
+Legacy lowercase marker tables are migrated to canonical `MARKERS`. Existing
+canonical tables without `enabled` gain the column with value `1` for existing
+rows.
+
+---
+
 #### `FBOs` — Framebuffer objects (render targets)
 
 | Column             | Type    | Constraints                    | Description                    |
@@ -251,6 +274,9 @@ Known keys and their meaning:
 - **SC-009**: Manual validation confirms the timeline clears and shows an empty state when a database with no BARS rows is opened.
 - **SC-006**: Project lint, typecheck, and build checks complete without new errors for the file open/save feature.
 - **SC-010**: Automated Edge browser validation confirms that an expanded Pool folder and its children remain visible across the `saving` to `open` state transition.
+- **SC-011**: Database tests prove legacy marker tables migrate without row loss,
+  new markers default to enabled, disabled state survives save/reopen, and marker
+  times are stored with at most three decimal places.
 
 ## Assumptions
 

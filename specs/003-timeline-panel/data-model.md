@@ -86,6 +86,24 @@
 - Disabled or locked clips remain visible but must be handled as non-editable in
   interaction logic where applicable.
 
+## TimelineMarker
+
+- `id`: stable project-database identifier
+- `time`: marker position in seconds, normalized to at most three decimals
+- `label`: editable display label
+- `enabled`: whether the marker participates in loop-boundary calculation
+
+### Validation Rules
+
+- Marker time must be finite and is stored with millisecond precision.
+- Disabled markers remain visible but do not partition loop intervals.
+- Marker order is ascending by time, with id as a stable tie-breaker.
+- The active loop is bounded by adjacent enabled markers or demo start/end.
+- Creating a marker inside an active loop chooses the resulting side using
+  current playback time; without an active loop, creation changes no loop state.
+- Disabling, moving, deleting, and undoing marker mutations reconcile an active
+  loop against the updated enabled-marker order.
+
 ## TimelinePropertyChannel
 
 - `id`: stable channel identifier
@@ -158,3 +176,5 @@
 - Transport actions update current time and playback state.
 - Editing actions update clip or track geometry and selection state.
 - Zoom actions update viewport scale and may preserve the focal point.
+- Active-loop playback wraps current time into `[loop.start, loop.end)` both for
+  local interpolation and incoming runtime state.

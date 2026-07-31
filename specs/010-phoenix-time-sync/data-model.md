@@ -68,8 +68,15 @@ Fields:
 - `currentTime`: mirrors `PhoenixRuntimeState.time`
 - `duration`: mirrors Phoenix end time when valid, otherwise local timeline duration
 - `isPlaying`: mirrors `PhoenixRuntimeState.playing`
+- `activeLoop`: optional `{ startTime, endTime }` selected from enabled timeline markers
 
 Rules:
 
 - Incoming Phoenix runtime state wins over local animation while connected.
 - Local fallback state may remain visible while disconnected.
+- With an active loop, both incoming runtime time and locally interpolated time
+  are normalized to `[startTime, endTime)`; reaching `endTime` wraps to
+  `startTime`, and stale values before the loop clamp to `startTime`.
+- Activating a loop projects `currentTime` to its start immediately, sends an
+  immediate `runtime.seek`, and confirms the same seek after the runtime-loop
+  request is acknowledged.
