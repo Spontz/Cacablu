@@ -52,6 +52,10 @@ Users can paste internal items or drop external files directly into the Pool roo
 3. **Given** replacement is cancelled, **When** the dialog closes, **Then** the existing file, dirty state, Phoenix state, and referencing bars remain unchanged.
 4. **Given** replacement is confirmed, **When** the import completes, **Then** Cacablu updates the existing file content while preserving its id, path, parent, and enabled state.
 5. **Given** a same-name folder exists, **When** an external file is dropped, **Then** Cacablu reports the non-replaceable conflict and performs no mutation.
+6. **Given** an internal Pool drag previously ended without a delivered
+   `dragend`, **When** an operating-system file is dropped on any Pool folder,
+   **Then** the external file is imported into that exact folder and no stale
+   internal item is moved.
 
 ### User Story 4 - Move Selected Pool Items By Dragging (Priority: P1)
 
@@ -93,6 +97,11 @@ Users can drag files or folders inside the Pool and move the complete canonical 
 - **FR-019**: A same-name file MUST require an explicit Replace confirmation; cancellation MUST be side-effect free.
 - **FR-020**: Confirmed replacement MUST update the existing database file content and metadata without changing its id, path, parent, name, or enabled state.
 - **FR-021**: A folder conflict MUST be reported and MUST NOT be converted, deleted, or replaced by the imported file.
+- **FR-022**: A drop whose data transfer advertises operating-system files MUST
+  take precedence over cached internal Pool drag payloads.
+- **FR-023**: Internal drag state and visual drag classes MUST be cleared after
+  every handled drop and by document-level drag termination, without relying on
+  the original dragged row remaining mounted.
 
 ## Success Criteria
 
@@ -102,6 +111,9 @@ Users can drag files or folders inside the Pool and move the complete canonical 
 - **SC-004**: Edge Playwright verifies multi-file drag, preserved selection, folder-subtree drag, inner-folder drop targets, and single-step Undo.
 - **SC-005**: Native Selenium Edge validation against an actual SQLite project confirms that a folder can be moved into another folder by pointer drag.
 - **SC-006**: Edge browser validation confirms both Cancel and Replace paths for a duplicate external file and proves replacement preserves file identity.
+- **SC-007**: Browser regression primes a stale internal drag, drops distinct
+  external GLSL files into two Pool folders, and proves both files are imported
+  while the stale internal file remains in its original parent.
 
 ## Assumptions
 

@@ -114,6 +114,43 @@ verify that the panel can represent them without breaking the existing view.
    **Then** the timeline can identify which property values are active at that
    time.
 
+---
+
+### User Story 5 - Manage Loop Markers (Priority: P1)
+
+As a user, I want persistent, editable loop markers so that I can define and
+adjust playback intervals directly from the Timeline.
+
+**Independent Test**: Create markers, edit their properties, activate a loop,
+then disable, move, delete, create, and undo marker mutations while verifying
+the active loop and playhead remain consistent.
+
+**Acceptance Scenarios**:
+
+1. **Given** a marker is selected, **When** its properties are shown, **Then**
+   its label, time, and Enabled checkbox are editable and its time contains no
+   more than three decimal places.
+2. **Given** a marker is disabled, **When** Timeline renders, **Then** the marker
+   and guide are gray, have no animation, and are ignored as loop boundaries.
+3. **Given** the user clicks the loop area between enabled markers, **When** the
+   loop activates, **Then** its boundaries are the nearest enabled markers or
+   the demo start/end and current time seeks immediately to the loop start.
+4. **Given** an active loop uses a marker boundary, **When** that marker is
+   disabled or deleted, **Then** the loop expands to the nearest enabled marker
+   or corresponding demo boundary.
+5. **Given** an active loop and a marker is moved, **When** the move commits,
+   **Then** the loop is recomputed from the remaining enabled marker order.
+6. **Given** an active loop between two markers, **When** a new marker is
+   created between them, **Then** the current playback time selects which side
+   remains active: first-to-new or new-to-last.
+7. **Given** no active loop, **When** a marker is created, **Then** no loop is
+   implicitly activated.
+8. **Given** a marker mutation is undone, **When** the prior marker state is
+   restored, **Then** the active loop is reconciled again.
+9. **Given** playback reaches or passes the active loop end between Phoenix
+   runtime updates, **When** the local playhead is interpolated, **Then** it
+   wraps to the loop start and never renders outside the active interval.
+
 ### Edge Cases
 
 - What happens when the timeline is zoomed in so far that clips become wider
@@ -127,6 +164,11 @@ verify that the panel can represent them without breaking the existing view.
   scroll rather than zoom?
 - What happens when native scrollbar pointer events target the same viewport
   element that owns lane editing interactions?
+- What happens when all markers inside the demo are disabled or deleted while a
+  loop is active?
+- What happens when a moved marker crosses another loop boundary?
+- What happens when a delayed Phoenix runtime update reports a time outside the
+  currently active loop?
 
 ## Requirements *(mandatory)*
 
@@ -179,6 +221,33 @@ verify that the panel can represent them without breaking the existing view.
 - **FR-022**: Native horizontal or vertical scrollbar interaction MUST be
   navigation-only and MUST NOT initiate lane selection, bar creation, bar
   movement, playhead scrubbing, or a Phoenix runtime seek.
+- **FR-023**: Timeline markers MUST persist a stable id, label, time, and enabled
+  state in the project database.
+- **FR-024**: Marker times MUST be normalized to at most three decimal places on
+  creation and update, and the marker property editor MUST enforce the same
+  precision.
+- **FR-025**: Marker properties MUST expose an Enabled checkbox.
+- **FR-026**: Disabled markers MUST remain visible in gray without guide
+  animation and MUST NOT participate in loop-boundary selection.
+- **FR-027**: Activating a loop from the ruler loop area MUST choose the nearest
+  enabled marker before and after the clicked time, falling back to demo start
+  or end.
+- **FR-028**: Loop activation MUST set local current time and send Phoenix seek
+  commands to the new loop start, including an immediate seek before loop
+  acknowledgement and a confirmation after acknowledgement.
+- **FR-029**: Disabling or deleting a marker while a loop is active MUST
+  reconcile the loop to the nearest remaining enabled boundaries or demo
+  bounds.
+- **FR-030**: Moving a marker while a loop is active MUST reconcile the loop
+  after the committed move.
+- **FR-031**: Creating a marker inside an active loop MUST split that loop using
+  current playback time as the reference; marker creation MUST NOT activate a
+  loop when none exists.
+- **FR-032**: Undoing marker creation, movement, deletion, or enabled-state
+  changes MUST reconcile any active loop after restoring marker state.
+- **FR-033**: Local playhead interpolation and incoming Phoenix runtime times
+  MUST be normalized to the active loop so rendered current time remains within
+  `[loop.start, loop.end)`.
 
 ### Key Entities *(include if feature involves data)*
 
@@ -194,6 +263,8 @@ verify that the panel can represent them without breaking the existing view.
   property over time.
 - **Transport Control**: A playback action that changes the current time or
   playback state.
+- **Timeline Marker**: A persistent labeled time boundary with an enabled state;
+  enabled markers partition the demo into selectable loop intervals.
 
 ## Success Criteria *(mandatory)*
 
@@ -225,6 +296,12 @@ verify that the panel can represent them without breaking the existing view.
   the timeline scale beyond the earlier fixed limits in manual validation.
 - **SC-013**: A headed Edge regression moves the native horizontal scrollbar
   while the playhead time remains byte-for-byte unchanged.
+- **SC-014**: Automated browser validation covers marker enable/disable styling,
+  active-loop adjustment after create/move/delete/Undo, and immediate seek to a
+  newly activated loop start.
+- **SC-015**: Playback started near a loop end keeps the rendered playhead within
+  the loop across multiple locally interpolated frames and delayed runtime
+  updates.
 
 ## Assumptions
 

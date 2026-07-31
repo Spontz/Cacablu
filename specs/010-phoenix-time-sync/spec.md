@@ -29,6 +29,12 @@ As a user, I want Cacablu to show the current Phoenix time so that the timeline 
 2. **Given** Phoenix is playing, **When** Phoenix streams runtime state, **Then** Cacablu moves the playhead dynamically using the streamed time.
 3. **Given** Phoenix is not connected, **When** the timeline panel loads, **Then** Cacablu remains usable and the existing toolbar connection indicator shows that Phoenix is disconnected.
 4. **Given** Phoenix is not connected, **When** the user views the transport bar, **Then** all five transport buttons are disabled.
+5. **Given** an active marker loop, **When** local interpolation or a delayed
+   Phoenix runtime message reaches the loop end, **Then** the visible current
+   time wraps into the active loop instead of rendering to its right.
+6. **Given** the user activates a marker loop, **When** Phoenix takes time to
+   acknowledge the loop update, **Then** Cacablu seeks to the loop start
+   immediately and confirms that seek after acknowledgement.
 
 ---
 
@@ -94,6 +100,12 @@ As a user, I want Cacablu to show whether Phoenix is connected so that I underst
 - **FR-015**: The system MUST disable all five transport buttons while Phoenix is disconnected, connecting, or in an error state.
 - **FR-016**: The system MUST preserve the existing browser-only/static deployment model and MUST NOT add a Cacablu backend.
 - **FR-017**: The system MUST keep the existing engine data export workflow separate from live Phoenix transport control.
+- **FR-018**: While a marker loop is active, local runtime interpolation and
+  streamed Phoenix time MUST remain within `[loop.start, loop.end)` by wrapping
+  at the loop end and clamping stale values before the loop to its start.
+- **FR-019**: Activating a runtime loop MUST send an immediate seek to its start
+  and repeat that seek after Phoenix acknowledges the loop update so an
+  in-flight runtime state cannot restore the clicked time.
 
 ### Key Entities *(include if feature involves data)*
 
@@ -113,6 +125,10 @@ As a user, I want Cacablu to show whether Phoenix is connected so that I underst
 - **SC-005**: Stopping Phoenix while Cacablu is open does not crash the timeline panel.
 - **SC-006**: When Phoenix is disconnected, all five transport buttons are visibly disabled in manual validation.
 - **SC-007**: `npm run typecheck`, `npm run lint`, and `npm run build` complete without new errors after implementation.
+- **SC-008**: With loop acknowledgement deliberately delayed, browser automation
+  observes the loop-start seek and local playhead position before the response.
+- **SC-009**: Playback interpolated from just before a loop end never renders a
+  current time outside the active loop.
 
 ## Assumptions
 
