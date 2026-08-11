@@ -149,10 +149,17 @@ export async function openDbSession(handle: FileSystemFileHandle): Promise<DbSes
   const db = new SQL.Database(bytes);
   migrateDatabaseSchema(db);
   const data = readDatabase(db);
-  return makeSession(handle, db, data);
+  return makeSession(handle, db, data, bytes);
 }
 
-function makeSession(handle: FileSystemFileHandle, db: SqlDatabase, data: ProjectDatabase): DbSession {
+function makeSession(
+  handle: FileSystemFileHandle,
+  db: SqlDatabase,
+  data: ProjectDatabase,
+  persistedBytes: Uint8Array,
+): DbSession {
+  let lastPersistedBytes = persistedBytes;
+
   return {
     get fileName() {
       return handle.name;
@@ -826,24 +833,34 @@ function makeSession(handle: FileSystemFileHandle, db: SqlDatabase, data: Projec
 
     async save(): Promise<void> {
       // .slice() copies the WASM-backed buffer into a plain ArrayBuffer
-      const blob = new Blob([serializeDatabase(db).slice()]);
+      const serialized = serializeDatabase(db).slice();
+      if (byteArraysEqual(serialized, lastPersistedBytes)) return;
+
+      const blob = new Blob([serialized]);
       const writable = await handle.createWritable();
       await writable.write(blob);
       await writable.close();
+      lastPersistedBytes = serialized;
     },
 
     async saveAs(newHandle: FileSystemFileHandle): Promise<DbSession> {
-      const blob = new Blob([serializeDatabase(db).slice()]);
+      const serialized = serializeDatabase(db).slice();
+      const blob = new Blob([serialized]);
       const writable = await newHandle.createWritable();
       await writable.write(blob);
       await writable.close();
-      return makeSession(newHandle, db, data);
+      return makeSession(newHandle, db, data, serialized);
     },
 
     close(): void {
       db.close();
     },
   };
+}
+
+function byteArraysEqual(left: Uint8Array, right: Uint8Array): boolean {
+  if (left.byteLength !== right.byteLength) return false;
+  return left.every((value, index) => value === right[index]);
 }
 
 export function validateResourceItemName(

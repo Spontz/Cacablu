@@ -25,6 +25,7 @@ import { captureAssetRoots } from '../../src/resources/asset-clipboard';
 
 class MemoryFileHandle {
   readonly name = 'project.sqlite';
+  writeCount = 0;
 
   constructor(private bytes: Uint8Array) {}
 
@@ -35,12 +36,33 @@ class MemoryFileHandle {
   async createWritable(): Promise<{ write: (blob: Blob) => Promise<void>; close: () => Promise<void> }> {
     return {
       write: async (blob: Blob) => {
+        this.writeCount += 1;
         this.bytes = new Uint8Array(await blob.arrayBuffer());
       },
       close: async () => {},
     };
   }
 }
+
+describe('DbSession saving', () => {
+  it('does not rewrite an unchanged database on consecutive saves', async () => {
+    const memoryHandle = new MemoryFileHandle(await createLegacyProjectBytes());
+    const handle = memoryHandle as unknown as FileSystemFileHandle;
+    const session = await openDbSession(handle);
+
+    session.updateCell('custom_debug', 1, 'note', 'Changed demo');
+    await session.save();
+    await session.save();
+
+    expect(memoryHandle.writeCount).toBe(1);
+
+    session.updateCell('custom_debug', 1, 'note', 'Changed again');
+    await session.save();
+
+    expect(memoryHandle.writeCount).toBe(2);
+    session.close();
+  });
+});
 
 describe('DbSession markers', () => {
   it('migrates old databases and persists marker CRUD changes', async () => {
