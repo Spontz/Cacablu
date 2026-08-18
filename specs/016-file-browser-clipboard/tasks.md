@@ -38,8 +38,17 @@
 
 ## Cross-Editor Drag Copies
 
-- [ ] T022 Publish a self-contained bounded Pool subtree snapshot and source-editor identity in drag data.
-- [ ] T023 Distinguish same-editor move from cross-editor copy and allocate destination-owned ids for copied batches.
-- [ ] T024 Reuse root/folder/file-parent destinations, atomic conflicts, one destination Undo action, and destination-only Phoenix reconciliation.
-- [ ] T025 Preserve normalized `/pool/...` path insertion for editable drop targets.
+- [x] T022 Publish a self-contained bounded Pool subtree snapshot and source-editor identity in drag data.
+- [x] T023 Distinguish same-editor move from cross-editor copy and allocate destination-owned ids for copied batches.
+- [x] T024 Reuse root/folder/file-parent destinations, atomic conflicts, one destination Undo action, and destination-only Phoenix reconciliation.
+- [x] T025 Preserve normalized `/pool/...` path insertion for editable drop targets.
 - [ ] T026 Add two-window browser coverage for file, multi-root, nested-folder, stripped payload, conflicts, source preservation, Undo, and editable path drops.
+- [x] T027 Add source-session identity to Pool drag routing so only an exact editor/session match can move original ids.
+- [x] T028 Add unit regression coverage for different project sessions with overlapping resource ids in `tests/unit/resource-drag-origin.test.ts`.
+
+## Latest Validation
+
+- `npm run typecheck`: passed.
+- Focused drag-origin, cross-project clipboard, and resource-tree tests: 9 passed.
+- `npm run build`: passed with pre-existing non-blocking bundle warnings.
+- Two-window cross-editor drag regression: pending (T026).

@@ -14,6 +14,7 @@ import { buildResourceTree, type ResourceTreeNode } from '../resources/resource-
 import type { AssetClipboard, AssetClipboardNode } from '../resources/asset-clipboard';
 import {
   buildResourcePath,
+  captureAssetRoots,
   canonicalizeSelection,
   normalizePoolPath,
   pendingCutKeys,
@@ -37,10 +38,13 @@ import {
 import { writeSystemClipboardText } from '../resources/system-clipboard';
 import {
   createPoolClipboardEnvelope,
+  poolClipboardRootsToAssetNodes,
+  readEnvelopeFromDataTransfer,
   writeEnvelopeToDataTransfer,
   writeEnvelopeToSystemClipboard,
 } from '../services/cross-project-clipboard';
 import { ASSET_FILE_DRAG_TYPE } from '../resources/pool-path-drop';
+import { getResourceDragOrigin, isResourceDragFromSession } from '../resources/resource-drag-origin';
 import { createMenuIcon } from '../menu/menu-icon';
 import { createContentRenderer } from './base-panel';
 
@@ -412,6 +416,23 @@ export function createResourcesPanel(
       const assetMove = isExternalFileDrop
         ? null
         : getAssetDrag(event.dataTransfer) ?? draggingAssetItems;
+      const destinationSession = sessionRef.current;
+      const isCrossTabDrag = Boolean(
+        assetMove && (!destinationSession || !isResourceDragFromSession(assetMove, destinationSession)),
+      );
+      let crossTabRoots: AssetClipboardNode[] | null = null;
+      if (!isExternalFileDrop && isCrossTabDrag) {
+        try {
+          const envelope = readEnvelopeFromDataTransfer(event.dataTransfer);
+          if (envelope?.kind === 'pool') {
+            crossTabRoots = poolClipboardRootsToAssetNodes(envelope.payload);
+          } else {
+            setSyncStatus('error', 'The dragged Pool items do not include transferable file data.');
+          }
+        } catch (error) {
+          setSyncStatus('error', error instanceof Error ? error.message : 'Could not read dragged Pool items.');
+        }
+      }
       clearAssetDragState();
 
       if (isExternalFileDrop) {
@@ -420,6 +441,11 @@ export function createResourcesPanel(
         }
         return;
       }
+      if (crossTabRoots) {
+        void pasteAssetClipboard(dropTarget.parentId, crossTabRoots);
+        return;
+      }
+      if (isCrossTabDrag) return;
       if (assetMove) {
         void moveAssetItems(dropTarget, assetMove);
         return;
@@ -439,6 +465,7 @@ export function createResourcesPanel(
         ? getAssetSelectionItems(selection)
         : [draggedItem];
       const payload: AssetDragPayload = {
+        ...getResourceDragOrigin(session),
         items: canonicalizeSelection(session.data, selectedItems).map((item) => ({
           kind: item.kind,
           id: item.id,
@@ -450,6 +477,10 @@ export function createResourcesPanel(
       const serialized = JSON.stringify(payload);
       draggingAssetItems = payload;
       event.dataTransfer.effectAllowed = 'copyMove';
+      writeEnvelopeToDataTransfer(
+        event.dataTransfer,
+        createPoolClipboardEnvelope(captureAssetRoots(session.data, selectedItems)),
+      );
       event.dataTransfer.setData(ASSET_FILE_DRAG_TYPE, serialized);
       event.dataTransfer.setData('text/plain', normalizePoolPath(
         payload.items.find((item) => item.kind === 'file')?.sourcePath ?? payload.items[0].sourcePath,
@@ -1385,6 +1416,8 @@ interface AssetDragItem {
 }
 
 interface AssetDragPayload {
+  sourceId?: string;
+  sourceSessionId?: string;
   items: AssetDragItem[];
 }
 
@@ -1453,7 +1486,13 @@ function getAssetDrag(dataTransfer: DataTransfer): AssetDragPayload | null {
       && typeof item.name === 'string'
       && typeof item.sourcePath === 'string',
     ));
-    return items.length === candidates.length && items.length > 0 ? { items } : null;
+    return items.length === candidates.length && items.length > 0
+      ? {
+          items,
+          sourceId: typeof payload.sourceId === 'string' ? payload.sourceId : undefined,
+          sourceSessionId: typeof payload.sourceSessionId === 'string' ? payload.sourceSessionId : undefined,
+        }
+      : null;
   } catch {
     return null;
   }

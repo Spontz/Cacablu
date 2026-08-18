@@ -48,5 +48,6 @@ tests/unit/
 8. Preserve moved selection, register one inverse Undo command, reconcile Phoenix after commit, and verify both synthetic and native Edge pointer flows.
 9. Detect external import conflicts case-insensitively, reject folder conflicts, and show a modal Cancel/Replace choice for file conflicts before mutation.
 10. Replace only file content metadata so database identity and enabled state remain stable, then delegate ordered Phoenix publication to the asset-sync service.
-11. Publish a bounded recursive Pool snapshot plus source-editor identity at drag start; route a same-editor drop to atomic move and a different-editor drop to atomic copy with destination-owned ids.
+11. Publish a bounded recursive Pool snapshot plus source-editor and source-session identities at drag start; route only an exact editor/session match to atomic move and every foreign or changed session to atomic copy with destination-owned ids.
 12. Verify two-window file, multi-root, and folder drags, exact destinations, source preservation, conflicts, one-step destination Undo, editable path drops, and destination-only Phoenix reconciliation.
+13. Add a regression proving that overlapping numeric resource ids in different project sessions cannot route a cross-project drop through the local move path.

@@ -43,4 +43,5 @@
 
 ## Notes
 
-- Specification is ready for `/speckit.plan`.
+- The original feature and cross-editor drag implementation are complete.
+- Dedicated automated validation of drag-and-drop across two visible browser windows remains tracked by T048/T026.

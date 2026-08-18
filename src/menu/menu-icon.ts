@@ -27,6 +27,7 @@ const ICON_PATHS: Record<string, string> = {
   'bar-editor': 'M5 5h14v14H5z M10 9l-2 3 2 3M14 9l2 3-2 3',
   marker: 'M6 3v18M7 5h11l-3 4 3 4H7',
   events: 'M5 4h14v16H5z M8 8h8M8 12h8M8 16h5',
+  about: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z M12 10v6M12 7h.01',
   rename: 'M4 18h5l10-10-4-4L5 14z M13 6l4 4',
 };
 
@@ -46,6 +47,7 @@ const COMMAND_ICONS: Record<string, string> = {
   'select-all-bars': 'select-all',
   'reset-layout': 'close-panels',
   'toggle-db-explorer': 'database',
+  'toggle-about': 'about',
   'toggle-resources': 'folder',
   'toggle-timeline': 'timeline',
   'toggle-preview': 'preview',

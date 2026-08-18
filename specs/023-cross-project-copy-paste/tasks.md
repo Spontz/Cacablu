@@ -80,17 +80,26 @@ Follow-up validation: scoped ESLint, all 183 unit tests, production build, and t
 
 ## Closure
 
-- **Status**: Reopened for cross-editor Pool drag-and-drop
+- **Status**: Cross-editor Pool drag-and-drop implemented; two-window browser regression pending
 - **Closed**: 2026-07-21
-- **Result**: All planned and follow-up tasks are complete; automated unit, type, lint, build, and two-tab browser validations passed.
+- **Result**: The original Copy/Paste scope and its automated validations are complete. The cross-editor drag amendment is implemented and passes focused unit tests, typecheck, and production build; its dedicated two-window browser regression remains open.
 
 ## Amendment: Cross-Editor Pool Drag-And-Drop
 
-- [ ] T044 Extend Pool drag payloads with a self-contained versioned subtree snapshot and source-editor identity.
-- [ ] T045 Route same-editor drops to existing atomic move behavior and cross-editor Resources drops to atomic independent copy behavior.
-- [ ] T046 Support Pool root, folder row/interior, and containing-folder file destinations while preserving editable `/pool/...` path drops.
-- [ ] T047 Reuse cross-project validation, conflict rollback, one-batch Undo, and post-commit destination Phoenix reconciliation.
+- [x] T044 Extend Pool drag payloads with a self-contained versioned subtree snapshot and source-editor identity.
+- [x] T045 Route same-editor drops to existing atomic move behavior and cross-editor Resources drops to atomic independent copy behavior.
+- [x] T046 Support Pool root, folder row/interior, and containing-folder file destinations while preserving editable `/pool/...` path drops.
+- [x] T047 Reuse cross-project validation, conflict rollback, one-batch Undo, and post-commit destination Phoenix reconciliation.
 - [ ] T048 Add browser coverage using two visible Cacablu windows for file, multi-root, nested-folder, conflict, stripped-payload, source-preservation, Undo, and text-editor drops.
+- [x] T049 Add source-session identity to origin routing and prevent projects with overlapping Pool ids from entering the same-session move path.
+- [x] T050 Add focused unit regression coverage for exact-session, foreign-session, incomplete-origin, and foreign-editor classification.
+
+### Amendment Validation Results
+
+- `npm run typecheck`: passed.
+- Focused drag-origin, cross-project clipboard, and resource-tree validation: 3 files and 9 tests passed.
+- `npm run build`: passed; only the existing Mantine directive and bundle-size warnings were emitted.
+- Dedicated two-window drag-and-drop browser coverage: pending (T048).
 
 ## Dependencies & Execution Order
 

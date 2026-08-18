@@ -20,6 +20,7 @@ export function createDefaultMenuActions(): MenuActionDefinition[] {
     { id: 'select-all-bars', label: 'Select All', menu: 'Timeline', shortcut: { default: 'Ctrl+A', mac: '⌘A' } },
     { id: 'reset-layout', label: 'Close all panels', menu: 'Panels' },
     { id: 'panels-separator-close', label: '', menu: 'Panels', separator: true },
+    { id: 'toggle-about', label: 'About', menu: 'Panels' },
     { id: 'toggle-db-explorer', label: 'Database Explorer', menu: 'Panels' },
     { id: 'toggle-resources', label: 'Pool', menu: 'Panels' },
     { id: 'toggle-timeline', label: 'Timeline', menu: 'Panels' },

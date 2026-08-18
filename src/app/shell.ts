@@ -180,6 +180,9 @@ export function createAppShell(root: HTMLElement): AppShell {
         case 'toggle-db-explorer':
           workspace.openFloating('db-explorer', 'db-explorer-panel', 'Database Explorer');
           break;
+        case 'toggle-about':
+          workspace.openPanel('about');
+          break;
         case 'toggle-resources':
           workspace.openPanel('resources', { widthRatio: SIDE_PANEL_WIDTH_RATIO });
           break;

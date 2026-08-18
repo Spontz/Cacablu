@@ -7,6 +7,7 @@ import type { ConnectionController } from '../ws/connection';
 import type { UndoManager } from '../app/undo-manager';
 import type { AssetClipboard } from '../resources/asset-clipboard';
 import { createContentRenderer } from './base-panel';
+import { createAboutPanel } from './about-panel';
 import { createDbExplorerPanel } from './db-explorer-panel';
 import { createEventsPanel } from './events-panel';
 import { createInspectorPanel } from './inspector-panel';
@@ -34,6 +35,8 @@ export function createPanelRegistry(
   return {
     create(name: string): IContentRenderer {
       switch (name) {
+        case 'about-panel':
+          return createAboutPanel();
         case 'resources-panel':
           return createResourcesPanel(state, dbState, sessionRef, connection, undoManager, assetClipboard);
         case 'timeline-panel':

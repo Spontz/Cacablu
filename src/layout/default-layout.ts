@@ -2,6 +2,12 @@ import type { PanelDefinition } from '../app/types';
 
 export const DEFAULT_PANELS: PanelDefinition[] = [
   {
+    id: 'about',
+    title: 'About',
+    component: 'about-panel',
+    description: 'Build revision information.',
+  },
+  {
     id: 'resources',
     title: 'Pool',
     component: 'resources-panel',

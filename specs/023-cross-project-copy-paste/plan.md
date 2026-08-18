@@ -86,8 +86,9 @@ scripts/
 6. Allocate destination ids in SQLite, select the pasted batch, register conflict-safe Undo, refresh Timeline once, and publish eligible sections through existing sync.
 7. Let Resources accept decoded copy roots in addition to its same-tab in-memory clipboard. Preserve normal root/folder/file-parent destination rules and existing recursive atomic insert/Undo/sync behavior.
 8. Validate source-tab independence, repeated Paste, mismatched context, corruption, large/binary data, collision rollback, and connected/disconnected behavior.
-9. Publish the validated recursive Pool snapshot during drag start with source-instance metadata; route same-editor drops to the existing move path and cross-editor drops to the independent-copy path.
-10. Validate cross-editor file, multi-root, and nested-folder drops across separate browser windows, including exact destinations, source preservation, atomic conflicts, Undo, editable path drops, and Phoenix reconciliation.
+9. Publish the validated recursive Pool snapshot during drag start with per-page and per-session source ids; route only exact page/session matches to the existing move path and all other drops to the independent-copy path.
+10. Validate the implemented codec and routing with focused unit tests, typecheck, and production build.
+11. Add the remaining cross-editor browser regression for file, multi-root, and nested-folder drops across separate visible windows, including exact destinations, source preservation, atomic conflicts, stripped payloads, Undo, editable path drops, and Phoenix reconciliation.
 
 ## Complexity Tracking
 

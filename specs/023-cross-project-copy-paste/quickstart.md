@@ -20,6 +20,10 @@ Run two-tab browser validation:
 node scripts/playwright-cross-project-copy-paste-check.mjs
 ```
 
+This script validates cross-project clipboard workflows. The dedicated
+two-visible-window drag-and-drop regression described by T048 is still pending;
+use the manual steps below for the cross-editor drag amendment meanwhile.
+
 ## Manual Validation
 
 1. Open two Cacablu tabs with different copied project files.

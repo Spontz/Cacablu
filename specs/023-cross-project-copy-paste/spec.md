@@ -2,7 +2,7 @@
 
 **Feature Branch**: `023-cross-project-copy-paste`  
 **Created**: 2026-07-20  
-**Status**: Draft
+**Status**: Implemented; dedicated cross-editor browser regression pending
 **Reopened**: 2026-08-18 for cross-editor Pool drag-and-drop
 **Input**: User description: "Necesito poder copiar y pegar entre dos pestañas que tengan dos proyectos diferentes cargados barras con sus propiedades y carpetas y archivos del filesystem. En Timeline, el tiempo y la capa seleccionados determinan el punto de pegado; en Filesystem debe funcionar como un copy/paste normal."
 
@@ -185,7 +185,7 @@ As a user with Phoenix connected to the destination tab, I want pasted content s
 - **FR-036**: A Pool file or folder drag MUST publish a self-contained, versioned Cacablu resource payload through the browser drag data transfer so another open Cacablu editor can validate and consume it without accessing source-editor memory.
 - **FR-037**: A cross-editor Pool drag MUST recursively include the same hierarchy, bytes, names, types, formats, byte counts, and enabled state required by Pool Copy.
 - **FR-038**: Cross-editor Pool drop MUST be copy-only: it MUST allocate destination-owned ids and MUST NOT delete, move, rename, or otherwise mutate source-project rows.
-- **FR-039**: Same-editor Pool drag MUST retain the existing move behavior and preserve original ids; the drag payload MUST carry enough origin information to distinguish same-editor moves from cross-editor copies.
+- **FR-039**: Pool drag MUST retain move behavior and preserve original ids only when its source-editor and source-session identities both match the active destination session; the drag payload MUST carry both identities so cross-editor and changed-session drops become independent copies.
 - **FR-040**: Cross-editor drop destinations MUST support the explicit Pool root, a folder row, a file's containing folder, and visible whitespace within an expanded folder.
 - **FR-041**: Cross-editor drag decoding and insertion MUST enforce the same bounded binary validation, path normalization, canonical-root handling, case-insensitive sibling conflict checks, and atomic rollback guarantees as cross-project Pool Paste.
 - **FR-042**: One successful cross-editor drop MUST create one destination Undo entry for the complete copied batch and MUST reuse existing post-commit scoped Phoenix asset synchronization when the destination editor is connected.

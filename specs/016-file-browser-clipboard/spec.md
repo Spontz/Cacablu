@@ -2,7 +2,7 @@
 
 **Feature Branch**: `016-file-browser-clipboard`  
 **Created**: 2026-07-15  
-**Status**: Draft
+**Status**: Implemented; dedicated cross-editor browser regression pending
 **Reopened**: 2026-08-18 for cross-editor drag-and-drop
 **Input**: Context-aware Cut, Copy, Paste, drag paths, and Pool-root destinations in Cacablu.
 
@@ -118,8 +118,8 @@ Users can drag files or folders from the Pool panel of one open Cacablu editor i
 - **FR-023**: Internal drag state and visual drag classes MUST be cleared after
   every handled drop and by document-level drag termination, without relying on
   the original dragged row remaining mounted.
-- **FR-024**: Pool drag start MUST publish a self-contained, versioned recursive resource snapshot and source-editor identity in browser drag data.
-- **FR-025**: A drag received by the source editor MUST retain existing atomic move semantics and original ids; a drag received by another editor MUST use copy semantics and allocate destination-owned ids.
+- **FR-024**: Pool drag start MUST publish a self-contained, versioned recursive resource snapshot plus source-editor and source-session identities in browser drag data.
+- **FR-025**: A drag MUST retain atomic move semantics and original ids only when both source-editor and source-session identities match the active destination session; every other drag MUST use copy semantics and allocate destination-owned ids.
 - **FR-026**: Cross-editor drag MUST preserve canonical roots, complete folder hierarchy, file bytes, metadata, formats, enabled state, and normalized paths without requiring live access to source-editor memory during drop.
 - **FR-027**: Cross-editor copy destinations MUST include the explicit Pool root, folder rows, a target file's containing folder, and visible whitespace within an expanded folder.
 - **FR-028**: Cross-editor drops MUST reuse bounded payload validation, case-insensitive conflict detection, safe path normalization, and one atomic destination transaction with no overwrite, merge, or automatic rename.
