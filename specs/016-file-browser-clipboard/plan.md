@@ -4,17 +4,17 @@
 
 ## Summary
 
-Route clipboard commands by active editing context, store an application clipboard snapshot for Pool roots, implement atomic recursive copy/move operations in `DbSession`, reuse the same batch mutation path for internal file/folder drag, and make external duplicate imports an explicit confirmed content update with scoped Phoenix reconciliation.
+Route clipboard commands by active editing context, store self-contained Pool snapshots, implement atomic recursive copy/move operations in `DbSession`, preserve same-editor drag as move, add cross-editor drag as independent copy, and make external duplicate imports an explicit confirmed content update with scoped Phoenix reconciliation.
 
 ## Technical Context
 
 **Language/Version**: TypeScript 5.x, ES2022 browser target  
-**Primary Dependencies**: Existing Vite app, `sql.js`, Monaco, browser clipboard and drag APIs  
+**Primary Dependencies**: Existing Vite app, `sql.js`, Monaco, browser clipboard and DragEvent/DataTransfer APIs
 **Storage**: Loaded in-memory project database; no schema change  
 **Testing**: Vitest, Edge Playwright, and native Selenium Edge against an actual SQLite project
 **Target Platform**: Browser with File System Access API  
 **Performance Goals**: Immediate selection/cut feedback; atomic mutations without blocking pointer interaction  
-**Constraints**: Static browser-only runtime; no native filesystem clipboard guarantee
+**Constraints**: Static browser-only runtime; no native filesystem clipboard guarantee; cross-editor drag is copy-only and must not depend on live source-editor memory at drop time
 
 ## Constitution Check
 
@@ -48,3 +48,5 @@ tests/unit/
 8. Preserve moved selection, register one inverse Undo command, reconcile Phoenix after commit, and verify both synthetic and native Edge pointer flows.
 9. Detect external import conflicts case-insensitively, reject folder conflicts, and show a modal Cancel/Replace choice for file conflicts before mutation.
 10. Replace only file content metadata so database identity and enabled state remain stable, then delegate ordered Phoenix publication to the asset-sync service.
+11. Publish a bounded recursive Pool snapshot plus source-editor identity at drag start; route a same-editor drop to atomic move and a different-editor drop to atomic copy with destination-owned ids.
+12. Verify two-window file, multi-root, and folder drags, exact destinations, source preservation, conflicts, one-step destination Undo, editable path drops, and destination-only Phoenix reconciliation.

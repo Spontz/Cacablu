@@ -2,16 +2,17 @@
 
 **Feature Branch**: `016-file-browser-clipboard`  
 **Created**: 2026-07-15  
-**Status**: Implemented  
+**Status**: Draft
+**Reopened**: 2026-08-18 for cross-editor drag-and-drop
 **Input**: Context-aware Cut, Copy, Paste, drag paths, and Pool-root destinations in Cacablu.
 
 ## Runtime Context
 
-**Browser Surface**: Pool file browser, Edit menu, Monaco editors, and external file drop targets.  
+**Browser Surface**: Pool file browsers in one or more open Cacablu editor instances, Edit menu, Monaco editors, and external file drop targets.
 **Local Engine Dependency**: Optional; enabled asset mutations synchronize through existing Phoenix asset operations.  
 **Static Deployment Impact**: Browser-only; uses DOM clipboard/drag APIs and the loaded SQLite session.  
 **Real-Time Sensitivity**: Selection, pending-cut feedback, and paste validation must be immediate.  
-**File System Access Requirement**: Required for project open/save and external file import; internal clipboard operations remain database-backed.
+**File System Access Requirement**: Required for project open/save and external file import; clipboard and cross-editor drag operations remain database-backed.
 
 ## User Scenarios & Testing
 
@@ -72,6 +73,21 @@ Users can drag files or folders inside the Pool and move the complete canonical 
 5. **Given** a conflict, stale source, self destination, or descendant destination, **When** a batch drag is dropped, **Then** the complete operation is rejected with no partial mutation.
 6. **Given** a batch drag succeeds, **When** the user invokes Undo, **Then** all moved roots return to their original parents in one action and enabled Phoenix paths are reconciled.
 
+### User Story 5 - Copy Pool Items Between Open Editors By Dragging (Priority: P1)
+
+Users can drag files or folders from the Pool panel of one open Cacablu editor into the Pool panel of another editor, creating independent destination copies without modifying the source project.
+
+**Independent Test**: Place two Cacablu windows side by side, drag a file, multiple selected roots, and a nested folder from project A into root and folder destinations in project B, then verify source preservation, complete destination data, new ids, conflicts, Undo, and Phoenix reconciliation.
+
+**Acceptance Scenarios**:
+
+1. **Given** two Cacablu editors are open, **When** a selected Pool file is dragged from editor A to a valid destination in editor B, **Then** editor B creates an independent copy with a new destination id and editor A remains unchanged.
+2. **Given** multiple canonical roots are selected in editor A, **When** any selected root is dragged to editor B, **Then** all canonical roots and complete descendant subtrees are copied exactly once as one batch.
+3. **Given** a cross-editor drag targets the explicit Pool root, a folder row, a file inside a folder, or visible whitespace within an expanded folder, **When** the drop occurs, **Then** Cacablu resolves the exact root or containing folder destination.
+4. **Given** the cross-editor payload is malformed, stripped, stale, unsupported, too large, or conflicts with a destination sibling name, **When** it is dropped, **Then** neither project is modified and no destination Undo entry is created.
+5. **Given** a cross-editor drop succeeds, **When** Undo is invoked in editor B, **Then** the complete copied batch is removed without changing editor A.
+6. **Given** a Pool item is dropped into Monaco or another editable text target in either editor, **When** the target accepts the drop, **Then** only normalized `/pool/...` path text is inserted and no resource mutation occurs.
+
 ## Requirements
 
 ### Functional Requirements
@@ -102,6 +118,14 @@ Users can drag files or folders inside the Pool and move the complete canonical 
 - **FR-023**: Internal drag state and visual drag classes MUST be cleared after
   every handled drop and by document-level drag termination, without relying on
   the original dragged row remaining mounted.
+- **FR-024**: Pool drag start MUST publish a self-contained, versioned recursive resource snapshot and source-editor identity in browser drag data.
+- **FR-025**: A drag received by the source editor MUST retain existing atomic move semantics and original ids; a drag received by another editor MUST use copy semantics and allocate destination-owned ids.
+- **FR-026**: Cross-editor drag MUST preserve canonical roots, complete folder hierarchy, file bytes, metadata, formats, enabled state, and normalized paths without requiring live access to source-editor memory during drop.
+- **FR-027**: Cross-editor copy destinations MUST include the explicit Pool root, folder rows, a target file's containing folder, and visible whitespace within an expanded folder.
+- **FR-028**: Cross-editor drops MUST reuse bounded payload validation, case-insensitive conflict detection, safe path normalization, and one atomic destination transaction with no overwrite, merge, or automatic rename.
+- **FR-029**: Successful cross-editor drops MUST create one destination Undo entry and reconcile enabled destination assets with Phoenix only after local commit; source Phoenix state MUST NOT be changed.
+- **FR-030**: Missing, malformed, stripped, stale, unsupported, or conflicting cross-editor drag data MUST cause zero project mutations and a clear destination diagnostic.
+- **FR-031**: Editable text targets MUST continue to receive normalized Pool path text and MUST NOT trigger same-editor move or cross-editor copy mutations.
 
 ## Success Criteria
 
@@ -114,7 +138,11 @@ Users can drag files or folders inside the Pool and move the complete canonical 
 - **SC-007**: Browser regression primes a stale internal drag, drops distinct
   external GLSL files into two Pool folders, and proves both files are imported
   while the stale internal file remains in its original parent.
+- **SC-008**: Browser validation using two visible Cacablu editor windows confirms that file, multi-root, and nested-folder drags preserve 100% of destination hierarchy, bytes, metadata, formats, and enabled state with new ids while leaving the source unchanged.
+- **SC-009**: Invalid and conflicting cross-editor drops create zero destination entities, zero source changes, and zero Undo entries; one destination Undo removes every entity from a successful dropped batch.
 
 ## Assumptions
 
 - Clipboard file-list export to Explorer/Desktop requires a future native host and is outside the guaranteed browser contract.
+- A drag between different Cacablu editor instances is always copy-only, even if both instances opened the same underlying project file.
+- Cross-editor drag support targets browser tabs/windows that can be displayed simultaneously and whose browser drag policy preserves Cacablu's structured drag data.

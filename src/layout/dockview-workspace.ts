@@ -113,6 +113,10 @@ export function createDockviewWorkspace(options: WorkspaceOptions): DockviewWork
       dockview = new DockviewComponent(container, {
         createComponent: (component) => options.panels.create(component.name),
         createTabComponent: () => createShellTab(options.state),
+        // The Dockview container is the usable workspace below the menu bar.
+        // Keeping floating groups inside it prevents their title and close
+        // controls from becoming trapped underneath the menu.
+        floatingGroupBounds: 'boundedWithinViewport',
       });
 
       dockview.onDidActivePanelChange((panel) => {

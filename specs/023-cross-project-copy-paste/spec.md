@@ -2,17 +2,17 @@
 
 **Feature Branch**: `023-cross-project-copy-paste`  
 **Created**: 2026-07-20  
-**Status**: Closed  
-**Closed**: 2026-07-20  
+**Status**: Draft
+**Reopened**: 2026-08-18 for cross-editor Pool drag-and-drop
 **Input**: User description: "Necesito poder copiar y pegar entre dos pestañas que tengan dos proyectos diferentes cargados barras con sus propiedades y carpetas y archivos del filesystem. En Timeline, el tiempo y la capa seleccionados determinan el punto de pegado; en Filesystem debe funcionar como un copy/paste normal."
 
 ## Runtime Context
 
-**Browser Surface**: Two or more Cacablu browser tabs, Timeline lanes/ruler/playhead, shared Edit Copy/Paste commands, Pool Resources panel, Undo, and Events.  
+**Browser Surface**: Two or more Cacablu browser tabs or windows, Timeline lanes/ruler/playhead, shared Edit Copy/Paste commands, Pool Resources panels, cross-editor drag-and-drop, Undo, and Events.
 **Local Engine Dependency**: Optional. Copy and local paste work without Phoenix. When connected, pasted bars and Pool resources use the existing scoped section and asset synchronization paths.  
-**Static Deployment Impact**: Cacablu remains a browser-only static application. Cross-tab transfer uses the browser/system clipboard and MUST NOT require a backend, cloud service, native host, or shared server process.  
+**Static Deployment Impact**: Cacablu remains a browser-only static application. Copy/Paste transfer uses the browser/system clipboard and cross-editor drag uses browser `DataTransfer`; neither route may require a backend, cloud service, native host, or shared server process.
 **Real-Time Sensitivity**: Selecting a Timeline paste target and committing a local paste must feel immediate. Clipboard serialization, validation, database mutation, and optional Phoenix synchronization must not make pointer interaction or Timeline rendering unresponsive.  
-**File System Access Requirement**: Each tab uses the existing File System Access workflow to open and save its own project. Pool copy/paste transfers project database resource contents and metadata; it does not copy arbitrary operating-system files outside the loaded project.
+**File System Access Requirement**: Each editor uses the existing File System Access workflow to open and save its own project. Pool copy/paste and cross-editor drag transfer project database resource contents and metadata; they do not copy arbitrary operating-system files outside the loaded project.
 
 ## User Scenarios & Testing
 
@@ -61,13 +61,13 @@ As an editor, I want an explicit selected Timeline layer combined with the selec
 
 ---
 
-### User Story 3 - Copy Pool Files And Folders Between Projects (Priority: P1)
+### User Story 3 - Copy Or Drag Pool Files And Folders Between Projects (Priority: P1)
 
-As an editor, I want normal copy/paste behavior for project Pool files and folders between tabs so I can reuse complete resource subtrees in another project.
+As an editor, I want normal copy/paste and drag-and-drop behavior for project Pool files and folders between open Cacablu editors so I can reuse complete resource subtrees in another project.
 
 **Why this priority**: Bars often depend on project resources, and transferring only Timeline rows would leave destination projects incomplete.
 
-**Independent Test**: Copy files and nested folders from project A, paste them into the root, a selected folder, and beside a selected file in project B, then verify hierarchy, bytes, metadata, enabled state, and independent destination ids.
+**Independent Test**: Open projects A and B in separate Cacablu windows, copy and drag files and nested folders from A into the Pool root, a folder, and beside a file in B, then verify hierarchy, bytes, metadata, enabled state, independent destination ids, source preservation, and Undo.
 
 **Acceptance Scenarios**:
 
@@ -79,6 +79,11 @@ As an editor, I want normal copy/paste behavior for project Pool files and folde
 6. **Given** multiple destination items are selected, **When** Paste runs, **Then** Cacablu rejects the ambiguous destination without mutation.
 7. **Given** a case-insensitive sibling name conflict, malformed path, invalid payload, or failed recursive insert, **When** Paste runs, **Then** the complete Pool paste is rejected atomically.
 8. **Given** a successful cross-project Pool paste, **When** the project is saved and reopened, **Then** destination hierarchy, file contents, metadata, and enabled state remain present with destination-owned ids.
+9. **Given** two Cacablu editors are open and visible, **When** the user drags one or more canonical Pool file or folder roots from editor A to a valid Resources destination in editor B, **Then** editor B creates an independent recursive copy with destination-owned ids and editor A remains unchanged.
+10. **Given** a folder is dragged between editors, **When** it is dropped on a destination folder row, a file inside that folder, visible whitespace inside that expanded folder, or the explicit Pool root, **Then** the drop uses that exact folder or root as its destination and preserves the complete source subtree.
+11. **Given** a cross-editor drag has a sibling-name conflict, malformed or unsupported payload, stale destination, or failed recursive insert, **When** it is dropped, **Then** the complete destination operation is rejected atomically and neither editor is partially modified.
+12. **Given** a successful cross-editor Pool drop, **When** the user invokes Undo in the destination editor, **Then** the complete copied batch is removed in one action without changing the source editor.
+13. **Given** a drag starts and ends inside one Cacablu editor, **When** the destination is valid, **Then** existing same-project drag semantics continue to move the original ids rather than creating cross-project copies.
 
 ---
 
@@ -133,14 +138,17 @@ As a user with Phoenix connected to the destination tab, I want pasted content s
 - A destination file is selected but is deleted before Paste.
 - Multiple Pool destination items are selected.
 - Names differ only by case in the destination.
+- The browser removes or truncates Cacablu's structured drag payload while crossing tabs or windows.
+- The source editor closes, reloads, or changes project while a cross-editor drag is active.
+- Source and destination editors have opened the same underlying project file.
 - Phoenix disconnects while a local paste or Undo synchronization is in flight.
 
 ## Requirements
 
 ### Functional Requirements
 
-- **FR-001**: Cacablu MUST support self-contained Copy/Paste transfer between independent browser tabs with different loaded projects.
-- **FR-002**: Cross-tab transfer MUST use the browser/system clipboard and MUST NOT rely solely on in-memory state, source-tab lifetime, BroadcastChannel state, or a backend.
+- **FR-001**: Cacablu MUST support self-contained Copy/Paste and Pool drag transfer between independent browser tabs or windows with different loaded projects.
+- **FR-002**: Cross-tab Copy/Paste MUST use the browser/system clipboard, while cross-editor drag MUST use browser drag data; neither route may rely solely on source-tab memory, BroadcastChannel state, or a backend.
 - **FR-003**: Cacablu clipboard payloads MUST include an application identifier, payload kind, schema version, and integrity/shape validation data sufficient to reject unrelated or malformed clipboard content.
 - **FR-004**: Clipboard payload kinds MUST distinguish Timeline bars from Pool resource subtrees.
 - **FR-005**: The clipboard MUST preserve a useful `text/plain` fallback for ordinary text destinations, including normalized Pool paths for copied resources.
@@ -174,12 +182,22 @@ As a user with Phoenix connected to the destination tab, I want pasted content s
 - **FR-033**: Clipboard decoding MUST enforce bounded, validated binary lengths and safe normalized Pool paths before allocating or mutating project data.
 - **FR-034**: Clicking either a Timeline lane or a bar MUST select and visibly highlight that bar's complete layer.
 - **FR-035**: Timeline MUST provide at least one viewport width of horizontally scrollable editing space after its current content end, and lane clicks/bar creation in that space MUST use their real horizontal time.
+- **FR-036**: A Pool file or folder drag MUST publish a self-contained, versioned Cacablu resource payload through the browser drag data transfer so another open Cacablu editor can validate and consume it without accessing source-editor memory.
+- **FR-037**: A cross-editor Pool drag MUST recursively include the same hierarchy, bytes, names, types, formats, byte counts, and enabled state required by Pool Copy.
+- **FR-038**: Cross-editor Pool drop MUST be copy-only: it MUST allocate destination-owned ids and MUST NOT delete, move, rename, or otherwise mutate source-project rows.
+- **FR-039**: Same-editor Pool drag MUST retain the existing move behavior and preserve original ids; the drag payload MUST carry enough origin information to distinguish same-editor moves from cross-editor copies.
+- **FR-040**: Cross-editor drop destinations MUST support the explicit Pool root, a folder row, a file's containing folder, and visible whitespace within an expanded folder.
+- **FR-041**: Cross-editor drag decoding and insertion MUST enforce the same bounded binary validation, path normalization, canonical-root handling, case-insensitive sibling conflict checks, and atomic rollback guarantees as cross-project Pool Paste.
+- **FR-042**: One successful cross-editor drop MUST create one destination Undo entry for the complete copied batch and MUST reuse existing post-commit scoped Phoenix asset synchronization when the destination editor is connected.
+- **FR-043**: Invalid, stripped, stale, or unsupported cross-editor drag data MUST produce no source or destination mutation and MUST provide a clear destination diagnostic.
+- **FR-044**: Dropping a Pool drag into an editable text target MUST preserve the existing normalized `/pool/...` path insertion behavior rather than copying or moving project resources.
 
 ### Key Entities
 
 - **Cross-Project Clipboard Envelope**: Versioned application-specific clipboard representation containing one payload kind, source metadata for diagnostics, and a self-contained immutable snapshot.
 - **Bar Clipboard Payload**: Ordered bar snapshots plus the source group anchor derived from earliest start and minimum layer.
 - **Pool Clipboard Payload**: Canonical file/folder roots containing recursive hierarchy, metadata, enabled state, and file bytes.
+- **Cross-Editor Pool Drag Payload**: Self-contained, versioned Pool subtree snapshot carried by browser drag data together with origin metadata that distinguishes same-editor movement from cross-editor copying.
 - **Timeline Paste Target**: Per-project pair of selected numeric layer and current Timeline time, with visible lane feedback.
 - **Destination Paste Batch**: Atomic group of newly allocated destination bars or Pool entities created by one Paste command.
 - **Paste Undo Entry**: One action capable of removing the exact destination batch if it has not been modified incompatibly.
@@ -199,6 +217,8 @@ As a user with Phoenix connected to the destination tab, I want pasted content s
 - **SC-009**: Disconnected paste performs zero Phoenix requests and connected failure leaves local destination state intact with diagnostics.
 - **SC-010**: Automated tests cover cross-tab serialization, schema rejection, target calculation, atomic collisions, Pool binaries, repeated paste, Undo, and connected/disconnected synchronization.
 - **SC-011**: Typecheck, scoped lint, full tests, production build, and two-tab browser validation pass without new errors.
+- **SC-012**: Browser validation with two simultaneously open Cacablu editors confirms that file, multi-selection, and nested-folder drags create complete independent destination copies, leave the source unchanged, and are removed by one destination Undo.
+- **SC-013**: Every invalid or conflicting cross-editor drop creates zero destination entities, zero source mutations, and zero Undo entries.
 
 ## Assumptions
 
@@ -207,4 +227,5 @@ As a user with Phoenix connected to the destination tab, I want pasted content s
 - Bar dependencies are not inferred from free-form scripts; required Pool resources are copied explicitly through Resources.
 - Destination collision behavior follows current Cacablu guarantees: reject atomically rather than overwrite, rename, merge, or auto-shift.
 - Source projects are never modified by cross-tab Paste or Undo.
-- Cross-tab Cut/Move and automatic dependency collection may be proposed as later features.
+- Cross-editor drag is a copy operation even if both editors opened the same underlying project file; conflicting destination names are rejected normally.
+- Cross-tab Cut/Move and automatic dependency collection remain out of scope.

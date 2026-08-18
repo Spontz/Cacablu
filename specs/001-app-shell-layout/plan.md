@@ -23,7 +23,10 @@ with the local visuals engine.
 **Target Platform**: Modern desktop browsers  
 **Project Type**: Static web application  
 **Performance Goals**: Shell visible quickly, panel interactions remain responsive, no obvious UI blocking during menu and layout actions  
-**Constraints**: Browser-only runtime, no backend, open source dependencies only, single window model, compatibility with modern browsers, local engine is optional at startup  
+**Constraints**: Browser-only runtime, no backend, open source dependencies only,
+single window model, compatibility with modern browsers, local engine is
+optional at startup, and floating panels must remain fully below the top menu
+bar during drag, layout restore, and viewport resize
 **Scale/Scope**: One application shell, one workspace layout, placeholder panels, initial connection state and message categories only
 
 ## Constitution Check
@@ -40,6 +43,9 @@ with the local visuals engine.
   documented even though real engine handling is not yet implemented.
 - Maintainability preserved: the shell is divided into app, layout, panel, menu,
   connection, and style modules with narrow responsibilities.
+- Workspace safety preserved: floating-panel bounds are derived from the usable
+  workspace below the menu bar, keeping panel title bars and close controls
+  reachable during drag and after viewport or layout changes.
 
 Post-design re-check: PASS. No designed element requires a backend, proprietary
 software, or a non-open-source runtime dependency.

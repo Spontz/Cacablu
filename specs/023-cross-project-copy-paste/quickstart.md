@@ -32,3 +32,8 @@ node scripts/playwright-cross-project-copy-paste-check.mjs
 8. Verify Monaco/input Copy/Paste remains native.
 9. Verify mismatched payload contexts and destination conflicts make no mutation.
 10. Repeat with Phoenix connected and disconnected.
+11. Place two Cacablu editor windows side by side, each with a different project open.
+12. Drag one file, a multi-selection, and a nested folder from Pool in editor A to the root, a folder, and beside a file in editor B.
+13. Confirm editor B creates complete copies with new ids, editor A remains unchanged, and one Undo in B removes each complete dropped batch.
+14. Repeat a drag with a destination name conflict and with the structured drag data removed; confirm neither project changes.
+15. Drag a Pool file into Monaco and confirm only its normalized `/pool/...` path is inserted.

@@ -59,6 +59,10 @@ PoolClipboardFile
 
 Decoded files become existing `AssetClipboardFile` nodes with independent `Uint8Array` data.
 
+The same recursive payload is used for cross-editor drag. Drag metadata adds a
+source editor-instance identifier and source project identity for routing and
+diagnostics; neither identity is reused as a destination database id.
+
 ## Timeline Paste Target
 
 ```text
@@ -90,3 +94,5 @@ One batch maps to one Undo entry. Undo validates that pasted entities have not c
 - Pool bytes and declared byte counts match after decode.
 - Context kind must match payload kind.
 - Undo changes only destination entities.
+- Same-editor Pool drag is a move; cross-editor Pool drag is an independent copy.
+- Cross-editor drag never requires live access to source-editor state after the payload is published.

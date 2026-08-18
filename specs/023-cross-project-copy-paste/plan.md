@@ -5,18 +5,18 @@
 
 ## Summary
 
-Introduce a versioned, self-contained Cacablu clipboard envelope that survives source-tab closure and carries either complete Timeline bar snapshots or recursive Pool resource snapshots. Route native Copy/Paste by active context, add an explicit selected Timeline layer paired with current time, paste bars atomically with relative time/layer offsets and new ids, and extend existing Pool copy/paste to decode cross-tab snapshots. Every destination paste is one Undo action and synchronizes through existing Phoenix clients only after local commit.
+Introduce a versioned, self-contained Cacablu transfer envelope that carries either complete Timeline bar snapshots or recursive Pool resource snapshots. Route native Copy/Paste by active context, support Pool drag-and-drop between simultaneously open editor instances, add an explicit selected Timeline layer paired with current time, and create destination content atomically with new ids. Every destination paste or cross-editor drop is one Undo action and synchronizes through existing Phoenix clients only after local commit.
 
 ## Technical Context
 
 **Language/Version**: TypeScript 5.x targeting ES2022  
-**Primary Dependencies**: Existing Vite app, `sql.js`, DOM Clipboard events, Clipboard API fallback, shared Undo manager, Phoenix section/asset clients  
+**Primary Dependencies**: Existing Vite app, `sql.js`, DOM Clipboard and DragEvent/DataTransfer APIs, Clipboard API fallback, shared Undo manager, Phoenix section/asset clients
 **Storage**: Independent loaded SQLite `DbSession` per browser tab; no schema migration  
 **Testing**: Vitest for serialization, validation, placement, atomic DB operations, Undo helpers, and sync routing; Playwright two-tab browser validation  
 **Target Platform**: Chromium-class desktop browser supporting File System Access and user-initiated clipboard events  
 **Project Type**: Browser-only static application with optional local Phoenix  
 **Performance Goals**: Lane selection and local paste feedback within one interaction frame for normal projects; recursive payload validation before mutation; no synchronous Phoenix dependency  
-**Constraints**: No backend, no source-session dependency, no cross-tab Cut, no automatic dependency inference, no overwrite/merge/auto-shift on conflicts  
+**Constraints**: No backend, no source-session dependency for transferred data, no cross-editor Cut or Move, no automatic dependency inference, no overwrite/merge/auto-shift on conflicts
 **Scale/Scope**: One copied batch at a time; typical demo bar groups and Pool subtrees; bounded clipboard payload decoding
 
 ## Constitution Check
@@ -86,6 +86,8 @@ scripts/
 6. Allocate destination ids in SQLite, select the pasted batch, register conflict-safe Undo, refresh Timeline once, and publish eligible sections through existing sync.
 7. Let Resources accept decoded copy roots in addition to its same-tab in-memory clipboard. Preserve normal root/folder/file-parent destination rules and existing recursive atomic insert/Undo/sync behavior.
 8. Validate source-tab independence, repeated Paste, mismatched context, corruption, large/binary data, collision rollback, and connected/disconnected behavior.
+9. Publish the validated recursive Pool snapshot during drag start with source-instance metadata; route same-editor drops to the existing move path and cross-editor drops to the independent-copy path.
+10. Validate cross-editor file, multi-root, and nested-folder drops across separate browser windows, including exact destinations, source preservation, atomic conflicts, Undo, editable path drops, and Phoenix reconciliation.
 
 ## Complexity Tracking
 

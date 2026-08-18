@@ -74,7 +74,8 @@ interface to the way I work.
 that will host resources, timeline, preview, and inspector panels.
 
 **Independent Test**: Drag, dock, and resize panels in the workspace and
-confirm that the layout remains usable throughout the session.
+confirm that the layout remains usable throughout the session and that a
+floating panel cannot be dragged beneath the top menu bar.
 
 **Acceptance Scenarios**:
 
@@ -83,6 +84,9 @@ confirm that the layout remains usable throughout the session.
    rest of the layout.
 2. **Given** the workspace is visible, **When** the user resizes panel groups,
    **Then** the interface updates immediately and remains visually coherent.
+3. **Given** a panel is floating, **When** the user drags it toward or beyond
+   the top edge of the workspace, **Then** the panel stops at the lower edge of
+   the menu bar and its title bar and close control remain fully reachable.
 
 ---
 
@@ -128,6 +132,9 @@ As a user, I want the Preview panel to show Phoenix video and audio without extr
   engine exists?
 - How does the shell behave if the browser viewport is too small for the default
   layout proportions?
+- How does the shell keep a floating panel below the menu bar when dragging,
+  restoring a layout, or resizing the browser viewport would otherwise place
+  it beneath the menu?
 - What happens when a panel is closed and the user needs to recover it from the
   menu bar?
 - What happens when a future engine message arrives before the related panel has
@@ -183,6 +190,13 @@ As a user, I want the Preview panel to show Phoenix video and audio without extr
 - **FR-020**: The Preview panel MUST combine all WebRTC remote tracks from Phoenix into a single media stream so audio and video remain attached to the same preview element.
 - **FR-021**: The Preview panel MUST attempt audio playback automatically and MUST NOT show a "click to enable audio" message in normal connected preview flow.
 - **FR-022**: The shell MUST not include a Help top-level menu unless a future feature adds meaningful Help actions.
+- **FR-023**: The shell MUST constrain every floating workspace panel to the
+  workspace area below the top menu bar while it is dragged, so no part of the
+  panel can be placed beneath the menu bar and the panel title bar and close
+  control remain reachable.
+- **FR-024**: The shell MUST restore a floating panel to a valid position below
+  the top menu bar if a restored layout or browser viewport resize would place
+  any part of that panel beneath the menu bar.
 
 ### Key Entities *(include if feature involves data)*
 
@@ -232,6 +246,9 @@ As a user, I want the Preview panel to show Phoenix video and audio without extr
 - **SC-011**: Project lint, typecheck, and build commands complete without new
   errors for the shell implementation.
 - **SC-012**: Manual validation confirms Phoenix preview audio is attempted automatically without requiring the user to click the Preview panel.
+- **SC-013**: In manual validation, dragging each floating panel repeatedly
+  toward and beyond the top of the workspace never allows it to overlap the
+  menu bar, and its title bar and close control remain usable after release.
 
 ## Assumptions
 

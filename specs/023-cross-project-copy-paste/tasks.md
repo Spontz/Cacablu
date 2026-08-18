@@ -80,9 +80,17 @@ Follow-up validation: scoped ESLint, all 183 unit tests, production build, and t
 
 ## Closure
 
-- **Status**: Closed
+- **Status**: Reopened for cross-editor Pool drag-and-drop
 - **Closed**: 2026-07-21
 - **Result**: All planned and follow-up tasks are complete; automated unit, type, lint, build, and two-tab browser validations passed.
+
+## Amendment: Cross-Editor Pool Drag-And-Drop
+
+- [ ] T044 Extend Pool drag payloads with a self-contained versioned subtree snapshot and source-editor identity.
+- [ ] T045 Route same-editor drops to existing atomic move behavior and cross-editor Resources drops to atomic independent copy behavior.
+- [ ] T046 Support Pool root, folder row/interior, and containing-folder file destinations while preserving editable `/pool/...` path drops.
+- [ ] T047 Reuse cross-project validation, conflict rollback, one-batch Undo, and post-commit destination Phoenix reconciliation.
+- [ ] T048 Add browser coverage using two visible Cacablu windows for file, multi-root, nested-folder, conflict, stripped-payload, source-preservation, Undo, and text-editor drops.
 
 ## Dependencies & Execution Order
 

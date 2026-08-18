@@ -27,8 +27,12 @@ Open the local development URL in a modern desktop browser.
 3. Confirm the default panels render: Resources, Timeline, Preview, Inspector,
    and Events.
 4. Drag and resize panels to verify the layout engine is active.
-5. Use the menu bar to reset the layout.
-6. Confirm the connection state is visible even without a running local engine.
+5. Float a panel and drag it upward; confirm it stops below the menu bar and
+   its title bar and close control remain fully reachable.
+6. With a floating panel open, resize the browser viewport and reset or restore
+   the layout; confirm the panel is repositioned below the menu bar if needed.
+7. Use the menu bar to reset the layout.
+8. Confirm the connection state is visible even without a running local engine.
 
 ## Quality Checks
 

@@ -22,6 +22,8 @@
 - [x] Atomic Undo, repeated Paste, disconnected behavior, and Phoenix failure are specified.
 - [x] Payload versioning, validation, permissions, malformed data, and size safety are specified.
 - [x] Cross-project Cut and automatic script dependency collection are explicitly out of scope.
+- [x] Cross-editor drag is explicitly copy-only while same-editor drag remains a move.
+- [x] Cross-editor destinations, source preservation, atomic conflicts, Undo, editable path drops, and Phoenix reconciliation are specified.
 
 ## Testability
 
@@ -29,6 +31,7 @@
 - [x] Acceptance scenarios use observable Given/When/Then outcomes.
 - [x] Success criteria are measurable.
 - [x] Edge cases cover tab closure, collisions, stale targets, malformed payloads, large binaries, and disconnects.
+- [x] Edge cases cover stripped cross-window drag data, active source changes, and both editors opening the same project file.
 
 ## Constitution Alignment
 

@@ -35,3 +35,11 @@
 - [x] T019 Show an accessible Cancel/Replace dialog for same-name files and keep cancellation side-effect free.
 - [x] T020 Replace existing content through `updateResourceFileContent` while preserving id, path, parent, name, and enabled state.
 - [x] T021 Add unit and Edge regression coverage for conflict detection, cancellation, identity-preserving replacement, and Phoenix ordering.
+
+## Cross-Editor Drag Copies
+
+- [ ] T022 Publish a self-contained bounded Pool subtree snapshot and source-editor identity in drag data.
+- [ ] T023 Distinguish same-editor move from cross-editor copy and allocate destination-owned ids for copied batches.
+- [ ] T024 Reuse root/folder/file-parent destinations, atomic conflicts, one destination Undo action, and destination-only Phoenix reconciliation.
+- [ ] T025 Preserve normalized `/pool/...` path insertion for editable drop targets.
+- [ ] T026 Add two-window browser coverage for file, multi-root, nested-folder, stripped payload, conflicts, source preservation, Undo, and editable path drops.
