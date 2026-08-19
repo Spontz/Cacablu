@@ -2138,6 +2138,17 @@ button.events-listbox__severity:focus-visible {
   padding-left: 4px;
 }
 
+.monaco-editor .cam-editor-column-0 { color: #ff8a3d !important; }
+.monaco-editor .cam-editor-column-1 { color: #4dd8ff !important; }
+.monaco-editor .cam-editor-column-2 { color: #ff63dc !important; }
+.monaco-editor .cam-editor-column-3 { color: #a8ef5a !important; }
+.monaco-editor .cam-editor-column-4 { color: #ffe066 !important; }
+.monaco-editor .cam-editor-column-5 { color: #b99cff !important; }
+.monaco-editor .cam-editor-column-6 { color: #ff6b7a !important; }
+.monaco-editor .cam-editor-column-7 { color: #55e6a5 !important; }
+.monaco-editor .cam-editor-column-8 { color: #7aaeff !important; }
+.monaco-editor .cam-editor-column-9 { color: #ff9fca !important; }
+
 .monaco-editor .cacablu-code-selection-occurrence {
   box-sizing: border-box;
   border: 1px solid rgba(34, 211, 238, 0.88);

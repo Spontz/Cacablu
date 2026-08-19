@@ -17,6 +17,7 @@ import { createSectionEditorPanel } from './section-editor-panel';
 import { createTimelinePanel } from './timeline-panel';
 import { createGraphicsSettingsPanel } from './graphics-settings-dialog';
 import { createGlslAssetEditorPanel } from './glsl-asset-editor-panel';
+import { createCamAssetEditorPanel } from './cam-asset-editor-panel';
 import { createDemoSettingsPanel } from './demo-settings-dialog';
 import { createMarkersPanel } from './markers-panel';
 
@@ -59,6 +60,8 @@ export function createPanelRegistry(
           return createMarkersPanel(dbState, sessionRef, undoManager);
         case 'glsl-asset-editor-panel':
           return createGlslAssetEditorPanel(state, dbState, sessionRef, connection, undoManager);
+        case 'cam-asset-editor-panel':
+          return createCamAssetEditorPanel(state, dbState, sessionRef, connection, undoManager);
         default:
           return createFallbackPanel(name);
       }

@@ -887,6 +887,22 @@ export function createAppShell(root: HTMLElement): AppShell {
         );
       });
 
+      window.addEventListener('cacablu:open-cam-editor', (event) => {
+        const detail = event instanceof CustomEvent ? event.detail as { fileId?: unknown; name?: unknown } : null;
+        const fileId = typeof detail?.fileId === 'number' && Number.isFinite(detail.fileId) ? detail.fileId : null;
+        const name = typeof detail?.name === 'string' && detail.name ? detail.name : 'CAM Editor';
+        if (fileId === null) {
+          workspace.openFloating('cam-asset-editor', 'cam-asset-editor-panel', 'CAM Editor');
+          return;
+        }
+        workspace.openFloating(
+          `cam-asset-editor-${fileId}`,
+          'cam-asset-editor-panel',
+          name,
+          { fileId },
+        );
+      });
+
       window.addEventListener('cacablu:open-timeline', () => {
         workspace.openPanel('timeline');
       });

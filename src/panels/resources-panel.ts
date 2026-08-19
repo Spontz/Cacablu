@@ -45,6 +45,7 @@ import {
 } from '../services/cross-project-clipboard';
 import { ASSET_FILE_DRAG_TYPE } from '../resources/pool-path-drop';
 import { getResourceDragOrigin, isResourceDragFromSession } from '../resources/resource-drag-origin';
+import { isCamAssetName } from '../services/cam-asset-save';
 import { createMenuIcon } from '../menu/menu-icon';
 import { createContentRenderer } from './base-panel';
 
@@ -174,8 +175,21 @@ function inferMimeType(fileName: string): string {
   if (['png','jpg','jpeg','gif','webp','svg','bmp'].includes(format)) return `image/${format === 'jpg' ? 'jpeg' : format}`;
   if (['mp4','webm','mov','avi','mkv'].includes(format)) return `video/${format}`;
   if (['mp3','ogg','wav','flac','aac','opus'].includes(format)) return `audio/${format}`;
-  if (['txt','md','glsl','vert','frag','geom','comp','hlsl','wgsl','json','xml','csv','yaml','yml','toml'].includes(format)) return 'text/plain';
+  if (['txt','md','cam','glsl','vert','frag','geom','comp','hlsl','wgsl','json','xml','csv','yaml','yml','toml'].includes(format)) return 'text/plain';
   return 'application/octet-stream';
+}
+
+function dispatchAssetEditorOpen(fileId: number, name: string): boolean {
+  const lowerName = name.toLowerCase();
+  const eventName = lowerName.endsWith('.glsl')
+    ? 'cacablu:open-glsl-editor'
+    : isCamAssetName(name)
+      ? 'cacablu:open-cam-editor'
+      : null;
+  if (!eventName) return false;
+
+  window.dispatchEvent(new CustomEvent(eventName, { detail: { fileId, name } }));
+  return true;
 }
 
 export function createResourcesPanel(
@@ -538,15 +552,9 @@ export function createResourcesPanel(
           fileType: file.dataset.resourceType ?? '',
         };
         updateAssetSelection(event, item);
-        if (event.detail >= 2 && name.toLowerCase().endsWith('.glsl')) {
+        if (event.detail >= 2 && dispatchAssetEditorOpen(Number(file.dataset.resourceId), name)) {
           event.preventDefault();
           event.stopPropagation();
-          window.dispatchEvent(new CustomEvent('cacablu:open-glsl-editor', {
-            detail: {
-              fileId: Number(file.dataset.resourceId),
-              name,
-            },
-          }));
         }
         return;
       }
@@ -579,7 +587,7 @@ export function createResourcesPanel(
       const file = target.closest<HTMLElement>('[data-resource-kind="file"]');
       if (!file?.dataset.resourceId || !file.dataset.poolPath) return;
       const name = file.dataset.resourceName ?? '';
-      if (!name.toLowerCase().endsWith('.glsl')) return;
+      if (!name.toLowerCase().endsWith('.glsl') && !isCamAssetName(name)) return;
       event.preventDefault();
       event.stopPropagation();
       state.setAssetSelection({
@@ -588,12 +596,7 @@ export function createResourcesPanel(
         name,
         fileType: file.dataset.resourceType ?? '',
       });
-      window.dispatchEvent(new CustomEvent('cacablu:open-glsl-editor', {
-        detail: {
-          fileId: Number(file.dataset.resourceId),
-          name,
-        },
-      }));
+      dispatchAssetEditorOpen(Number(file.dataset.resourceId), name);
     });
 
     treeEl.addEventListener('change', (event) => {
