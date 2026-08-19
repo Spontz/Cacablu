@@ -1,6 +1,17 @@
 import { describe, expect, it } from 'vitest';
 
-import { computeLoopIntervalFromMarkers, wrapTimeWithinLoop } from '../../src/services/timeline-loop-markers';
+import {
+  computeLoopIntervalFromMarkers,
+  getTransportBeginningTime,
+  wrapTimeWithinLoop,
+} from '../../src/services/timeline-loop-markers';
+
+describe('getTransportBeginningTime', () => {
+  it('returns zero without a loop and the active loop start otherwise', () => {
+    expect(getTransportBeginningTime(null)).toBe(0);
+    expect(getTransportBeginningTime({ startTime: 12.5, endTime: 20 })).toBe(12.5);
+  });
+});
 
 describe('computeLoopIntervalFromMarkers', () => {
   it('uses nearest marker boundaries around the clicked time', () => {

@@ -150,6 +150,9 @@ the active loop and playhead remain consistent.
 9. **Given** playback reaches or passes the active loop end between Phoenix
    runtime updates, **When** the local playhead is interpolated, **Then** it
    wraps to the loop start and never renders outside the active interval.
+10. **Given** a loop is active, **When** the user clicks the ruler loop area,
+    **Then** Cacablu clears the active loop locally and asks Phoenix to restore
+    the runtime loop configuration that preceded the temporary interval.
 
 ### Edge Cases
 
@@ -248,6 +251,9 @@ the active loop and playhead remain consistent.
 - **FR-033**: Local playhead interpolation and incoming Phoenix runtime times
   MUST be normalized to the active loop so rendered current time remains within
   `[loop.start, loop.end)`.
+- **FR-034**: Clicking the ruler loop area while a loop is active MUST deactivate
+  that loop instead of selecting another interval, clear the local loop state,
+  and clear the temporary runtime loop override in Phoenix.
 
 ### Key Entities *(include if feature involves data)*
 

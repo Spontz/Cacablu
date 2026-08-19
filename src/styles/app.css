@@ -925,6 +925,36 @@ body > .context-view {
   display: none;
 }
 
+.shell-tab__close {
+  width: 18px;
+  height: 18px;
+  margin-left: 1px;
+  padding: 2px;
+  border: 0;
+  border-radius: 3px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  opacity: 0.7;
+}
+
+.shell-tab__close:hover,
+.shell-tab__close:focus-visible {
+  background: rgb(255 255 255 / 12%);
+  opacity: 1;
+}
+
+.shell-tab__close svg {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+}
+
 .events-panel {
   height: 100%;
   min-height: 0;

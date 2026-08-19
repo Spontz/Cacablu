@@ -197,6 +197,9 @@ As a user, I want the Preview panel to show Phoenix video and audio without extr
 - **FR-024**: The shell MUST restore a floating panel to a valid position below
   the top menu bar if a restored layout or browser viewport resize would place
   any part of that panel beneath the menu bar.
+- **FR-025**: The Events panel MUST remain closable despite its custom unread
+  badge tab: its tab MUST expose a close control, and `Panels > Events` MUST
+  toggle the panel closed when it is already open and reopen it when closed.
 
 ### Key Entities *(include if feature involves data)*
 

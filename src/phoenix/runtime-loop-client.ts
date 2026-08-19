@@ -16,6 +16,7 @@ export interface RuntimeLoopResponse {
 
 export interface PhoenixRuntimeLoopClient {
   putLoop(interval: RuntimeLoopInterval, signal?: AbortSignal): Promise<RuntimeLoopResponse>;
+  clearLoop(signal?: AbortSignal): Promise<void>;
 }
 
 export function createPhoenixRuntimeLoopClient(baseUrl = PHOENIX_HTTP_BASE): PhoenixRuntimeLoopClient {
@@ -50,6 +51,26 @@ export function createPhoenixRuntimeLoopClient(baseUrl = PHOENIX_HTTP_BASE): Pho
         throw new Error('Phoenix returned an invalid runtime loop response.');
       }
       return result;
+    },
+    async clearLoop(signal): Promise<void> {
+      let response: Response;
+      try {
+        response = await phoenixFetch(`${base}/api/runtime/loop`, {
+          method: 'DELETE',
+          signal,
+        });
+      } catch (error) {
+        if (error instanceof DOMException && error.name === 'AbortError') throw error;
+        throw new Error(error instanceof Error ? `Could not connect to Phoenix: ${error.message}` : 'Could not connect to Phoenix.');
+      }
+
+      const payload = await response.json() as unknown;
+      if (!response.ok) {
+        throw new Error(getErrorMessage(payload) ?? `Phoenix runtime loop clear request failed with HTTP ${response.status}`);
+      }
+      if (!payload || typeof payload !== 'object' || (payload as Record<string, unknown>).ok !== true) {
+        throw new Error('Phoenix returned an invalid runtime loop clear response.');
+      }
     },
   };
 }

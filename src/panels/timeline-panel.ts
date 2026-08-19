@@ -17,7 +17,11 @@ import { createPhoenixLogClient } from '../phoenix/log-client';
 import { createPhoenixRuntimeLoopClient } from '../phoenix/runtime-loop-client';
 import { primePhoenixLogEvents, recordPhoenixLogsAsEvents } from '../phoenix/log-events';
 import { ProjectSectionSyncError, syncProjectBarToPhoenix } from '../services/project-section-sync';
-import { computeLoopIntervalFromMarkers, wrapTimeWithinLoop } from '../services/timeline-loop-markers';
+import {
+  computeLoopIntervalFromMarkers,
+  getTransportBeginningTime,
+  wrapTimeWithinLoop,
+} from '../services/timeline-loop-markers';
 import type { BarClipboardPayload } from '../services/cross-project-clipboard';
 import {
   assertPastedBarsUnchanged,
@@ -614,6 +618,23 @@ export function createTimelinePanel(
   }
 
   async function applyActiveLoopFromTime(clickedTime: number): Promise<void> {
+    if (state.transport.loop) {
+      state.transport.loop = null;
+      appState.setActiveLoop(null);
+      renderTimeline?.(true);
+
+      try {
+        await phoenixLoop.clearLoop();
+      } catch (err) {
+        appState.addEvent({
+          severity: 'error',
+          source: 'Phoenix runtime loop',
+          description: err instanceof Error ? err.message : 'Could not clear Phoenix runtime loop.',
+        });
+      }
+      return;
+    }
+
     const markers = sessionRef.current?.data.markers ?? [];
     const interval = computeLoopIntervalFromMarkers(markers, clickedTime, 0, state.transport.duration);
     if (!interval) return;
@@ -1196,11 +1217,14 @@ export function createTimelinePanel(
       }
 
       if (action === 'start') {
-        runtimeAnchorTime = 0;
+        const time = getTransportBeginningTime(state.transport.loop
+          ? { startTime: state.transport.loop.start, endTime: state.transport.loop.end }
+          : null);
+        runtimeAnchorTime = time;
         runtimeAnchorTimestamp = performance.now();
-        state.transport.currentTime = 0;
+        state.transport.currentTime = time;
         updatePlayhead();
-        connection.send({ type: 'runtime.seek', time: 0 });
+        connection.send({ type: 'runtime.seek', time });
         return;
       }
 

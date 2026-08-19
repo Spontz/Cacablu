@@ -5,6 +5,10 @@ export interface TimelineLoopInterval {
   endTime: number;
 }
 
+export function getTransportBeginningTime(loop: TimelineLoopInterval | null): number {
+  return loop?.startTime ?? 0;
+}
+
 export function wrapTimeWithinLoop(time: number, loop: TimelineLoopInterval): number {
   const duration = loop.endTime - loop.startTime;
   if (!Number.isFinite(time) || !Number.isFinite(duration) || duration <= 0) return time;

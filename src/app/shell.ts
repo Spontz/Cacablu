@@ -6,6 +6,7 @@ import { createDbState } from '../state/db-state';
 import type { DbSnapshot } from '../state/db-state';
 import { createConnectionController } from '../ws/connection';
 import { createDockviewWorkspace } from '../layout/dockview-workspace';
+import { togglePanelVisibility } from '../layout/panel-visibility';
 import { isFileSystemAccessSupported, pickSqliteFile, pickSaveAsFile } from '../db/file-picker';
 import { openDbSession, createDbSessionRef } from '../db/db-session';
 import type { DbSession } from '../db/db-session';
@@ -74,6 +75,7 @@ export function createAppShell(root: HTMLElement): AppShell {
   const connection = createConnectionController(state);
   const undoManager = createUndoManager();
   const assetClipboard = createAssetClipboard();
+  let pendingEventsOpen = false;
   const panels = createPanelRegistry(state, dbState, sessionRef, connection, undoManager, assetClipboard);
   const workspace = createDockviewWorkspace({
     state,
@@ -90,6 +92,9 @@ export function createAppShell(root: HTMLElement): AppShell {
       }
       if (panelId === 'section-editor') {
         lastSectionEditorSelectionId = null;
+      }
+      if (panelId === 'events') {
+        pendingEventsOpen = false;
       }
       syncMenuDisabled(dbState.getSnapshot());
     },
@@ -108,7 +113,6 @@ export function createAppShell(root: HTMLElement): AppShell {
   let lastConnectionStatus = state.getSnapshot().connectionStatus;
   let lastErrorEventRevision = state.getSnapshot().errorEventRevision;
   let lastSectionErrorIds = new Set(state.getSnapshot().sectionErrorIds);
-  let pendingEventsOpen = false;
   let lastDisplayTimelineIds = state.getSnapshot().displayTimelineIds;
   let lastResourceSelectionSignature = getResourceSelectionSignature(state.getSnapshot().resourceSelection);
   let lastAssetSelectionSignature = JSON.stringify(state.getSnapshot().assetSelection);
@@ -202,7 +206,7 @@ export function createAppShell(root: HTMLElement): AppShell {
           workspace.openPanel('markers', { widthRatio: SIDE_PANEL_WIDTH_RATIO });
           break;
         case 'toggle-events':
-          workspace.openPanel('events');
+          togglePanelVisibility(workspace, 'events');
           break;
         default:
           break;

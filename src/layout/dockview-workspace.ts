@@ -237,7 +237,22 @@ function createShellTab(state: AppState): ITabRenderer {
   errorDot.hidden = true;
   errorDot.setAttribute('aria-hidden', 'true');
 
-  element.append(label, errorDot, badge);
+  const closeButton = document.createElement('button');
+  closeButton.className = 'shell-tab__close';
+  closeButton.type = 'button';
+  closeButton.title = 'Close Events';
+  closeButton.setAttribute('aria-label', 'Close Events');
+  closeButton.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg>';
+  closeButton.addEventListener('pointerdown', (event) => {
+    event.preventDefault();
+  });
+  closeButton.addEventListener('click', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    params?.api.close();
+  });
+
+  element.append(label, errorDot, badge, closeButton);
 
   let params: TabPartInitParameters | null = null;
   let unsubscribe: (() => void) | null = null;
