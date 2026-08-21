@@ -578,11 +578,6 @@ export function createAppShell(root: HTMLElement): AppShell {
     state.setActiveLoop(null);
     undoManager.clear();
     projectSyncCoordinator.setSession(null);
-    workspace.closePanel('resources');
-    workspace.closePanel('inspector');
-    workspace.closePanel('section-editor');
-    workspace.closePanel('timeline');
-    workspace.closePanel('events');
     let nextSession: DbSession | null = null;
     try {
       session?.close();
@@ -597,10 +592,12 @@ export function createAppShell(root: HTMLElement): AppShell {
       assetClipboard.invalidateSession(session);
       projectSyncCoordinator.setSession(session, connection.isConnected());
       dbState.setOpen(session.fileName);
-      workspace.closePanel('inspector');
-      workspace.openPanel('timeline');
+      const shouldOpenDefaultProjectPanels = !workspace.hasLayoutPreference();
+      if (shouldOpenDefaultProjectPanels) {
+        workspace.openPanel('timeline');
+        workspace.openPanel('resources', { widthRatio: SIDE_PANEL_WIDTH_RATIO });
+      }
       flushPendingEventsOpen();
-      workspace.openPanel('resources', { widthRatio: SIDE_PANEL_WIDTH_RATIO });
     } catch (err) {
       nextSession?.close();
       session = null;

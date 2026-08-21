@@ -2,6 +2,13 @@ import { DockviewComponent } from 'dockview-core';
 import type { AddPanelPositionOptions, ITabRenderer, TabPartInitParameters } from 'dockview-core';
 
 import { DEFAULT_PANELS } from './default-layout';
+import {
+  getBrowserLayoutStorage,
+  readWorkspaceLayout,
+  removeWorkspaceLayout,
+  writeWorkspaceLayout,
+  type WorkspaceLayoutStorage,
+} from './workspace-layout-storage';
 import type { PanelDefinition } from '../app/types';
 import type { PanelRegistry } from '../panels/panel-registry';
 import type { AppState } from '../state/app-state';
@@ -9,6 +16,7 @@ import type { AppState } from '../state/app-state';
 interface WorkspaceOptions {
   state: AppState;
   panels: PanelRegistry;
+  storage?: WorkspaceLayoutStorage | null;
   onPanelOpened?: (panelId: string) => void;
   onPanelClosed?: (panelId: string) => void;
 }
@@ -16,6 +24,7 @@ interface WorkspaceOptions {
 export interface DockviewWorkspace {
   mount(container: HTMLElement): void;
   resetLayout(): void;
+  hasLayoutPreference(): boolean;
   openPanel(panelId: string, options?: OpenPanelOptions): void;
   closePanel(panelId: string): void;
   isPanelOpen(panelId: string): boolean;
@@ -31,6 +40,8 @@ interface OpenPanelOptions {
 export function createDockviewWorkspace(options: WorkspaceOptions): DockviewWorkspace {
   let dockview: DockviewComponent | null = null;
   let workspaceContainer: HTMLElement | null = null;
+  let hasLayoutPreference = false;
+  const storage = options.storage === undefined ? getBrowserLayoutStorage() : options.storage;
 
   function addDockedPanel(panel: PanelDefinition, panelOptions: OpenPanelOptions = {}): void {
     if (!dockview) {
@@ -107,6 +118,12 @@ export function createDockviewWorkspace(options: WorkspaceOptions): DockviewWork
     dockview.clear();
   }
 
+  function persistCurrentLayout(): void {
+    if (!dockview) return;
+    hasLayoutPreference = true;
+    writeWorkspaceLayout(storage, dockview.toJSON());
+  }
+
   return {
     mount(container: HTMLElement): void {
       workspaceContainer = container;
@@ -129,11 +146,29 @@ export function createDockviewWorkspace(options: WorkspaceOptions): DockviewWork
         options.onPanelClosed?.(panel.id);
       });
 
-      applyDefaultLayout();
+      const storedLayout = readWorkspaceLayout(storage);
+      if (storedLayout.kind === 'restored') {
+        try {
+          dockview.fromJSON(storedLayout.layout);
+          hasLayoutPreference = true;
+        } catch {
+          removeWorkspaceLayout(storage);
+          applyDefaultLayout();
+        }
+      } else {
+        applyDefaultLayout();
+      }
+
+      dockview.onDidLayoutChange(persistCurrentLayout);
     },
 
     resetLayout(): void {
       applyDefaultLayout();
+      persistCurrentLayout();
+    },
+
+    hasLayoutPreference(): boolean {
+      return hasLayoutPreference;
     },
 
     openPanel(panelId: string, panelOptions: OpenPanelOptions = {}): void {
