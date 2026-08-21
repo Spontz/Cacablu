@@ -220,12 +220,7 @@ export function createSectionEditorPanel(
 
       const root = document.createElement('div');
       root.className = 'section-editor';
-      root.addEventListener('keydown', (event) => {
-        if (!isApplyShortcut(event) || isMonacoEventTarget(event.target)) return;
-        event.preventDefault();
-        event.stopPropagation();
-        window.setTimeout(applyCurrentBarEdits, 0);
-      });
+      installSectionApplyKeyHandler(root, applyCurrentBarEdits);
 
       const timeRow = document.createElement('div');
       timeRow.className = 'section-editor__row section-editor__row--bar-meta';
@@ -595,6 +590,7 @@ export function createSectionEditorPanel(
     function renderMultiSelection(selectedBars: DbBar[]): void {
       const root = document.createElement('div');
       root.className = 'section-editor section-editor--multi';
+      installSectionApplyKeyHandler(root, applyMultiSelectionEdits);
 
       const timeRow = document.createElement('div');
       timeRow.className = 'section-editor__row section-editor__row--multi-time';
@@ -634,7 +630,9 @@ export function createSectionEditorPanel(
         return true;
       });
 
-      apply.addEventListener('click', () => {
+      apply.addEventListener('click', applyMultiSelectionEdits);
+
+      function applyMultiSelectionEdits(): void {
         const currentBars = getSelectedBars();
         if (currentBars.length <= 1) return;
 
@@ -692,7 +690,7 @@ export function createSectionEditorPanel(
         });
         window.dispatchEvent(new CustomEvent('cacablu:timeline-bars-changed'));
         void syncBarsToPhoenix(changedIds);
-      });
+      }
     }
 
     function takeBarSnapshots(bars: DbBar[]): BarSnapshot[] {
@@ -1062,6 +1060,23 @@ function roundEditorTime(value: number): number {
 function isApplyShortcut(event: KeyboardEvent): boolean {
   const key = event.key.toLowerCase();
   return (event.ctrlKey || event.metaKey) && !event.shiftKey && !event.altKey && (key === 'enter' || key === 'return');
+}
+
+function installSectionApplyKeyHandler(root: HTMLElement, onApply: () => void): void {
+  root.addEventListener('keydown', (event) => {
+    if (event.isComposing || event.repeat || isMonacoEventTarget(event.target)) return;
+    if (!isSingleLineInputEnter(event) && !isApplyShortcut(event)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    window.setTimeout(onApply, 0);
+  }, { capture: true });
+}
+
+function isSingleLineInputEnter(event: KeyboardEvent): boolean {
+  const key = event.key.toLowerCase();
+  if (key !== 'enter' && key !== 'return') return false;
+  if (!(event.target instanceof HTMLInputElement)) return false;
+  return ['text', 'number', 'search', 'email', 'tel', 'url', 'password'].includes(event.target.type);
 }
 
 function isMonacoEventTarget(target: EventTarget | null): boolean {

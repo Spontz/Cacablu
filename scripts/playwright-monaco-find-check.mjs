@@ -151,6 +151,12 @@ try {
       state: () => ({
         canUndo: undoManager.canUndo(),
         isDirty: dbState.getSnapshot().isDirty,
+        bar: {
+          name: bar.name,
+          type: bar.type,
+          script: bar.script,
+          startTime: bar.startTime,
+        },
       }),
       dispose: () => {
         section.dispose();
@@ -348,6 +354,41 @@ try {
     throw new Error(`Saving a section reloaded a text editor: ${JSON.stringify(savePreservation)}`);
   }
 
+  const sectionPanel = panel('section');
+  const nameInput = sectionPanel.locator('.section-editor__field').filter({ hasText: 'Name' }).locator('input');
+  await nameInput.fill('Applied with Enter');
+  await nameInput.press('Enter');
+  await page.waitForFunction(() => window.__monacoFindFixture.state().bar.name === 'Applied with Enter');
+
+  const barTypeInput = sectionPanel.locator('.section-editor__field').filter({ hasText: 'Bar Type' }).locator('input');
+  await barTypeInput.fill('drawQuad');
+  await barTypeInput.press('Enter');
+  await page.waitForFunction(() => window.__monacoFindFixture.state().bar.type === 'drawQuad');
+
+  const startInput = sectionPanel.locator('.section-editor__field').filter({ hasText: 'Start Time' }).locator('input');
+  await startInput.fill('0.25');
+  await startInput.press('Enter');
+  await page.waitForFunction(() => window.__monacoFindFixture.state().bar.startTime === 0.25);
+
+  await sectionPanel.locator('.monaco-editor .view-lines').click();
+  await page.keyboard.press('Control+End');
+  await page.keyboard.press('Enter');
+  await page.keyboard.insertText('editor newline remains unsaved');
+  const enterApplyBehavior = {
+    state: await page.evaluate(() => window.__monacoFindFixture.state()),
+    editorText: await readEditorState('section'),
+  };
+
+  if (
+    enterApplyBehavior.state.bar.name !== 'Applied with Enter'
+    || enterApplyBehavior.state.bar.type !== 'drawQuad'
+    || enterApplyBehavior.state.bar.startTime !== 0.25
+    || enterApplyBehavior.state.bar.script !== 'saved section script'
+    || !enterApplyBehavior.editorText.text.includes('editor newline remains unsaved')
+  ) {
+    throw new Error(`Section Enter behavior failed: ${JSON.stringify(enterApplyBehavior)}`);
+  }
+
   console.log(JSON.stringify({
     results,
     modes: { caseSensitiveCount, wholeWordCount, regexCount },
@@ -355,6 +396,7 @@ try {
     shortcutScope,
     applicationState,
     savePreservation,
+    enterApplyBehavior,
   }, null, 2));
 } finally {
   await browser.close();
