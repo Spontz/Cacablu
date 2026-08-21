@@ -86,6 +86,38 @@ describe('buildResourceTree', () => {
     expect(JSON.stringify(tree)).toContain('"id":11');
   });
 
+  it('sorts folders and files alphabetically at every level', () => {
+    const tree = buildResourceTree(makeDb({
+      folders: [
+        { id: 3, name: 'zeta', parent: 0, enabled: true },
+        { id: 2, name: 'Alpha', parent: 0, enabled: true },
+        { id: 5, name: 'nested-z', parent: 2, enabled: true },
+        { id: 4, name: 'nested-a', parent: 2, enabled: true },
+      ],
+      files: [
+        { id: 14, name: 'shader10.glsl', parent: 0, bytes: 1, type: 'text/plain', data: new Uint8Array(), format: 'glsl', enabled: true },
+        { id: 13, name: 'Shader2.glsl', parent: 0, bytes: 1, type: 'text/plain', data: new Uint8Array(), format: 'glsl', enabled: true },
+        { id: 12, name: 'z-last.txt', parent: 2, bytes: 1, type: 'text/plain', data: new Uint8Array(), format: 'txt', enabled: true },
+        { id: 11, name: 'A-first.txt', parent: 2, bytes: 1, type: 'text/plain', data: new Uint8Array(), format: 'txt', enabled: true },
+      ],
+    }));
+
+    expect(tree.map((node) => `${node.kind}:${node.name}`)).toEqual([
+      'folder:Alpha',
+      'folder:zeta',
+      'file:Shader2.glsl',
+      'file:shader10.glsl',
+    ]);
+    expect(tree[0].kind).toBe('folder');
+    if (tree[0].kind !== 'folder') throw new Error('Expected Alpha to be a folder.');
+    expect(tree[0].children.map((node) => `${node.kind}:${node.name}`)).toEqual([
+      'folder:nested-a',
+      'folder:nested-z',
+      'file:A-first.txt',
+      'file:z-last.txt',
+    ]);
+  });
+
   it('escapes separators inside names without dropping the original name', () => {
     expect(escapeResourcePathSegment('fx/a\\b')).toBe('fx\\/a\\\\b');
   });

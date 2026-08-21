@@ -30,6 +30,11 @@ type FolderDraft = Omit<ResourceFolderNode, 'path' | 'children'> & {
   children: DraftNode[];
 };
 
+const RESOURCE_NAME_COLLATOR = new Intl.Collator(undefined, {
+  numeric: true,
+  sensitivity: 'base',
+});
+
 export function buildResourceTree(db: Pick<ProjectDatabase, 'folders' | 'files'>): ResourceTreeNode[] {
   const folderNodes = new Map<number, FolderDraft>();
 
@@ -74,7 +79,7 @@ export function buildResourceTree(db: Pick<ProjectDatabase, 'folders' | 'files'>
     else roots.push(node);
   }
 
-  return roots.map((node) => finalizePath(node, ''));
+  return roots.sort(compareResourceNodes).map((node) => finalizePath(node, ''));
 }
 
 export function escapeResourcePathSegment(name: string): string {
@@ -95,8 +100,18 @@ function finalizePath(node: FolderDraft | ResourceFileNode, parentPath: string):
     name: node.name,
     path,
     enabled: node.enabled,
-    children: node.children.map((child) => finalizePath(child, path)),
+    children: node.children
+      .sort(compareResourceNodes)
+      .map((child) => finalizePath(child, path)),
   };
+}
+
+function compareResourceNodes(left: DraftNode, right: DraftNode): number {
+  if (left.kind !== right.kind) return left.kind === 'folder' ? -1 : 1;
+
+  return RESOURCE_NAME_COLLATOR.compare(left.name, right.name)
+    || left.name.localeCompare(right.name)
+    || left.id - right.id;
 }
 
 function normalizeParentId(input: Pick<DbFolder | DbFile, 'parent'>): number {

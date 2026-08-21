@@ -29,10 +29,10 @@ export function snapshotResourceFileContent(file: DbFile): ResourceFileContentSn
 export function shouldReplaceResourceFileEditorContent(
   currentFileId: number | null,
   nextFileId: number,
-  editorContent: string,
+  previousPersistedContent: string,
   persistedContent: string,
 ): boolean {
-  return currentFileId !== nextFileId || editorContent !== persistedContent;
+  return currentFileId !== nextFileId || previousPersistedContent !== persistedContent;
 }
 
 export function registerResourceFileSaveUndo(options: RegisterResourceFileSaveUndoOptions): void {

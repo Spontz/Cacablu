@@ -202,12 +202,22 @@ try {
     }
   }
 
+  async function activateLoopAt(time) {
+    if (await page.locator('.timeline-panel__loop-range').count() > 0) {
+      await clickRulerAt(time, 'lower');
+    }
+    await clickRulerAt(time, 'lower');
+  }
+
   await clickRulerAt(2, 'lower');
   await page.waitForTimeout(100);
   let markerCount = await page.evaluate(() => window.__markerFixture.db.markers.length);
   if (markerCount !== 0) {
     throw new Error(`Expected normal lower-zone click not to create a marker, got ${markerCount}`);
   }
+  // The normal lower-zone click toggles a loop even while Phoenix is offline.
+  // Clear it so the later connected activation starts from a known state.
+  await clickRulerAt(2, 'lower');
 
   await clickRulerAt(2, 'lower', { modifiers: ['Shift'] });
   await page.waitForFunction(() => window.__markerFixture.db.markers.length === 1);
@@ -266,7 +276,7 @@ try {
     window.__markerFixture.connected = true;
     window.__markerFixture.sent.length = 0;
   });
-  await clickRulerAt(5, 'lower');
+  await activateLoopAt(5);
   const immediateLoopStartSeek = await page.evaluate(() => window.__markerFixture.sent.some((message) => (
     message.type === 'runtime.seek' && Math.abs(message.time - 4) < 0.001
   )));
@@ -381,7 +391,17 @@ try {
   await enabledCheckbox.check();
   await page.waitForFunction(() => window.__markerFixture.db.markers.find((marker) => marker.id === 1)?.enabled === true);
 
-  await clickRulerAt(5, 'lower');
+  await page.evaluate(() => {
+    window.__markerFixture.emitRuntime({
+      time: 5.5,
+      playing: false,
+      fps: 60,
+      startTime: 4,
+      endTime: 7,
+      receivedAt: Date.now(),
+    });
+    window.__markerFixture.sent.length = 0;
+  });
   const movedMarker = page.locator('.timeline-panel__loop-marker[data-marker-id="1"]');
   const movedMarkerBox = await movedMarker.boundingBox();
   if (!movedMarkerBox) throw new Error('Missing marker before active-loop move');
@@ -397,6 +417,15 @@ try {
     const end = (Number.parseFloat(range.style.left) + Number.parseFloat(range.style.width)) / 88;
     return Math.abs(left - 3) < 0.15 && Math.abs(end - 7) < 0.15;
   });
+  await page.waitForTimeout(250);
+  const markerMoveSeekCount = await page.evaluate(() => window.__markerFixture.sent.filter((message) => (
+    message.type === 'runtime.seek'
+  )).length);
+  if (markerMoveSeekCount !== 0) {
+    throw new Error(`Expected marker move to send no runtime seek, got ${markerMoveSeekCount}`);
+  }
+  const timeAfterMarkerMove = Number.parseFloat(await page.locator('.timeline-panel__playhead span').innerText());
+  expectClose(timeAfterMarkerMove, 5.5, 'playhead after active-loop marker move', 0.001);
 
   await page.locator('.panel--timeline').focus();
   await page.keyboard.press('Delete');
@@ -446,7 +475,7 @@ try {
   await page.evaluate(() => {
     window.__markerFixture.sent.length = 0;
   });
-  await clickRulerAt(8, 'lower');
+  await activateLoopAt(8);
   await page.waitForFunction(() => window.__markerFixture.sent.some((message) => (
     message.type === 'runtime.seek' && Math.abs(message.time - 7) < 0.001
   )));
@@ -457,7 +486,7 @@ try {
   expectClose(nextLoop.left / 88, 7, 'post-runtime-state loop start');
   expectClose((nextLoop.left + nextLoop.width) / 88, 12, 'post-runtime-state loop end');
 
-  await clickRulerAt(1, 'lower');
+  await activateLoopAt(1);
   const fallback = await page.locator('.timeline-panel__loop-range').first().evaluate((node) => ({
     left: Number.parseFloat(node.style.left),
     width: Number.parseFloat(node.style.width),

@@ -21,6 +21,7 @@ import {
 import { createContentRenderer } from './base-panel';
 import { CACABLU_CODE_THEME, registerCacabluCodeTheme } from './code-editor-theme';
 import { installSelectionOccurrenceHighlighting } from './selection-occurrence-highlighting';
+import './monaco-find';
 
 registerGlslLanguage();
 registerCacabluCodeTheme();
@@ -141,7 +142,7 @@ export function createGlslAssetEditorPanel(
       const replaceEditorContent = shouldReplaceGlslEditorContent(
         currentFileId,
         file.id,
-        editor?.getValue() ?? '',
+        originalContent,
         persistedContent,
       );
       currentFileId = file.id;

@@ -37,9 +37,9 @@ function makeSession(file: DbFile) {
 }
 
 describe('GLSL editor undo', () => {
-  it('preserves Monaco text history when saving the unchanged editor model', () => {
+  it('preserves Monaco text history across unrelated project changes', () => {
     expect(shouldReplaceGlslEditorContent(7, 7, 'saved text', 'saved text')).toBe(false);
-    expect(shouldReplaceGlslEditorContent(7, 7, 'unsaved text', 'saved text')).toBe(true);
+    expect(shouldReplaceGlslEditorContent(7, 7, 'before', 'after')).toBe(true);
     expect(shouldReplaceGlslEditorContent(6, 7, 'saved text', 'saved text')).toBe(true);
   });
 

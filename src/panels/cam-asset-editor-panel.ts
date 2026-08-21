@@ -22,6 +22,7 @@ import { createContentRenderer } from './base-panel';
 import { CACABLU_CODE_THEME, registerCacabluCodeTheme } from './code-editor-theme';
 import { installSelectionOccurrenceHighlighting } from './selection-occurrence-highlighting';
 import { camColumnClassName, findCamColumnTokens } from './cam-column-highlighting';
+import './monaco-find';
 
 const CAM_LANGUAGE_ID = 'cacablu-cam';
 
@@ -132,7 +133,7 @@ export function createCamAssetEditorPanel(
       const replaceEditorContent = shouldReplaceResourceFileEditorContent(
         currentFileId,
         file.id,
-        editor?.getValue() ?? '',
+        originalContent,
         persistedContent,
       );
       currentFileId = file.id;

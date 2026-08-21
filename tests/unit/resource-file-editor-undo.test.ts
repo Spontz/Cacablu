@@ -37,9 +37,10 @@ function makeSession(file: DbFile) {
 }
 
 describe('resource file editor undo', () => {
-  it('decides whether persisted content should replace the editor model', () => {
+  it('only replaces the editor model when its file or persisted content changed', () => {
     expect(shouldReplaceResourceFileEditorContent(9, 9, 'same', 'same')).toBe(false);
-    expect(shouldReplaceResourceFileEditorContent(9, 9, 'draft', 'saved')).toBe(true);
+    expect(shouldReplaceResourceFileEditorContent(9, 9, 'saved', 'saved')).toBe(false);
+    expect(shouldReplaceResourceFileEditorContent(9, 9, 'before', 'after')).toBe(true);
     expect(shouldReplaceResourceFileEditorContent(8, 9, 'same', 'same')).toBe(true);
   });
 

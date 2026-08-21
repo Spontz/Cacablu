@@ -17,6 +17,7 @@ import { prepareMultiBarTimeEdit } from '../services/multi-bar-time-edit';
 import { createContentRenderer } from './base-panel';
 import { CACABLU_CODE_THEME, registerCacabluCodeTheme } from './code-editor-theme';
 import { installSelectionOccurrenceHighlighting } from './selection-occurrence-highlighting';
+import './monaco-find';
 
 const TEMPLATE_STORAGE_KEY = 'cacablu.sectionEditor.templates';
 const BAR_TYPE_STORAGE_KEY = 'cacablu.sectionEditor.barTypes';
@@ -195,7 +196,8 @@ export function createSectionEditorPanel(
 
     function render(): void {
       disposeCodeEditor();
-      if (dbState.getSnapshot().status !== 'open' || !sessionRef.current) {
+      const dbStatus = dbState.getSnapshot().status;
+      if ((dbStatus !== 'open' && dbStatus !== 'saving') || !sessionRef.current) {
         activeSelectionSignature = null;
         renderEmpty('No project open.');
         return;
@@ -922,11 +924,12 @@ export function createSectionEditorPanel(
         render();
       }
     });
-    let lastDbStatus = dbState.getSnapshot().status;
+    let lastDbSession = sessionRef.current;
     let lastDbFileName = dbState.getSnapshot().fileName;
     const unsubscribeDb = dbState.subscribe((snapshot) => {
-      if (snapshot.status === lastDbStatus && snapshot.fileName === lastDbFileName) return;
-      lastDbStatus = snapshot.status;
+      const nextDbSession = sessionRef.current;
+      if (nextDbSession === lastDbSession && snapshot.fileName === lastDbFileName) return;
+      lastDbSession = nextDbSession;
       lastDbFileName = snapshot.fileName;
       render();
     });
