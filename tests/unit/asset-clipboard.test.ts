@@ -7,6 +7,7 @@ import {
   createAssetClipboard,
   normalizePoolPath,
   pendingCutKeys,
+  renameSameFolderFileCopies,
   resolveAssetPasteParent,
   serializePoolPaths,
   validateAssetCopyDestination,
@@ -66,6 +67,22 @@ describe('asset clipboard', () => {
     expect(() => validateAssetCopyDestination(db, roots, 1)).toThrow('cannot be copied into itself');
     expect(() => validateAssetCopyDestination(db, roots, 2)).toThrow('cannot be copied into itself');
     expect(() => validateAssetCopyDestination(db, roots, 0)).not.toThrow();
+  });
+
+  it('numbers file copies pasted into their source folder', () => {
+    const db = createProject();
+    db.files.push(
+      { ...db.files[0], id: 5, name: 'hero-1.png' },
+      { ...db.files[0], id: 6, name: 'README', parent: 0 },
+    );
+    db.folders.push({ id: 7, name: 'hero-2.png', parent: 1, enabled: true });
+
+    const imageRoots = captureAssetRoots(db, [{ kind: 'file', id: 3, name: 'hero.png', fileType: 'image/png' }]);
+    expect(renameSameFolderFileCopies(db, imageRoots, 1)[0].name).toBe('hero-3.png');
+
+    const extensionlessRoots = captureAssetRoots(db, [{ kind: 'file', id: 6, name: 'README', fileType: 'text/plain' }]);
+    expect(renameSameFolderFileCopies(db, extensionlessRoots, 0)[0].name).toBe('README-1');
+    expect(renameSameFolderFileCopies(db, imageRoots, 0)[0]).toBe(imageRoots[0]);
   });
 
   it('captures immutable copy data and keeps copies available', () => {

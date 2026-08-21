@@ -21,7 +21,7 @@ vi.mock('../../src/db/sql-loader', () => {
 
 import { openDbSession } from '../../src/db/db-session';
 import { getSqlJs } from '../../src/db/sql-loader';
-import { captureAssetRoots } from '../../src/resources/asset-clipboard';
+import { captureAssetRoots, renameSameFolderFileCopies } from '../../src/resources/asset-clipboard';
 
 class MemoryFileHandle {
   readonly name = 'project.sqlite';
@@ -356,6 +356,21 @@ describe('DbSession Pool clipboard mutations', () => {
     expect(() => session.moveResourceItems([{ kind: 'folder', id: 1 }], 2)).toThrow('descendant');
     expect(session.data.folders).toEqual(beforeFolders);
     expect(session.data.files.map((file) => ({ ...file, data: [...file.data] }))).toEqual(beforeFiles);
+    session.close();
+  });
+
+  it('copies a same-folder file with a numbered name', async () => {
+    const handle = new MemoryFileHandle(await createResourceProjectBytes()) as unknown as FileSystemFileHandle;
+    const session = await openDbSession(handle);
+    const fileRoot = captureAssetRoots(session.data, [{ kind: 'file', id: 3, name: 'hero.png', fileType: 'image/png' }]);
+    const renamedRoots = renameSameFolderFileCopies(session.data, fileRoot, 1);
+
+    const result = session.copyResourceItems(renamedRoots, 1);
+    const copied = result.roots[0]?.kind === 'file'
+      ? session.data.files.find((file) => file.id === result.roots[0].id)
+      : null;
+    expect(copied).toMatchObject({ name: 'hero-1.png', parent: 1 });
+    expect([...copied!.data]).toEqual([...session.data.files.find((file) => file.id === 3)!.data]);
     session.close();
   });
 

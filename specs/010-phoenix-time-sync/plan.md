@@ -98,3 +98,7 @@ Post-design constitution check remains PASS:
 | Violation | Why Needed | Simpler Alternative Rejected Because |
 |-----------|------------|-------------------------------------|
 | None | N/A | N/A |
+
+## 2026-08-22 Marker Reconciliation Constraint
+
+Loop activation remains the only marker-loop interaction that intentionally seeks to a boundary. Moving an existing marker can update the active loop request, but it preserves Cacablu transport anchors and never emits `runtime.seek`, allowing Phoenix to continue playback without a restart.

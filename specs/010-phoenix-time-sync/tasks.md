@@ -71,6 +71,14 @@
 
 ---
 
+## Phase 7: 2026-08-22 Playback Preservation
+
+- [x] T025 Prevent marker-move loop reconciliation from emitting a Phoenix seek.
+- [x] T026 Preserve local current time and interpolation anchors across marker movement.
+- [x] T027 Extend runtime/marker validation to distinguish loop activation seeks from marker-reconciliation updates.
+
+---
+
 ## Dependencies & Execution Order
 
 - Setup before Foundational

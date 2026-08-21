@@ -315,6 +315,21 @@ try {
     .map((file) => [file.id, file.parent]));
 
   const sourceFolder = page.locator('[data-resource-kind="folder"]', { hasText: 'source' });
+  await sourceFile.click();
+  await sourceFile.dragTo(targetFolder);
+  await page.waitForFunction(() => window.__assetDndFixture.db.files.find((file) => file.id === 10)?.parent === 2);
+  await secondSourceFile.click();
+  await secondSourceFile.dragTo(targetFolder);
+  await page.waitForFunction(() => window.__assetDndFixture.db.files.find((file) => file.id === 11)?.parent === 2);
+  result.repeatedFileDragParents = await page.evaluate(() => window.__assetDndFixture.db.files
+    .filter((file) => file.id === 10 || file.id === 11)
+    .map((file) => [file.id, file.parent]));
+  await page.evaluate(() => window.__assetDndFixture.undo.undo());
+  await page.evaluate(() => window.__assetDndFixture.undo.undo());
+  await page.waitForFunction(() => window.__assetDndFixture.db.files
+    .filter((file) => file.id === 10 || file.id === 11)
+    .every((file) => file.parent === 1));
+
   await targetFolder.click();
   const targetChild = page.locator('[data-resource-kind="file"]', { hasText: 'destination.txt' });
   await sourceFolder.dragTo(targetChild);

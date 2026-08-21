@@ -48,6 +48,7 @@ import { createAssetClipboard } from '../resources/asset-clipboard';
 import { isNativeTextWriteInProgress } from '../resources/system-clipboard';
 import {
   createBarClipboardEnvelope,
+  createPoolClipboardEnvelope,
   getClipboardPlainText,
   poolClipboardRootsToAssetNodes,
   readEnvelopeFromDataTransfer,
@@ -299,10 +300,15 @@ export function createAppShell(root: HTMLElement): AppShell {
       if (envelope.kind !== 'pool') {
         throw new Error('Only Pool files and folders can be pasted into the Pool.');
       }
+      const localSnapshot = assetClipboard.getSnapshot();
+      const matchesLocalSnapshot = Boolean(
+        localSnapshot
+        && JSON.stringify(createPoolClipboardEnvelope(localSnapshot.roots).payload) === JSON.stringify(envelope.payload),
+      );
       window.dispatchEvent(new CustomEvent('cacablu:asset-clipboard-command', {
         detail: {
           command: 'paste',
-          externalRoots: poolClipboardRootsToAssetNodes(envelope.payload),
+          ...(matchesLocalSnapshot ? {} : { externalRoots: poolClipboardRootsToAssetNodes(envelope.payload) }),
         },
       }));
       return true;

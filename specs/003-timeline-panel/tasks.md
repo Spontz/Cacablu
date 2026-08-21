@@ -157,3 +157,9 @@ retains it without breaking the clip layout.
 3. Add the transport bar icon controls
 4. Keep the interaction model stable for editing and keyframes
 
+## 2026-08-22 Marker Regression
+
+- [x] T-M01 Preserve current transport time and interpolation anchors while moving a marker.
+- [x] T-M02 Reconcile active loop bounds after marker commit without issuing a seek or restarting playback.
+- [x] T-M03 Cover marker movement during playback in the Timeline marker/loop browser regression.
+

@@ -46,6 +46,15 @@
 - [x] T027 Add source-session identity to Pool drag routing so only an exact editor/session match can move original ids.
 - [x] T028 Add unit regression coverage for different project sessions with overlapping resource ids in `tests/unit/resource-drag-origin.test.ts`.
 
+## Same-Folder Copy Naming And Repeated Drag Reliability
+
+- [x] T029 Allocate `-1`, `-2`, and the next free suffix before a copied file extension when source and destination folders are identical.
+- [x] T030 Reserve generated names across the current copy batch and compare sibling conflicts case-insensitively without overwriting files or folders.
+- [x] T031 Preserve existing conflict behavior for folder copies, moves, imports, and cross-editor copies.
+- [x] T032 Clear stale internal drag state at the start of every gesture and keep local drag functional when optional rich-transfer publication fails.
+- [x] T033 Ensure system-clipboard paste reuses the local snapshot for same-project copies so same-folder numbering is applied consistently.
+- [x] T034 Add unit coverage for numbered copies and browser coverage for consecutive Pool drag/drop gestures.
+
 ## Latest Validation
 
 - `npm run typecheck`: passed.

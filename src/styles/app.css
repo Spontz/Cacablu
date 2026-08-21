@@ -1645,6 +1645,8 @@ button.events-listbox__severity:focus-visible {
 .timeline-panel__clip {
   position: absolute;
   box-sizing: border-box;
+  user-select: none;
+  -webkit-user-select: none;
   top: 2px;
   bottom: 2px;
   display: flex;
@@ -1763,6 +1765,23 @@ button.events-listbox__severity:focus-visible {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.timeline-panel__clip-resize-handle {
+  position: absolute;
+  z-index: 2;
+  top: 0;
+  bottom: 0;
+  width: 6px;
+  cursor: ew-resize;
+}
+
+.timeline-panel__clip-resize-handle--start {
+  left: 0;
+}
+
+.timeline-panel__clip-resize-handle--end {
+  right: 0;
 }
 
 .timeline-panel__clip.is-selected .timeline-panel__clip-label,

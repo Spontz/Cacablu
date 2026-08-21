@@ -110,3 +110,7 @@ No other cases change.
 ## Complexity Tracking
 
 *No constitution violations — table not applicable.*
+
+## 2026-08-22 Deterministic Ordering
+
+The resource-tree projection, rather than the panel DOM renderer, owns sibling ordering. It sorts folders before files and applies the same locale-aware name comparison at the root and recursively at every folder so all consumers receive deterministic tree data after any mutation.

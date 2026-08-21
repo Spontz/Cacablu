@@ -1,10 +1,11 @@
-/* global process, console, window, document, TextEncoder, HTMLButtonElement, KeyboardEvent */
+/* global process, console, window, document, TextEncoder, HTMLButtonElement, KeyboardEvent, CustomEvent */
 
 import { chromium } from 'playwright';
 
 const baseUrl = process.env.CACABLU_E2E_URL ?? 'http://127.0.0.1:5191/';
 const browser = await chromium.launch({ headless: true });
 const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+const rawTemplateRequests = [];
 
 function panel(selector) {
   return page.locator(`[data-test-editor="${selector}"]`);
@@ -44,6 +45,18 @@ async function readMatchCount(widget) {
 }
 
 try {
+  await page.route('https://api.github.com/repos/Spontz/Dungeon/**', (route) => route.fulfill({
+    status: 403,
+    contentType: 'application/json',
+    body: JSON.stringify({ message: 'API rate limit exceeded' }),
+  }));
+  await page.route('https://raw.githubusercontent.com/Spontz/Dungeon/master/Engines/Phoenix/CodeTemplates/**', (route) => {
+    rawTemplateRequests.push(route.request().url());
+    if (route.request().url().endsWith('/drawQuad/drawQuad.template')) {
+      return route.fulfill({ status: 200, contentType: 'text/plain', body: 'direct template loaded' });
+    }
+    return route.fulfill({ status: 404, body: 'Not found' });
+  });
   await page.goto(baseUrl, { waitUntil: 'networkidle' });
   await page.evaluate(async () => {
     const [
@@ -311,6 +324,30 @@ try {
     );
   });
 
+  const dragPreviewBehavior = await page.evaluate(() => {
+    const section = document.querySelector('[data-test-editor="section"]');
+    const editorBefore = section?.querySelector('.monaco-editor');
+    window.dispatchEvent(new CustomEvent('cacablu:timeline-bar-placement-preview', {
+      detail: { bars: [{ id: 3, startTime: 2.25, endTime: 4.75 }] },
+    }));
+    const result = {
+      startTime: section?.querySelector('[data-bar-time-field="start"]')?.value ?? null,
+      endTime: section?.querySelector('[data-bar-time-field="end"]')?.value ?? null,
+      editorPreserved: editorBefore === section?.querySelector('.monaco-editor'),
+    };
+    window.dispatchEvent(new CustomEvent('cacablu:timeline-bar-placement-preview', {
+      detail: { bars: [{ id: 3, startTime: 0, endTime: 1 }] },
+    }));
+    return result;
+  });
+  if (
+    dragPreviewBehavior.startTime !== '2.25'
+    || dragPreviewBehavior.endTime !== '4.75'
+    || !dragPreviewBehavior.editorPreserved
+  ) {
+    throw new Error(`Timeline drag did not update the Bar Editor safely: ${JSON.stringify(dragPreviewBehavior)}`);
+  }
+
   for (const [selector, content] of [['glsl', 'unsaved GLSL draft'], ['cam', 'unsaved CAM draft']]) {
     await panel(selector).locator('.monaco-editor .view-lines').click();
     await page.keyboard.press('Control+a');
@@ -389,14 +426,33 @@ try {
     throw new Error(`Section Enter behavior failed: ${JSON.stringify(enterApplyBehavior)}`);
   }
 
+  const scriptTemplateField = sectionPanel.locator('.section-editor__field').filter({ hasText: 'Script Template' });
+  const scriptTemplateInput = scriptTemplateField.locator('input');
+  await scriptTemplateInput.click();
+  await scriptTemplateField.locator('.section-editor__combo-option', { hasText: /^drawQuad$/ }).click();
+  await page.waitForTimeout(500);
+  const directTemplateBehavior = {
+    selectedTemplate: await scriptTemplateInput.inputValue(),
+    editorText: await readEditorState('section'),
+    rawTemplateRequests,
+  };
+  if (
+    directTemplateBehavior.selectedTemplate !== 'drawQuad'
+    || !directTemplateBehavior.editorText.text.includes('direct template loaded')
+  ) {
+    throw new Error(`Direct script template route failed: ${JSON.stringify(directTemplateBehavior)}`);
+  }
+
   console.log(JSON.stringify({
     results,
     modes: { caseSensitiveCount, wholeWordCount, regexCount },
     noResults,
     shortcutScope,
     applicationState,
+    dragPreviewBehavior,
     savePreservation,
     enterApplyBehavior,
+    directTemplateBehavior,
   }, null, 2));
 } finally {
   await browser.close();

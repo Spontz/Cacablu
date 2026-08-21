@@ -153,6 +153,10 @@ the active loop and playhead remain consistent.
 10. **Given** a loop is active, **When** the user clicks the ruler loop area,
     **Then** Cacablu clears the active loop locally and asks Phoenix to restore
     the runtime loop configuration that preceded the temporary interval.
+11. **Given** Phoenix is playing or paused at an arbitrary current time, **When**
+    the user drags a marker to a new position, **Then** marker and loop geometry
+    are reconciled without seeking, rewinding, restarting, or otherwise changing
+    the current playback time.
 
 ### Edge Cases
 
@@ -254,6 +258,9 @@ the active loop and playhead remain consistent.
 - **FR-034**: Clicking the ruler loop area while a loop is active MUST deactivate
   that loop instead of selecting another interval, clear the local loop state,
   and clear the temporary runtime loop override in Phoenix.
+- **FR-035**: Moving a timeline marker MUST NOT change local transport current
+  time, runtime interpolation anchors, or Phoenix playback position; the marker
+  mutation may update loop bounds but MUST allow playback to continue uninterrupted.
 
 ### Key Entities *(include if feature involves data)*
 
@@ -308,6 +315,9 @@ the active loop and playhead remain consistent.
 - **SC-015**: Playback started near a loop end keeps the rendered playhead within
   the loop across multiple locally interpolated frames and delayed runtime
   updates.
+- **SC-016**: Browser validation moves a marker during active playback and while
+  paused and observes an unchanged playback trajectory apart from ordinary time
+  progression.
 
 ## Assumptions
 

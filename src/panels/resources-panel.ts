@@ -18,6 +18,7 @@ import {
   canonicalizeSelection,
   normalizePoolPath,
   pendingCutKeys,
+  renameSameFolderFileCopies,
   resolveAssetPasteParent,
   validateAssetCopyDestination,
 } from '../resources/asset-clipboard';
@@ -467,6 +468,7 @@ export function createResourcesPanel(
     });
 
     treeEl.addEventListener('dragstart', (event) => {
+      clearAssetDragState();
       const target = getEventElement(event);
       if (target?.closest('.resources__enabled, .resources__actions-button')) return;
       const resource = target?.closest<HTMLElement>('[data-resource-kind]');
@@ -491,11 +493,16 @@ export function createResourcesPanel(
       const serialized = JSON.stringify(payload);
       draggingAssetItems = payload;
       event.dataTransfer.effectAllowed = 'copyMove';
-      writeEnvelopeToDataTransfer(
-        event.dataTransfer,
-        createPoolClipboardEnvelope(captureAssetRoots(session.data, selectedItems)),
-      );
       event.dataTransfer.setData(ASSET_FILE_DRAG_TYPE, serialized);
+      try {
+        writeEnvelopeToDataTransfer(
+          event.dataTransfer,
+          createPoolClipboardEnvelope(captureAssetRoots(session.data, selectedItems)),
+        );
+      } catch {
+        // The lightweight same-tab payload above is sufficient for local moves.
+        // Some browsers reject large or custom rich-transfer formats.
+      }
       event.dataTransfer.setData('text/plain', normalizePoolPath(
         payload.items.find((item) => item.kind === 'file')?.sourcePath ?? payload.items[0].sourcePath,
       ));
@@ -946,7 +953,7 @@ export function createResourcesPanel(
       try {
         const parentId = explicitParentId ?? resolveAssetPasteParent(session.data, state.getSnapshot().assetSelection);
         const operation = externalRoots ? 'copy' : snapshot!.operation;
-        const roots = externalRoots ?? snapshot!.roots;
+        let roots = externalRoots ?? snapshot!.roots;
         const sourceSession = externalRoots ? null : snapshot!.sourceSession;
         const wasDirty = dbState.getSnapshot().isDirty;
         const previousParents = operation === 'cut'
@@ -962,6 +969,7 @@ export function createResourcesPanel(
         if (operation === 'copy') {
           if (sourceSession === session) {
             validateAssetCopyDestination(session.data, roots, parentId);
+            roots = renameSameFolderFileCopies(session.data, roots, parentId);
           }
           result = session.copyResourceItems(roots, parentId);
         } else {

@@ -80,6 +80,21 @@ As a user, I want each open project to have its own Resources panel showing its 
 
 ---
 
+### User Story 5 - Find Resources In A Predictable Order (Priority: P1)
+
+As a user, I want the contents of every Pool folder to appear alphabetically so that files remain easy to find regardless of database insertion order.
+
+**Independent Test**: Load a project whose sibling folders and files were inserted in a deliberately shuffled order and verify every expanded level is rendered deterministically with folders first and names alphabetized within each resource kind.
+
+**Acceptance Scenarios**:
+
+1. **Given** sibling files have different names, **When** their parent is rendered, **Then** the files appear in locale-aware alphabetical order rather than database row order.
+2. **Given** sibling folders have different names, **When** their parent is rendered, **Then** the folders appear in locale-aware alphabetical order.
+3. **Given** one folder contains both folders and files, **When** it is expanded, **Then** folders appear before files and each group is alphabetized consistently.
+4. **Given** resources are added, renamed, moved, copied, or deleted, **When** the tree rerenders, **Then** the affected sibling list is alphabetized again.
+
+---
+
 ### Edge Cases
 
 - What happens when a folder has no children (empty folder)?
@@ -107,6 +122,7 @@ As a user, I want each open project to have its own Resources panel showing its 
 - **FR-011**: The Resources panel MUST show the empty-project placeholder when its project window has no database loaded.
 - **FR-012**: The Resources panel MUST remain a read-only view; it must not allow renaming, deleting, or moving files or folders.
 - **FR-013**: The feature MUST remain part of the static deployable application with no backend dependency.
+- **FR-014**: Every root and nested sibling collection MUST render folders before files and MUST order names alphabetically with a deterministic locale-aware comparison independent of database insertion order.
 
 ### Key Entities *(include if feature involves data)*
 
@@ -127,6 +143,7 @@ As a user, I want each open project to have its own Resources panel showing its 
 - **SC-005**: Manual validation confirms that each project window's Resources panel shows only the files from its own database, independently of any other open project window.
 - **SC-007**: Manual validation confirms that opening a second database opens a new independent project window without closing or affecting the first.
 - **SC-006**: Project lint, typecheck, and build checks complete without new errors for this feature.
+- **SC-008**: Automated resource-tree coverage proves shuffled root and nested inputs produce the same folders-first alphabetical output on every render.
 
 ## Assumptions
 

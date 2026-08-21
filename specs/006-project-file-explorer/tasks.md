@@ -191,3 +191,9 @@ T015  Add minimal CSS for indentation and visual distinction in resources-panel.
 - Only one line changes in `src/panels/panel-registry.ts` (Foundational phase)
 - No new files, no new dependencies, no new directories
 - Total tasks: 26 (including validation and polish)
+
+## 2026-08-22 Alphabetical Ordering
+
+- [x] T027 Sort root and nested resource nodes deterministically in `src/resources/resource-tree.ts`.
+- [x] T028 Keep folders before files while sorting names alphabetically within each kind.
+- [x] T029 Verify shuffled resource rows render in the same order through resource-tree unit coverage.

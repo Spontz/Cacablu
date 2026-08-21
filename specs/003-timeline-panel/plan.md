@@ -109,3 +109,7 @@ separate backend or editor application.
 | Violation | Why Needed | Simpler Alternative Rejected Because |
 |-----------|------------|-------------------------------------|
 | None | N/A | N/A |
+
+## 2026-08-22 Marker Playback Preservation
+
+Marker drag previews mutate only marker geometry. On pointer release, Timeline restores the previewed marker to its persisted origin before committing the marker row, reconciles active loop boundaries without seeking, and leaves transport current time plus runtime interpolation anchors untouched. The focused marker/loop browser regression verifies that playback continues naturally rather than restarting at the loop start.

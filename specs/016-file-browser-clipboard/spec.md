@@ -28,6 +28,8 @@ Users can select one or more files/folders, Cut or Copy them, and Paste into a f
 2. **Given** selected Pool roots, **When** Cut is invoked, **Then** their rows remain at 50% opacity until Paste, invalidation, or clipboard replacement.
 3. **Given** a pending Cut, **When** Paste succeeds, **Then** the same ids move to the exact destination and pending-cut state is consumed.
 4. **Given** a stale source, conflict, self/descendant destination, or multiple destinations, **When** Paste is attempted, **Then** no partial mutation occurs.
+5. **Given** a copied file is pasted back into its own source folder, **When** an equal sibling name already exists, **Then** Cacablu creates a copy named `<stem>-1<extension>` or the first higher free numeric suffix instead of rejecting the Paste.
+6. **Given** several same-folder copies are pasted in sequence, **When** prior numbered copies already exist, **Then** every Paste remains reusable and allocates the next available collision-free name without overwriting any sibling.
 
 ### User Story 2 - Use Pool Paths In Text Editors (Priority: P1)
 
@@ -126,6 +128,10 @@ Users can drag files or folders from the Pool panel of one open Cacablu editor i
 - **FR-029**: Successful cross-editor drops MUST create one destination Undo entry and reconcile enabled destination assets with Phoenix only after local commit; source Phoenix state MUST NOT be changed.
 - **FR-030**: Missing, malformed, stripped, stale, unsupported, or conflicting cross-editor drag data MUST cause zero project mutations and a clear destination diagnostic.
 - **FR-031**: Editable text targets MUST continue to receive normalized Pool path text and MUST NOT trigger same-editor move or cross-editor copy mutations.
+- **FR-032**: Copying a file into the same folder in the same project MUST resolve its unavoidable name collision by inserting the lowest available `-N` suffix before the final extension, starting at `1`.
+- **FR-033**: Same-folder automatic numbering MUST be case-insensitive for sibling conflicts, MUST reserve names across a multi-root batch, MUST preserve file bytes and metadata, and MUST NOT overwrite existing files or folders.
+- **FR-034**: Automatic numbering applies only to same-project file copies returned to their source folder; moves, folders, imports, and cross-editor conflicts retain their existing validation and confirmation semantics.
+- **FR-035**: Each Pool drag start MUST clear stale internal drag state before publishing the new payload, and failure to publish optional rich drag formats MUST NOT prevent the lightweight same-tab payload from supporting subsequent local drags.
 
 ## Success Criteria
 
@@ -140,6 +146,8 @@ Users can drag files or folders from the Pool panel of one open Cacablu editor i
   while the stale internal file remains in its original parent.
 - **SC-008**: Browser validation using two visible Cacablu editor windows confirms that file, multi-root, and nested-folder drags preserve 100% of destination hierarchy, bytes, metadata, formats, and enabled state with new ids while leaving the source unchanged.
 - **SC-009**: Invalid and conflicting cross-editor drops create zero destination entities, zero source changes, and zero Undo entries; one destination Undo removes every entity from a successful dropped batch.
+- **SC-010**: Unit tests prove `pepe.jpg` copied repeatedly into its own folder becomes `pepe-1.jpg`, then the next free numbered name, with original and prior copies unchanged.
+- **SC-011**: Browser automation performs more than one internal drag/drop in the same mounted Resources panel and confirms every gesture uses the new source payload rather than stale drag state.
 
 ## Assumptions
 

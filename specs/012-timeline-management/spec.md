@@ -51,6 +51,11 @@ As a user, I want to select a bar on the Timeline and edit its section script an
 7. **Given** Bar Editor's Monaco code editor opens suggest lists, context menus, or hover widgets, **When** those popups overlap the timeline area, **Then** they render above every docked workspace panel and are not clipped by the timeline or Dockview layout.
 8. **Given** a selected bar has section errors in Phoenix, **When** the user edits its script and presses Apply, **Then** Cacablu keeps the edited script in the project session even if Phoenix still rejects the section.
 9. **Given** a selected bar has edited time fields that are invalid, **When** the user presses Apply, **Then** Cacablu keeps the prior time range but still persists valid non-time fields such as name, type, script, and blend metadata.
+10. **Given** focus is in any single-line Bar Editor text or numeric field, **When** the user presses Enter, **Then** Cacablu applies the form exactly as if the primary OK/Apply button had been pressed.
+11. **Given** focus is in the Monaco section-script editor, **When** the user presses Enter without the Apply modifier, **Then** Monaco inserts a newline and Cacablu does not apply the form.
+12. **Given** a selected section remains selected, **When** its script or other properties are applied, **Then** Cacablu keeps the existing Monaco editor instance instead of reloading the text editors, preserving editor focus, view state, and Undo context.
+13. **Given** a bar type has a script template at the canonical Dungeon raw route, **When** Bar Editor loads templates for that type, **Then** Cacablu downloads and offers that remote template directly.
+14. **Given** the GitHub directory-list API is unavailable but the canonical raw template route succeeds, **When** templates are requested, **Then** the directly downloaded template remains usable without a repository-bundled fallback.
 
 ---
 
@@ -71,6 +76,13 @@ As a user, I want to create, move, resize, change layer, and delete bars from th
 5. **Given** a bar move was committed, **When** the user chooses Edit > Undo, **Then** Cacablu restores the bar's previous start time, end time, and layer using the undo action stack.
 6. **Given** a bar exists, **When** the user resizes its start or end edge, **Then** Cacablu updates the corresponding time while preserving positive duration.
 7. **Given** a bar is selected, **When** the user deletes it, **Then** Cacablu removes it from the project database and the timeline.
+8. **Given** one bar is selected, **When** the user Shift-clicks an unselected bar, **Then** the second bar is added to the existing selection.
+9. **Given** multiple bars are selected, **When** the user Shift-clicks a selected bar, **Then** only that bar is removed and the remaining selection is normalized to one bar or none when appropriate.
+10. **Given** one or more bars are dragged with Shift held, **When** the pointer moves horizontally and vertically, **Then** their start and end times remain locked and only their layer may change.
+11. **Given** the user starts dragging an unselected bar, **When** the gesture begins, **Then** that bar becomes the active Bar Editor selection and its Start Time and End Time fields update live during the drag and after commit.
+12. **Given** the pointer is near a bar's start or end edge, **When** the user drags that edge, **Then** Cacablu resizes that endpoint, previews the matching Bar Editor times, validates duration and overlap, and commits one undoable edit on release.
+13. **Given** a completed drag leaves bars selected, **When** the user clicks empty Timeline space, **Then** the selection clears normally and is not trapped by pointer-capture state.
+14. **Given** a bar label is visible, **When** the user drags or clicks across its text, **Then** browser text selection does not start and the intended Timeline gesture retains control.
 
 ---
 
@@ -196,11 +208,21 @@ As a user, I want unused timeline rows to behave as available layers so that I c
 - **FR-040**: The unused-layer extension MUST advance whenever a new last occupied layer is created.
 - **FR-041**: Vertical time-grid lines MUST continue through all currently visible scrolled layers and remain ruler-aligned.
 - **FR-042**: Timeline-specific commands MUST appear under a top-level menu named `Timeline`, with no separate New Layer command.
+- **FR-043**: Shift-click on a bar MUST toggle that bar in the current selection without discarding other selected bars, and the resulting shared selection MUST normalize to `none`, one bar, or multiple bars.
+- **FR-044**: A Shift-modified bar drag MUST lock every dragged bar's start and end times for the complete gesture and permit layer displacement only.
+- **FR-045**: Pointer-down on a draggable bar MUST select it for Bar Editor unless Shift is being used to toggle an existing selection; a no-movement Shift gesture MUST remain a selection toggle rather than a drag.
+- **FR-046**: During bar move, group move, and resize previews, Bar Editor MUST update visible aggregate Start Time and End Time values without persisting the preview before pointer release.
+- **FR-047**: Bars MUST expose start/end pointer resize zones that preserve positive duration, prevent same-layer overlap, commit through the project session, create Undo history, and schedule the existing deferred Phoenix section sync.
+- **FR-048**: Timeline bar and label text MUST be non-selectable by browser text-selection gestures.
+- **FR-049**: Enter in a Bar Editor single-line input MUST invoke the same Apply operation as the primary form button; plain Enter inside Monaco MUST retain newline editing behavior, while `Ctrl/Cmd+Enter` MAY remain an explicit Apply shortcut.
+- **FR-050**: Applying a section while its selection and project session remain unchanged MUST NOT recreate or reload the Monaco editor or unrelated text editors.
+- **FR-051**: Bar Editor MUST attempt the canonical remote raw template path for `<barType>/<barType>.template` and MAY merge additional templates discovered through the GitHub contents API.
+- **FR-052**: Remote template loading MUST NOT depend on a checked-in fallback template; a successful canonical raw response MUST remain usable if directory discovery fails.
 
 ### Key Entities *(include if feature involves data)*
 
 - **Timeline Bar**: The editable visual representation of a project database bar, including id, type, layer, start time, end time, enabled state, blend metadata, and script.
-- **Timeline Selection**: The current selected timeline bar id or empty selection state shared with Inspector.
+- **Timeline Selection**: The current empty, single-bar, or multi-bar selection shared with Bar Editor and global editing commands.
 - **Bar Editor**: The right-side panel for editing a selected bar's type/template, script, blend source, blend destination, and blend equation.
 - **Monaco Overflow Widget**: A Monaco-owned popup such as the suggest list, hover widget, or context menu that must escape dock-panel clipping and remain topmost while editing code.
 - **Timeline Edit Transaction**: A create, move, resize, layer change, property edit, or delete operation applied to the project database.
@@ -226,10 +248,13 @@ As a user, I want unused timeline rows to behave as available layers so that I c
 - **SC-012**: Opening a project before Timeline mounts still renders all project bars when the Timeline panel is opened.
 - **SC-013**: A bar can be created on any visible unused row while one full unused window remains below the resulting last occupied layer.
 - **SC-014**: Grid lines remain visible and aligned throughout vertical layer scrolling.
+- **SC-015**: Browser automation proves Shift-click add/remove/clear selection, Shift-drag time locking, empty-space deselection, live Bar Editor timing, start/end resize, and non-selectable labels in one real pointer workflow.
+- **SC-016**: Browser automation proves Enter applies from single-line inputs while plain Monaco Enter inserts a newline, and applying without changing selection leaves the same editor surface active.
+- **SC-017**: Template-loading validation proves the canonical raw route can populate the editor even when directory discovery fails and no repository fallback exists.
 
 ## Assumptions
 
 - The current SQLite schema can represent the required bar edits.
 - The existing project section sync service remains the correct pathway for sending bars to Phoenix.
-- The first implementation does not need multi-select editing.
+- Multi-bar selection is represented in shared application state and is required for Shift-click toggling, group drag, clipboard, deletion, and aggregate Bar Editor workflows.
 - Exact gesture choices for creation can be toolbar, context menu, double click, or a combination decided during implementation.

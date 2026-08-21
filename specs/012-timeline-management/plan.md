@@ -9,6 +9,7 @@ Make Cacablu's Timeline an editable project bar management surface. Timeline wil
 The first editing surface is a right-side Bar Editor opened from a selected timeline bar, allowing script and blend setting edits before broader drag/resize timeline operations are added.
 The editor must provide real diagnostic feedback: section sync progress counters only advance for counted local work, bars with section sync errors are colored red, and Events remains a compact diagnostics surface.
 The layer surface is implicit: any visible row can receive a bar, no empty layer entity or New Layer command is stored, and one full window of unused rows remains below occupied content while scrolling preserves the time grid.
+Direct manipulation is selection-aware: Shift-click toggles bar membership, Shift-drag locks time while changing layers, bar-edge handles resize endpoints, and transient placement events keep Bar Editor times synchronized without persisting until release. Bar Editor Apply is in-place so an unchanged selection does not recreate Monaco, and remote script templates are downloaded from their canonical Dungeon routes without a checked-in fallback.
 
 ## Technical Context
 
@@ -79,6 +80,16 @@ tests/
 
 **Structure Decision**: Add bar persistence helpers near the existing DB session/writer modules, keep timeline interactions in `timeline-panel.ts` and `packages/timeline`, and reuse `project-section-sync.ts` through a debounced scheduler owned by the app shell or a focused service.
 
+### Interaction Refinement Design
+
+1. Treat pointer movement past the shared drag threshold as manipulation; treat a no-movement Shift gesture as selection toggling.
+2. Capture pointer interaction on the stable Timeline panel root so rerenders during drag/resize cannot strand pointer state.
+3. Store a time-lock flag for single and group drags. Once Shift activates the lock, horizontal pointer displacement contributes zero time delta for that gesture.
+4. Publish transient bar-placement events for Bar Editor display only, then commit validated placement through the existing database, Undo, Timeline refresh, and deferred Phoenix sync path.
+5. Keep the Bar Editor renderer keyed by project session and selection signature; republishing the same selected id after Apply does not dispose/recreate Monaco.
+6. Route Enter from single-line inputs to the same Apply callback, while excluding Monaco targets so multiline script editing remains native.
+7. Fetch `<barType>/<barType>.template` from the canonical raw Dungeon path in parallel with optional GitHub directory discovery and merge successful remote results with user-saved browser templates.
+
 ## Phase 0: Research
 
 Research is captured in [research.md](./research.md). Key decisions:
@@ -107,3 +118,7 @@ Post-design constitution check remains PASS.
 | Violation | Why Needed | Simpler Alternative Rejected Because |
 |-----------|------------|-------------------------------------|
 | None | N/A | N/A |
+
+### Focused Browser Validation
+
+`scripts/playwright-timeline-bar-drag-editor-check.mjs` exercises ordinary drag selection, live editor-time previews, Shift time locking, empty-space deselection, both resize edges, non-selectable labels, and Shift-click add/remove/clear transitions against real DOM pointer behavior.

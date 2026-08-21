@@ -130,6 +130,20 @@
 - [x] T062 Add browser regression coverage for empty-row creation, layer extension, and grid continuity.
 - [x] T057 Verify Monaco suggest/menu popup z-order with Playwright against a real project and timeline layout
 
+## Phase 9: Direct Manipulation And Bar Editor Refinements (2026-08-22)
+
+- [x] T063 Toggle individual bars into and out of shared selection with Shift-click, including normalization to single or empty selection.
+- [x] T064 Preserve Shift-drag as a layer-only gesture for single and multi-bar selections by locking every original start/end time.
+- [x] T065 Select an ordinary dragged bar at gesture start and allow empty Timeline clicks to clear selection after pointer capture ends.
+- [x] T066 Publish live move/group/resize placement previews to Bar Editor without persisting before pointer release.
+- [x] T067 Add start/end resize handles with duration, bounds, overlap, Undo, and deferred Phoenix synchronization behavior.
+- [x] T068 Make Timeline bar labels non-selectable so browser text selection cannot steal pointer gestures.
+- [x] T069 Route Enter in single-line Bar Editor fields to Apply while retaining plain Enter as a Monaco newline and `Ctrl/Cmd+Enter` as Apply.
+- [x] T070 Prevent Apply with an unchanged selection/session from disposing and recreating the Monaco text editor.
+- [x] T071 Load canonical raw script templates directly and keep them usable when GitHub directory discovery fails, without adding a repository fallback.
+- [x] T072 Add a real-browser regression for drag selection, live editor timing, Shift time lock, deselection, both resize edges, text selection, and Shift-click add/remove/clear.
+- [x] T073 Run typecheck, changed-file lint, the focused browser regression, and the complete 240-test unit suite.
+
 ## Dependencies & Execution Order
 
 - Setup before Foundational

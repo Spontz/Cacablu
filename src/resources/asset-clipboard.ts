@@ -200,6 +200,43 @@ export function validateAssetCopyDestination(
   }
 }
 
+export function renameSameFolderFileCopies(
+  db: Pick<ProjectDatabase, 'files' | 'folders'>,
+  roots: AssetClipboardNode[],
+  parentId: number,
+): AssetClipboardNode[] {
+  const reservedNames = [
+    ...db.files.filter((file) => file.parent === parentId).map((file) => file.name),
+    ...db.folders.filter((folder) => folder.parent === parentId).map((folder) => folder.name),
+  ];
+  const isReserved = (name: string): boolean => reservedNames.some((candidate) => (
+    candidate.localeCompare(name, undefined, { sensitivity: 'accent' }) === 0
+  ));
+
+  return roots.map((root) => {
+    const source = root.kind === 'file'
+      ? db.files.find((file) => file.id === root.sourceId)
+      : null;
+    if (!source || source.parent !== parentId) {
+      reservedNames.push(root.name);
+      return root;
+    }
+
+    const extensionIndex = root.name.lastIndexOf('.');
+    const hasExtension = extensionIndex > 0;
+    const stem = hasExtension ? root.name.slice(0, extensionIndex) : root.name;
+    const extension = hasExtension ? root.name.slice(extensionIndex) : '';
+    let suffix = 1;
+    let name = `${stem}-${suffix}${extension}`;
+    while (isReserved(name)) {
+      suffix += 1;
+      name = `${stem}-${suffix}${extension}`;
+    }
+    reservedNames.push(name);
+    return { ...root, name };
+  });
+}
+
 export function buildResourcePath(db: Pick<ProjectDatabase, 'folders' | 'files'>, kind: 'file' | 'folder', id: number): string {
   const item = kind === 'file'
     ? db.files.find((file) => file.id === id)

@@ -22,6 +22,7 @@ import './monaco-find';
 const TEMPLATE_STORAGE_KEY = 'cacablu.sectionEditor.templates';
 const BAR_TYPE_STORAGE_KEY = 'cacablu.sectionEditor.barTypes';
 const CODE_TEMPLATE_BASE_API_URL = 'https://api.github.com/repos/Spontz/Dungeon/contents/Engines/Phoenix/CodeTemplates';
+const CODE_TEMPLATE_RAW_BASE_URL = 'https://raw.githubusercontent.com/Spontz/Dungeon/master/Engines/Phoenix/CodeTemplates';
 const BAR_TYPE_SOURCE_URL = `${CODE_TEMPLATE_BASE_API_URL}?ref=master`;
 
 const BLEND_OPTIONS = [
@@ -52,11 +53,12 @@ interface SectionTemplate {
 interface RemoteSectionTemplate {
   name: string;
   url: string;
+  code?: string;
 }
 
 type ScriptTemplateOption =
   | { source: 'local'; name: string; code: string }
-  | { source: 'remote'; name: string; url: string };
+  | { source: 'remote'; name: string; url: string; code?: string };
 
 interface BarPlacement {
   id: number;
@@ -233,11 +235,13 @@ export function createSectionEditorPanel(
 
       const startField = createField('Start Time');
       const startInput = createTimeInput(bar.startTime);
+      startInput.dataset.barTimeField = 'start';
       let appliedStartInputValue = startInput.value;
       startField.append(startInput);
 
       const endField = createField('End Time');
       const endInput = createTimeInput(bar.endTime);
+      endInput.dataset.barTimeField = 'end';
       let appliedEndInputValue = endInput.value;
       endField.append(endInput);
 
@@ -583,6 +587,10 @@ export function createSectionEditorPanel(
           setCodeEditorValueFromTemplate(template.code);
           return;
         }
+        if (template.code !== undefined) {
+          setCodeEditorValueFromTemplate(template.code);
+          return;
+        }
         void loadTemplateIntoEditor(template.url, template.name);
       }
     }
@@ -602,10 +610,12 @@ export function createSectionEditorPanel(
 
       const startField = createField('Start Time');
       const startInput = createTimeInput(initialEditorStart);
+      startInput.dataset.barTimeField = 'start';
       startField.append(startInput);
 
       const endField = createField('End Time');
       const endInput = createTimeInput(initialEditorEnd);
+      endInput.dataset.barTimeField = 'end';
       endField.append(endInput);
 
       const apply = document.createElement('button');
@@ -922,6 +932,29 @@ export function createSectionEditorPanel(
         render();
       }
     });
+    const handleTimelineBarPlacementPreview = (event: Event): void => {
+      const detail = event instanceof CustomEvent
+        ? event.detail as { bars?: Array<{ id?: unknown; startTime?: unknown; endTime?: unknown }> }
+        : null;
+      const previewBars = detail?.bars?.filter((bar): bar is { id: number; startTime: number; endTime: number } => (
+        Number.isInteger(bar.id)
+        && typeof bar.startTime === 'number'
+        && Number.isFinite(bar.startTime)
+        && typeof bar.endTime === 'number'
+        && Number.isFinite(bar.endTime)
+      )) ?? [];
+      const selectedBars = getSelectedBars();
+      const selectedIds = new Set(selectedBars.map((bar) => bar.id));
+      const matchingBars = previewBars.filter((bar) => selectedIds.has(bar.id));
+      if (matchingBars.length === 0) return;
+
+      const startInput = element.querySelector<HTMLInputElement>('[data-bar-time-field="start"]');
+      const endInput = element.querySelector<HTMLInputElement>('[data-bar-time-field="end"]');
+      if (!startInput || !endInput) return;
+      startInput.value = formatEditorTime(Math.min(...matchingBars.map((bar) => bar.startTime)));
+      endInput.value = formatEditorTime(Math.max(...matchingBars.map((bar) => bar.endTime)));
+    };
+    window.addEventListener('cacablu:timeline-bar-placement-preview', handleTimelineBarPlacementPreview);
     let lastDbSession = sessionRef.current;
     let lastDbFileName = dbState.getSnapshot().fileName;
     const unsubscribeDb = dbState.subscribe((snapshot) => {
@@ -946,6 +979,7 @@ export function createSectionEditorPanel(
       activeBarTypeMenu = null;
       unsubscribeState();
       unsubscribeDb();
+      window.removeEventListener('cacablu:timeline-bar-placement-preview', handleTimelineBarPlacementPreview);
     };
   });
 }
@@ -1233,6 +1267,7 @@ function mergeScriptTemplateOptions(barType: string, remoteTemplates: RemoteSect
       source: 'remote',
       name: template.name,
       url: template.url,
+      code: template.code,
     }));
   return [...localTemplates, ...remoteOptions].sort((a, b) => a.name.localeCompare(b.name));
 }
@@ -1266,21 +1301,55 @@ async function refreshBarTypesFromGithub(): Promise<string[]> {
 }
 
 async function fetchScriptTemplatesForBarType(barType: string): Promise<RemoteSectionTemplate[]> {
-  const response = await fetch(`${CODE_TEMPLATE_BASE_API_URL}/${encodeURIComponent(barType)}?ref=master`, {
-    headers: { Accept: 'application/vnd.github+json' },
-  });
-  if (!response.ok) throw new Error(`GitHub returned ${response.status}.`);
+  const directTemplateRequest = fetchDirectTemplateForBarType(barType).catch(() => null);
+  const discoveredTemplateRequest = (async (): Promise<RemoteSectionTemplate[]> => {
+    const response = await fetch(`${CODE_TEMPLATE_BASE_API_URL}/${encodeURIComponent(barType)}?ref=master`, {
+      headers: { Accept: 'application/vnd.github+json' },
+    });
+    if (!response.ok) throw new Error(`GitHub returned ${response.status}.`);
 
-  const payload = await response.json() as unknown;
-  if (!Array.isArray(payload)) throw new Error('GitHub returned an unexpected CodeTemplates payload.');
+    const payload = await response.json() as unknown;
+    if (!Array.isArray(payload)) throw new Error('GitHub returned an unexpected CodeTemplates payload.');
 
-  return payload
-    .filter(isGithubTemplateFileEntry)
-    .map((entry) => ({
-      name: entry.name.replace(/\.template$/i, ''),
-      url: entry.download_url,
-    }))
-    .sort((a, b) => a.name.localeCompare(b.name));
+    return payload
+      .filter(isGithubTemplateFileEntry)
+      .map((entry) => ({
+        name: entry.name.replace(/\.template$/i, ''),
+        url: entry.download_url,
+      }));
+  })();
+  const [directTemplate, discoveredResult] = await Promise.all([
+    directTemplateRequest,
+    discoveredTemplateRequest.then(
+      (templates) => ({ templates, error: null }),
+      (error: unknown) => ({ templates: [], error }),
+    ),
+  ]);
+  if (!directTemplate && discoveredResult.templates.length === 0 && discoveredResult.error) {
+    throw discoveredResult.error;
+  }
+  return mergeRemoteSectionTemplates(
+    directTemplate ? [directTemplate] : [],
+    discoveredResult.templates,
+  );
+}
+
+async function fetchDirectTemplateForBarType(barType: string): Promise<RemoteSectionTemplate | null> {
+  const fileName = `${barType}.template`;
+  const url = `${CODE_TEMPLATE_RAW_BASE_URL}/${encodeURIComponent(barType)}/${encodeURIComponent(fileName)}`;
+  const response = await fetch(url);
+  if (response.status === 404) return null;
+  if (!response.ok) throw new Error(`Template route returned ${response.status}.`);
+  return { name: barType, url, code: await response.text() };
+}
+
+function mergeRemoteSectionTemplates(
+  fallbackTemplates: RemoteSectionTemplate[],
+  discoveredTemplates: RemoteSectionTemplate[],
+): RemoteSectionTemplate[] {
+  return [...new Map(
+    [...fallbackTemplates, ...discoveredTemplates].map((template) => [template.name, template]),
+  ).values()].sort((a, b) => a.name.localeCompare(b.name));
 }
 
 async function fetchTemplateContent(url: string): Promise<string> {

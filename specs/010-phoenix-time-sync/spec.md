@@ -35,6 +35,9 @@ As a user, I want Cacablu to show the current Phoenix time so that the timeline 
 6. **Given** the user activates a marker loop, **When** Phoenix takes time to
    acknowledge the loop update, **Then** Cacablu seeks to the loop start
    immediately and confirms that seek after acknowledgement.
+7. **Given** Phoenix is already playing inside or outside an active marker loop,
+   **When** the user repositions a marker, **Then** Cacablu may publish adjusted
+   loop bounds but MUST NOT send a seek or reset Phoenix's current playback time.
 
 ---
 
@@ -106,6 +109,9 @@ As a user, I want Cacablu to show whether Phoenix is connected so that I underst
 - **FR-019**: Activating a runtime loop MUST send an immediate seek to its start
   and repeat that seek after Phoenix acknowledges the loop update so an
   in-flight runtime state cannot restore the clicked time.
+- **FR-020**: Marker movement and the resulting active-loop reconciliation MUST
+  NOT emit `runtime.seek`; Phoenix playback MUST continue from its naturally
+  progressing current time.
 
 ### Key Entities *(include if feature involves data)*
 
@@ -129,6 +135,8 @@ As a user, I want Cacablu to show whether Phoenix is connected so that I underst
   observes the loop-start seek and local playhead position before the response.
 - **SC-009**: Playback interpolated from just before a loop end never renders a
   current time outside the active loop.
+- **SC-010**: Runtime-message capture during marker drag and commit contains no
+  seek command and shows uninterrupted Phoenix time progression.
 
 ## Assumptions
 

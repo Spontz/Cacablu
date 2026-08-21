@@ -56,6 +56,22 @@ interface BarDragState {
   currentStart: number;
   currentEnd: number;
   currentLayer: number;
+  lockTime: boolean;
+  hasMoved: boolean;
+  blocked: boolean;
+}
+
+interface BarResizeState {
+  pointerId: number;
+  barId: number;
+  edge: 'start' | 'end';
+  startClientX: number;
+  originStart: number;
+  originEnd: number;
+  layer: number;
+  currentStart: number;
+  currentEnd: number;
+  toggleSelection: boolean;
   hasMoved: boolean;
   blocked: boolean;
 }
@@ -84,12 +100,14 @@ interface EmptyBarCreationState {
 
 interface GroupBarDragState {
   pointerId: number;
+  primaryBarId: number;
   barIds: number[];
   startClientX: number;
   startClientY: number;
   originPointerLayer: number;
   currentTimeDelta: number;
   currentLayerDelta: number;
+  lockTime: boolean;
   originals: Array<{ id: number; startTime: number; endTime: number; layer: number }>;
   hasMoved: boolean;
   blocked: boolean;
@@ -102,6 +120,12 @@ interface MarkerDragState {
   originTime: number;
   currentTime: number;
   hasMoved: boolean;
+}
+
+interface BarPlacementPreview {
+  id: number;
+  startTime: number;
+  endTime: number;
 }
 
 export function createTimelinePanel(
@@ -133,6 +157,7 @@ export function createTimelinePanel(
   let runtimeAnchorTime = state.transport.currentTime;
   let runtimeAnchorTimestamp = performance.now();
   let dragState: BarDragState | null = null;
+  let resizeState: BarResizeState | null = null;
   let groupDragState: GroupBarDragState | null = null;
   let markerDragState: MarkerDragState | null = null;
   let lastMarkerPointerDown: { markerId: number; timestamp: number } | null = null;
@@ -256,6 +281,28 @@ export function createTimelinePanel(
 
   function findBar(barId: number): DbBar | null {
     return sessionRef.current?.data.bars.find((bar) => bar.id === barId) ?? null;
+  }
+
+  function toggleBarSelection(barId: number): void {
+    if (!findBar(barId)) return;
+
+    const selection = appState.getSnapshot().resourceSelection;
+    const selectedIds = selection.kind === 'bar'
+      ? [selection.id]
+      : selection.kind === 'bars'
+        ? selection.ids
+        : [];
+    const nextIds = selectedIds.includes(barId)
+      ? selectedIds.filter((id) => id !== barId)
+      : [...selectedIds, barId];
+
+    if (nextIds.length === 0) {
+      appState.clearResourceSelection();
+    } else if (nextIds.length === 1) {
+      appState.setResourceSelection({ kind: 'bar', id: nextIds[0] });
+    } else {
+      appState.setResourceSelection({ kind: 'bars', ids: nextIds });
+    }
   }
 
   function findMarker(markerId: number): DbMarker | null {
@@ -489,6 +536,19 @@ export function createTimelinePanel(
     }
   }
 
+  function applyResizePreview(next: BarResizeState): void {
+    const clip = findClipForBar(next.barId);
+    if (!clip) return;
+    clip.start = next.currentStart;
+    clip.end = next.currentEnd;
+  }
+
+  function notifyBarPlacementPreview(bars: BarPlacementPreview[]): void {
+    window.dispatchEvent(new CustomEvent('cacablu:timeline-bar-placement-preview', {
+      detail: { bars },
+    }));
+  }
+
   function applyGroupDragPreview(next: GroupBarDragState, timeDelta: number, layerDelta: number): void {
     for (const original of next.originals) {
       const clip = findClipForBar(original.id);
@@ -694,13 +754,39 @@ export function createTimelinePanel(
   }
 
   function commitBarMove(next: BarDragState): boolean {
+    return commitBarPlacementChange(
+      next.barId,
+      next.currentStart,
+      next.currentEnd,
+      next.currentLayer,
+      'Move',
+    );
+  }
+
+  function commitBarResize(next: BarResizeState): boolean {
+    return commitBarPlacementChange(
+      next.barId,
+      next.currentStart,
+      next.currentEnd,
+      next.layer,
+      'Resize',
+    );
+  }
+
+  function commitBarPlacementChange(
+    barId: number,
+    startTime: number,
+    endTime: number,
+    layer: number,
+    operation: 'Move' | 'Resize',
+  ): boolean {
     const session = sessionRef.current;
-    const bar = findBar(next.barId);
+    const bar = findBar(barId);
     if (!session || !bar) return false;
     if (
-      bar.startTime === next.currentStart &&
-      bar.endTime === next.currentEnd &&
-      bar.layer === next.currentLayer
+      bar.startTime === startTime &&
+      bar.endTime === endTime &&
+      bar.layer === layer
     ) {
       return false;
     }
@@ -711,11 +797,11 @@ export function createTimelinePanel(
       layer: bar.layer,
     };
     const movedBarId = bar.id;
-    applyBarPlacement(bar, next.currentStart, next.currentEnd, next.currentLayer);
+    applyBarPlacement(bar, startTime, endTime, layer);
     appState.setResourceSelection({ kind: 'bar', id: bar.id });
     if (!suppressUndoRegistration) {
       undoManager.push({
-        label: `Move bar ${movedBarId}`,
+        label: `${operation} bar ${movedBarId}`,
         undo: async () => {
           const current = findBar(movedBarId);
           if (!current) return;
@@ -724,7 +810,7 @@ export function createTimelinePanel(
               severity: 'warning',
               source: 'Timeline undo',
               subjectId: String(movedBarId),
-              description: `Could not undo move for bar ${movedBarId} because the original range is occupied.`,
+              description: `Could not undo ${operation.toLowerCase()} for bar ${movedBarId} because the original range is occupied.`,
             });
             return;
           }
@@ -738,6 +824,7 @@ export function createTimelinePanel(
           appState.setResourceSelection({ kind: 'bar', id: movedBarId });
           loadFromDb({ preserveTransport: true });
           renderTimeline?.(true);
+          notifyBarPlacementPreview([{ id: movedBarId, ...previous }]);
           scheduleMovedBarSync(movedBarId, MOVE_SYNC_DELAY_MS);
         },
       });
@@ -802,6 +889,7 @@ export function createTimelinePanel(
           appState.setResourceSelection(movedIds.length === 1 ? { kind: 'bar', id: movedIds[0] } : { kind: 'bars', ids: movedIds });
           loadFromDb({ preserveTransport: true });
           renderTimeline?.(true);
+          notifyBarPlacementPreview(previous);
           scheduleMovedBarsSync(movedIds, MOVE_SYNC_DELAY_MS);
         },
       });
@@ -1132,13 +1220,15 @@ export function createTimelinePanel(
                               !hasError &&
                               state.transport.currentTime >= clip.start &&
                               state.transport.currentTime < clip.end;
-                            const isDragging = dbId !== null && (dragState?.barId === dbId || groupDragState?.barIds.includes(dbId));
-                            const isBlocked = isDragging && (dragState?.blocked || groupDragState?.blocked);
+                            const isDragging = dbId !== null && (dragState?.barId === dbId || resizeState?.barId === dbId || groupDragState?.barIds.includes(dbId));
+                            const isBlocked = isDragging && (dragState?.blocked || resizeState?.blocked || groupDragState?.blocked);
                             const label = displayTimelineIds && dbId !== null && clip.label ? `${dbId} ${clip.label}` : clip.label;
 
                             return `
                               <article class="timeline-panel__clip ${isActive ? 'is-active' : ''} ${isEnabled ? '' : 'is-disabled'} ${isCompact ? 'is-compact' : ''} ${isSelected ? 'is-selected' : ''} ${isBoxSelected ? 'is-box-selected' : ''} ${isMovable ? 'is-movable' : ''} ${hasError ? 'has-error' : ''} ${isDragging ? 'is-dragging' : ''} ${isBlocked ? 'is-blocked' : ''}" data-bar-id="${dbId ?? ''}" tabindex="0" style="left:${left}px;width:${width}px;border-color:${clip.color ?? CLIP_COLOR}">
+                                <span class="timeline-panel__clip-resize-handle timeline-panel__clip-resize-handle--start" data-resize-edge="start" aria-hidden="true"></span>
                                 <span class="timeline-panel__clip-label">${label}</span>
+                                <span class="timeline-panel__clip-resize-handle timeline-panel__clip-resize-handle--end" data-resize-edge="end" aria-hidden="true"></span>
                               </article>
                             `;
                           })
@@ -1453,6 +1543,30 @@ export function createTimelinePanel(
       const bar = findBar(barId);
       if (!bar) return;
 
+      const resizeEdge = interactionTarget?.closest<HTMLElement>('[data-resize-edge]')?.dataset.resizeEdge;
+      if (resizeEdge === 'start' || resizeEdge === 'end') {
+        resizeState = {
+          pointerId: event.pointerId,
+          barId,
+          edge: resizeEdge,
+          startClientX: event.clientX,
+          originStart: bar.startTime,
+          originEnd: bar.endTime,
+          layer: bar.layer,
+          currentStart: bar.startTime,
+          currentEnd: bar.endTime,
+          toggleSelection: event.shiftKey,
+          hasMoved: false,
+          blocked: false,
+        };
+        element.setPointerCapture(event.pointerId);
+        if (!event.shiftKey && (selection.kind !== 'bar' || selection.id !== barId)) {
+          appState.setResourceSelection({ kind: 'bar', id: barId });
+        }
+        event.preventDefault();
+        return;
+      }
+
       if (selection.kind === 'bars' && selection.ids.includes(barId)) {
         const originals = selection.ids
           .map((id) => findBar(id))
@@ -1467,21 +1581,19 @@ export function createTimelinePanel(
 
         groupDragState = {
           pointerId: event.pointerId,
+          primaryBarId: barId,
           barIds: originals.map((original) => original.id),
           startClientX: event.clientX,
           startClientY: event.clientY,
           originPointerLayer: bar.layer,
           currentTimeDelta: 0,
           currentLayerDelta: 0,
+          lockTime: event.shiftKey,
           originals,
           hasMoved: false,
           blocked: false,
         };
-        clip.setPointerCapture(event.pointerId);
-        return;
-      }
-
-      if (selection.kind !== 'bar' || selection.id !== barId) {
+        element.setPointerCapture(event.pointerId);
         return;
       }
 
@@ -1497,10 +1609,14 @@ export function createTimelinePanel(
         currentStart: bar.startTime,
         currentEnd: bar.endTime,
         currentLayer: bar.layer,
+        lockTime: event.shiftKey,
         hasMoved: false,
         blocked: false,
       };
-      clip.setPointerCapture(event.pointerId);
+      element.setPointerCapture(event.pointerId);
+      if (!event.shiftKey && (selection.kind !== 'bar' || selection.id !== barId)) {
+        appState.setResourceSelection({ kind: 'bar', id: barId });
+      }
     }
 
     function beginBoxSelection(event: PointerEvent): void {
@@ -1547,6 +1663,7 @@ export function createTimelinePanel(
       // The viewport is replaced while rendering the creation preview. Keep
       // pointer capture on the stable panel root so pointerup can commit it.
       element.setPointerCapture(event.pointerId);
+      appState.clearResourceSelection();
     }
 
     function updateDrag(event: PointerEvent): void {
@@ -1562,6 +1679,11 @@ export function createTimelinePanel(
 
       if (emptyBarCreationState && event.pointerId === emptyBarCreationState.pointerId) {
         updateEmptyBarCreation(event);
+        return;
+      }
+
+      if (resizeState && event.pointerId === resizeState.pointerId) {
+        updateBarResize(event);
         return;
       }
 
@@ -1587,8 +1709,11 @@ export function createTimelinePanel(
       }
 
       dragState.hasMoved = true;
+      if (event.shiftKey) dragState.lockTime = true;
       const targetLayer = getLayerAtPoint(event.clientX, event.clientY, dragState.originLayer);
-      let nextStart = dragState.originStart + deltaX / effectivePixelsPerSecond;
+      let nextStart = dragState.lockTime
+        ? dragState.originStart
+        : dragState.originStart + deltaX / effectivePixelsPerSecond;
       nextStart = Math.max(0, nextStart);
       if (state.transport.duration > 0) {
         nextStart = Math.min(nextStart, Math.max(0, state.transport.duration - dragState.duration));
@@ -1606,6 +1731,54 @@ export function createTimelinePanel(
       dragState.currentLayer = targetLayer;
       dragState.blocked = false;
       applyDragPreview(dragState);
+      notifyBarPlacementPreview([{
+        id: dragState.barId,
+        startTime: dragState.currentStart,
+        endTime: dragState.currentEnd,
+      }]);
+      render(true);
+    }
+
+    function updateBarResize(event: PointerEvent): void {
+      if (!resizeState) return;
+      const deltaX = event.clientX - resizeState.startClientX;
+      if (!resizeState.hasMoved && Math.abs(deltaX) < DRAG_THRESHOLD_PX) return;
+
+      event.preventDefault();
+      const effectivePixelsPerSecond = state.viewport.pixelsPerSecond * state.viewport.zoom;
+      if (!Number.isFinite(effectivePixelsPerSecond) || effectivePixelsPerSecond <= 0) return;
+
+      const minimumDuration = 1 / effectivePixelsPerSecond;
+      let nextStart = resizeState.originStart;
+      let nextEnd = resizeState.originEnd;
+      if (resizeState.edge === 'start') {
+        nextStart = Math.min(
+          Math.max(resizeState.originStart + deltaX / effectivePixelsPerSecond, 0),
+          resizeState.originEnd - minimumDuration,
+        );
+      } else {
+        nextEnd = Math.max(
+          resizeState.originEnd + deltaX / effectivePixelsPerSecond,
+          resizeState.originStart + minimumDuration,
+        );
+        if (state.transport.duration > 0) nextEnd = Math.min(nextEnd, state.transport.duration);
+      }
+
+      resizeState.hasMoved = true;
+      if (wouldOverlap(resizeState.barId, resizeState.layer, nextStart, nextEnd)) {
+        resizeState.blocked = true;
+        render(true);
+        return;
+      }
+      resizeState.currentStart = nextStart;
+      resizeState.currentEnd = nextEnd;
+      resizeState.blocked = false;
+      applyResizePreview(resizeState);
+      notifyBarPlacementPreview([{
+        id: resizeState.barId,
+        startTime: nextStart,
+        endTime: nextEnd,
+      }]);
       render(true);
     }
 
@@ -1625,10 +1798,11 @@ export function createTimelinePanel(
       }
 
       const targetLayer = getLayerAtPoint(event.clientX, event.clientY, groupDragState.originPointerLayer);
+      if (event.shiftKey) groupDragState.lockTime = true;
       const layerDelta = targetLayer - groupDragState.originPointerLayer;
       const minStart = Math.min(...groupDragState.originals.map((bar) => bar.startTime));
       const maxEnd = Math.max(...groupDragState.originals.map((bar) => bar.endTime));
-      let timeDelta = deltaX / effectivePixelsPerSecond;
+      let timeDelta = groupDragState.lockTime ? 0 : deltaX / effectivePixelsPerSecond;
       timeDelta = Math.max(timeDelta, -minStart);
       if (state.transport.duration > 0) {
         timeDelta = Math.min(timeDelta, Math.max(0, state.transport.duration - maxEnd));
@@ -1652,6 +1826,7 @@ export function createTimelinePanel(
 
       groupDragState.blocked = false;
       applyGroupDragPreview(groupDragState, timeDelta, layerDelta);
+      notifyBarPlacementPreview(nextBars);
       render(true);
     }
 
@@ -1736,6 +1911,11 @@ export function createTimelinePanel(
         return;
       }
 
+      if (resizeState && event.pointerId === resizeState.pointerId) {
+        endBarResize();
+        return;
+      }
+
       if (groupDragState && event.pointerId === groupDragState.pointerId) {
         endGroupDrag();
         return;
@@ -1748,15 +1928,47 @@ export function createTimelinePanel(
       const finishedDrag = dragState;
       dragState = null;
       if (!finishedDrag.hasMoved) {
+        if (finishedDrag.lockTime) {
+          suppressUpcomingClick();
+          toggleBarSelection(finishedDrag.barId);
+        }
         return;
       }
 
       suppressUpcomingClick();
-      if (!commitBarMove(finishedDrag)) {
+      const committed = commitBarMove(finishedDrag);
+      if (!committed) {
         restoreDragPreview(finishedDrag);
       }
       loadFromDb({ preserveTransport: true });
       render(true);
+      notifyBarPlacementPreview([{
+        id: finishedDrag.barId,
+        startTime: committed ? finishedDrag.currentStart : finishedDrag.originStart,
+        endTime: committed ? finishedDrag.currentEnd : finishedDrag.originEnd,
+      }]);
+    }
+
+    function endBarResize(): void {
+      const finishedResize = resizeState;
+      resizeState = null;
+      if (!finishedResize?.hasMoved) {
+        if (finishedResize?.toggleSelection) {
+          suppressUpcomingClick();
+          toggleBarSelection(finishedResize.barId);
+        }
+        return;
+      }
+
+      suppressUpcomingClick();
+      const committed = commitBarResize(finishedResize);
+      loadFromDb({ preserveTransport: true });
+      render(true);
+      notifyBarPlacementPreview([{
+        id: finishedResize.barId,
+        startTime: committed ? finishedResize.currentStart : finishedResize.originStart,
+        endTime: committed ? finishedResize.currentEnd : finishedResize.originEnd,
+      }]);
     }
 
     function endMarkerDrag(): void {
@@ -1781,15 +1993,25 @@ export function createTimelinePanel(
       const finishedDrag = groupDragState;
       groupDragState = null;
       if (!finishedDrag?.hasMoved) {
+        if (finishedDrag?.lockTime) {
+          suppressUpcomingClick();
+          toggleBarSelection(finishedDrag.primaryBarId);
+        }
         return;
       }
 
       suppressUpcomingClick();
-      if (!commitGroupBarMove(finishedDrag)) {
+      const committed = commitGroupBarMove(finishedDrag);
+      if (!committed) {
         restoreGroupDragPreview(finishedDrag);
       }
       loadFromDb({ preserveTransport: true });
       render(true);
+      notifyBarPlacementPreview(finishedDrag.originals.map((bar) => ({
+        id: bar.id,
+        startTime: committed ? bar.startTime + finishedDrag.currentTimeDelta : bar.startTime,
+        endTime: committed ? bar.endTime + finishedDrag.currentTimeDelta : bar.endTime,
+      })));
     }
 
     function endBoxSelection(): void {
@@ -2104,7 +2326,11 @@ export function createTimelinePanel(
       if (clip?.dataset.barId) {
         const barId = Number(clip.dataset.barId);
         if (Number.isInteger(barId)) {
-          appState.setResourceSelection({ kind: 'bar', id: barId });
+          if (event.shiftKey) {
+            toggleBarSelection(barId);
+          } else {
+            appState.setResourceSelection({ kind: 'bar', id: barId });
+          }
         }
         element.focus({ preventScroll: true });
         return;

@@ -51,3 +51,5 @@ tests/unit/
 11. Publish a bounded recursive Pool snapshot plus source-editor and source-session identities at drag start; route only an exact editor/session match to atomic move and every foreign or changed session to atomic copy with destination-owned ids.
 12. Verify two-window file, multi-root, and folder drags, exact destinations, source preservation, conflicts, one-step destination Undo, editable path drops, and destination-only Phoenix reconciliation.
 13. Add a regression proving that overlapping numeric resource ids in different project sessions cannot route a cross-project drop through the local move path.
+14. Before a same-project file copy returns to its source folder, clone only the affected clipboard root names and allocate the lowest free `-N` suffix before the final extension; keep folder and cross-editor collision rules unchanged.
+15. Reset internal drag state at every `dragstart`, publish the lightweight local move payload first, and treat rich recursive `DataTransfer` publication as optional for same-tab moves so one failed or completed gesture cannot poison the next.

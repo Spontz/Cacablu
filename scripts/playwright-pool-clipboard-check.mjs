@@ -197,6 +197,18 @@ try {
     throw new Error(`Pool drag into Monaco failed: ${JSON.stringify({ droppedEditorText })}`);
   }
 
+  await page.evaluate(() => window.dispatchEvent(new CustomEvent('cacablu:asset-clipboard-command', {
+    detail: { command: 'paste' },
+  })));
+  await page.waitForFunction(() => window.__poolClipboardFixture.db.files.some((file) => (
+    file.parent === 1 && file.name === 'scene-1.glsl'
+  )));
+  const sameFolderCopyName = await page.evaluate(() => window.__poolClipboardFixture.db.files.find((file) => (
+    file.parent === 1 && file.name === 'scene-1.glsl'
+  ))?.name);
+  await page.evaluate(() => window.__poolClipboardFixture.undo.undo());
+  await page.waitForFunction(() => !window.__poolClipboardFixture.db.files.some((file) => file.name === 'scene-1.glsl'));
+
   const poolRoot = page.locator('.resources__root-row');
   await poolRoot.click();
   await page.evaluate(() => window.dispatchEvent(new CustomEvent('cacablu:asset-clipboard-command', {
@@ -330,6 +342,7 @@ try {
     throw new Error(`Pool folder self-copy was not rejected: ${JSON.stringify(rejectedSelfCopy)}`);
   }
   console.log(JSON.stringify({
+    sameFolderCopyName,
     clipboardText,
     editorText,
     droppedEditorText,
