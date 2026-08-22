@@ -1686,20 +1686,6 @@ button.events-listbox__severity:focus-visible {
   display: none;
 }
 
-.timeline-panel__clip.is-disabled {
-  border-style: dashed;
-  opacity: 0.58;
-  background:
-    linear-gradient(135deg, rgba(116, 137, 166, 0.18) 0 12px, rgba(24, 34, 48, 0.96) 12px 24px),
-    linear-gradient(180deg, rgba(39, 45, 55, 0.92), rgba(22, 27, 35, 0.98)),
-    #111827;
-}
-
-.timeline-panel__clip.is-disabled.is-selected,
-.timeline-panel__clip.is-disabled.is-box-selected {
-  opacity: 0.82;
-}
-
 .timeline-panel__clip.is-selected.is-movable {
   cursor: grab;
 }
@@ -1730,6 +1716,19 @@ button.events-listbox__severity:focus-visible {
     0 0 0 1px rgba(97, 215, 255, 0.36),
     0 0 14px rgba(97, 215, 255, 0.42),
     0 4px 10px rgba(0, 0, 0, 0.26);
+}
+
+.timeline-panel__clip.is-disabled {
+  border-color: rgba(174, 180, 190, 0.72) !important;
+  border-style: dashed;
+  opacity: 0.62;
+  background: rgba(118, 124, 134, 0.56);
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.16);
+}
+
+.timeline-panel__clip.is-disabled.is-selected,
+.timeline-panel__clip.is-disabled.is-box-selected {
+  opacity: 0.82;
 }
 
 .timeline-panel__clip.is-selected {

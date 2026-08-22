@@ -5,6 +5,8 @@ export function createDefaultMenuActions(): MenuActionDefinition[] {
     { id: 'open-database', label: 'Abrir', menu: 'File', shortcut: { default: 'Ctrl+O', mac: 'Cmd+O' } },
     { id: 'save-database', label: 'Guardar', menu: 'File', disabled: true, shortcut: { default: 'Ctrl+S', mac: 'Cmd+S' } },
     { id: 'save-database-as', label: 'Guardar como', menu: 'File', disabled: true, shortcut: { default: 'Ctrl+Shift+S', mac: 'Cmd+Shift+S' } },
+    { id: 'file-separator-revert', label: '', menu: 'File', separator: true },
+    { id: 'revert-database', label: 'Revert', menu: 'File', disabled: true },
     { id: 'edit-undo', label: 'Undo', menu: 'Edit', shortcut: { default: 'Ctrl+Z', mac: '⌘Z' } },
     { id: 'edit-separator-clipboard', label: '', menu: 'Edit', separator: true },
     { id: 'edit-cut', label: 'Cut', menu: 'Edit', shortcut: { default: 'Ctrl+X', mac: 'Cmd+X' } },

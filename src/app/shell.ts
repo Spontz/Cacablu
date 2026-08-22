@@ -23,6 +23,7 @@ import { createPhoenixLogClient } from '../phoenix/log-client';
 import { primePhoenixLogEvents, recordPhoenixLogsAsEvents } from '../phoenix/log-events';
 import { createUndoManager } from './undo-manager';
 import { getResourceSelectionSignature } from './selection-signature';
+import { confirmProjectRevert } from './project-revert';
 import {
   getSelectedExistingBars,
   hasSelectedExistingBars,
@@ -153,6 +154,9 @@ export function createAppShell(root: HTMLElement): AppShell {
           break;
         case 'save-database-as':
           void handleSaveAs();
+          break;
+        case 'revert-database':
+          void handleRevert();
           break;
         case 'edit-undo':
           void handleUndo();
@@ -673,6 +677,55 @@ export function createAppShell(root: HTMLElement): AppShell {
     }
   }
 
+  async function handleRevert(): Promise<void> {
+    const currentSession = session;
+    if (!currentSession || dbState.getSnapshot().status !== 'open') return;
+
+    const choice = confirmProjectRevert(dbState.getSnapshot().isDirty, (message) => window.confirm(message));
+    if (choice === 'cancel') return;
+
+    if (session !== currentSession) return;
+
+    dbState.setOpening();
+    projectSyncCoordinator.setSession(null);
+    let reloadedSession: DbSession | null = null;
+    try {
+      reloadedSession = await currentSession.reload();
+      if (connection.isConnected()) {
+        await syncOpenedProjectPool(reloadedSession, { forceSections: true });
+      }
+      if (session !== currentSession) {
+        throw new Error('The open project changed while Revert was running.');
+      }
+
+      session = reloadedSession;
+      sessionRef.current = reloadedSession;
+      reloadedSession = null;
+      currentSession.close();
+
+      state.clearResourceSelection();
+      state.clearAssetSelection();
+      state.setTimelinePasteLayer(null);
+      state.resetSectionErrors();
+      state.setActiveLoop(null);
+      undoManager.clear();
+      assetClipboard.invalidateSession(session);
+      projectSyncCoordinator.setSession(session, connection.isConnected());
+      dbState.setOpen(session.fileName);
+      state.addEvent({
+        severity: 'info',
+        source: 'Project',
+        description: `Reloaded the last saved version of ${session.fileName}.`,
+      });
+    } catch (error) {
+      reloadedSession?.close();
+      projectSyncCoordinator.setSession(currentSession, connection.isConnected());
+      const message = error instanceof Error ? error.message : 'Could not reload the saved project.';
+      dbState.setError(message);
+      if (!isAbortError(error)) window.alert(message);
+    }
+  }
+
   return {
     mount(): void {
       root.innerHTML = '';
@@ -1111,6 +1164,9 @@ export function createAppShell(root: HTMLElement): AppShell {
       }
       if (action.id === 'save-database' || action.id === 'save-database-as') {
         return { ...action, disabled: fileActionDisabled || !hasFile };
+      }
+      if (action.id === 'revert-database') {
+        return { ...action, disabled: snapshot.status !== 'open' };
       }
       if (action.id === 'toggle-display-timeline-ids') {
         return {

@@ -62,6 +62,18 @@ describe('DbSession saving', () => {
     expect(memoryHandle.writeCount).toBe(2);
     session.close();
   });
+
+  it('reloads the last saved bytes from the same file handle', async () => {
+    const memoryHandle = new MemoryFileHandle(await createLegacyProjectBytes());
+    const session = await openDbSession(memoryHandle as unknown as FileSystemFileHandle);
+
+    session.updateCell('custom_debug', 1, 'note', 'Unsaved change');
+    const reloaded = await session.reload();
+
+    expect(reloaded.getTableSnapshot('custom_debug').rows).toEqual([{ id: 1, note: 'visible' }]);
+    session.close();
+    reloaded.close();
+  });
 });
 
 describe('DbSession markers', () => {

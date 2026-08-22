@@ -71,6 +71,7 @@ export interface DbSession {
   updateDemoSettings(settings: DemoSettingsUpdate): void;
   save(): Promise<void>;
   saveAs(handle: FileSystemFileHandle): Promise<DbSession>;
+  reload(): Promise<DbSession>;
   close(): void;
 }
 
@@ -850,6 +851,10 @@ function makeSession(
       await writable.write(blob);
       await writable.close();
       return makeSession(newHandle, db, data, serialized);
+    },
+
+    async reload(): Promise<DbSession> {
+      return openDbSession(handle);
     },
 
     close(): void {
