@@ -67,6 +67,18 @@ interface BarPlacement {
   endTime: number;
 }
 
+interface BarEditorDraft {
+  name: string;
+  startTime: string;
+  endTime: string;
+  barType: string;
+  scriptTemplate: string;
+  script: string;
+  srcBlending: string;
+  dstBlending: string;
+  blendingEQ: string;
+}
+
 interface BarSnapshot extends BarPlacement {
   name: string;
   type: string;
@@ -131,6 +143,7 @@ export function createSectionEditorPanel(
     let disposeSelectionOccurrenceHighlighting: (() => void) | null = null;
     let activeBarTypeInput: HTMLInputElement | null = null;
     let activeBarTypeMenu: HTMLElement | null = null;
+    let refreshActiveEditorDraftSnapshot: (() => void) | null = null;
     let barTypes = getInitialBarTypes();
     let disposed = false;
     let templateListRequestId = 0;
@@ -193,11 +206,13 @@ export function createSectionEditorPanel(
       activeSelectionSignature = null;
       activeBarTypeInput = null;
       activeBarTypeMenu = null;
+      refreshActiveEditorDraftSnapshot = null;
       element.replaceChildren(createPlaceholder(message));
     }
 
     function render(): void {
       disposeCodeEditor();
+      refreshActiveEditorDraftSnapshot = null;
       const dbStatus = dbState.getSnapshot().status;
       if ((dbStatus !== 'open' && dbStatus !== 'saving') || !sessionRef.current) {
         activeSelectionSignature = null;
@@ -353,15 +368,82 @@ export function createSectionEditorPanel(
         fixedOverflowWidgets: true,
         overflowWidgetsDomNode: document.body,
       });
+      let suppressEditorHistory = false;
+      const editorHistory: BarEditorDraft[] = [];
+      const captureEditorDraft = (): BarEditorDraft => ({
+        name: nameInput.value,
+        startTime: startInput.value,
+        endTime: endInput.value,
+        barType: barTemplateInput.value,
+        scriptTemplate: scriptTemplateInput.value,
+        script: codeEditor?.getValue() ?? '',
+        srcBlending: srcSelect.value,
+        dstBlending: dstSelect.value,
+        blendingEQ: equationSelect.value,
+      });
+      let currentEditorDraft = captureEditorDraft();
+      refreshActiveEditorDraftSnapshot = () => {
+        currentEditorDraft = captureEditorDraft();
+      };
+      const recordEditorChange = (): void => {
+        if (suppressEditorHistory) return;
+        const nextDraft = captureEditorDraft();
+        if (barEditorDraftsEqual(currentEditorDraft, nextDraft)) return;
+        editorHistory.push(currentEditorDraft);
+        currentEditorDraft = nextDraft;
+      };
+      const restoreEditorDraft = (draft: BarEditorDraft): void => {
+        suppressEditorHistory = true;
+        try {
+          nameInput.value = draft.name;
+          startInput.value = draft.startTime;
+          endInput.value = draft.endTime;
+          barTemplateInput.value = draft.barType;
+          scriptTemplateInput.value = draft.scriptTemplate;
+          srcSelect.value = draft.srcBlending;
+          dstSelect.value = draft.dstBlending;
+          equationSelect.value = draft.blendingEQ;
+          codeEditor?.setValue(draft.script);
+          currentEditorDraft = draft;
+          refreshActiveBarTypeCombo(barTemplateInput.value);
+          refreshScriptTemplateMenu(scriptTemplateInput.value);
+          closeBarTypeMenu();
+          closeScriptTemplateMenu();
+        } finally {
+          suppressEditorHistory = false;
+        }
+      };
+      const undoEditorChange = (): boolean => {
+        const previousDraft = editorHistory.pop();
+        if (!previousDraft) return false;
+        restoreEditorDraft(previousDraft);
+        return true;
+      };
+      root.addEventListener('input', (event) => {
+        if ((event.target as HTMLElement | null)?.closest('.monaco-editor')) return;
+        recordEditorChange();
+      });
+      root.addEventListener('change', (event) => {
+        if ((event.target as HTMLElement | null)?.closest('.monaco-editor')) return;
+        recordEditorChange();
+      });
+      root.addEventListener('keydown', (event) => {
+        if (!isUndoShortcut(event) || editorHistory.length === 0) return;
+        event.preventDefault();
+        event.stopPropagation();
+        undoEditorChange();
+      }, { capture: true });
       disposePoolPathDrop = installPoolPathDrop(codeEditor, code);
       disposeSelectionOccurrenceHighlighting = installSelectionOccurrenceHighlighting(codeEditor);
       requestAnimationFrame(() => {
         codeEditor?.layout();
       });
       codeEditor.onDidChangeModelContent(() => {
-        if (suppressTemplateMismatchClear) return;
-        scriptTemplateInput.value = '';
-        closeScriptTemplateMenu();
+        if (!suppressTemplateMismatchClear) {
+          scriptTemplateInput.value = '';
+          closeScriptTemplateMenu();
+        }
+        recordEditorChange();
       });
       codeEditor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => {
         applyCurrentBarEdits();
@@ -526,6 +608,7 @@ export function createSectionEditorPanel(
         }
 
         if (!barSnapshotsChanged(previous, next)) {
+          currentEditorDraft = captureEditorDraft();
           void syncBarsToPhoenix([current.id]);
           state.setResourceSelection({ kind: 'bar', id: current.id });
           return;
@@ -551,6 +634,7 @@ export function createSectionEditorPanel(
         });
         window.dispatchEvent(new CustomEvent('cacablu:timeline-bars-changed'));
         void syncBarsToPhoenix([current.id]);
+        currentEditorDraft = captureEditorDraft();
         state.setResourceSelection({ kind: 'bar', id: current.id });
       }
 
@@ -953,6 +1037,7 @@ export function createSectionEditorPanel(
       if (!startInput || !endInput) return;
       startInput.value = formatEditorTime(Math.min(...matchingBars.map((bar) => bar.startTime)));
       endInput.value = formatEditorTime(Math.max(...matchingBars.map((bar) => bar.endTime)));
+      refreshActiveEditorDraftSnapshot?.();
     };
     window.addEventListener('cacablu:timeline-bar-placement-preview', handleTimelineBarPlacementPreview);
     let lastDbSession = sessionRef.current;
@@ -977,6 +1062,7 @@ export function createSectionEditorPanel(
       disposeCodeEditor();
       activeBarTypeInput = null;
       activeBarTypeMenu = null;
+      refreshActiveEditorDraftSnapshot = null;
       unsubscribeState();
       unsubscribeDb();
       window.removeEventListener('cacablu:timeline-bar-placement-preview', handleTimelineBarPlacementPreview);
@@ -1074,8 +1160,29 @@ function attachTimeWheelHandler(input: HTMLInputElement, applyDelta: (delta: num
     event.preventDefault();
     const step = Number.parseFloat(input.step) || 1;
     const direction = event.deltaY < 0 ? 1 : -1;
-    applyDelta(direction * step);
+    if (applyDelta(direction * step)) {
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    }
   }, { passive: false });
+}
+
+function isUndoShortcut(event: KeyboardEvent): boolean {
+  return (event.ctrlKey || event.metaKey)
+    && !event.shiftKey
+    && !event.altKey
+    && event.key.toLowerCase() === 'z';
+}
+
+function barEditorDraftsEqual(left: BarEditorDraft, right: BarEditorDraft): boolean {
+  return left.name === right.name
+    && left.startTime === right.startTime
+    && left.endTime === right.endTime
+    && left.barType === right.barType
+    && left.scriptTemplate === right.scriptTemplate
+    && left.script === right.script
+    && left.srcBlending === right.srcBlending
+    && left.dstBlending === right.dstBlending
+    && left.blendingEQ === right.blendingEQ;
 }
 
 function parseEditorTime(value: string): number | null {

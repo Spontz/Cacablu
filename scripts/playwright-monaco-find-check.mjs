@@ -113,11 +113,19 @@ try {
       dstBlending: 'ZERO',
       blendingEQ: 'ADD',
     };
+    const secondBar = {
+      ...bar,
+      id: 4,
+      name: 'Second section',
+      layer: 1,
+      startTime: 2,
+      endTime: 3,
+    };
     const session = {
       fileName: 'find-fixture.sqlite',
       data: {
         variables: new Map(),
-        bars: [bar],
+        bars: [bar, secondBar],
         fbos: [],
         files: [glslFile, camFile],
         folders: [],
@@ -130,8 +138,11 @@ try {
         return file;
       },
       updateCell(table, rowId, column, value) {
-        if (table !== 'bars' || rowId !== bar.id) throw new Error(`Unexpected cell ${table}.${rowId}.${column}`);
-        bar[column] = value;
+        const targetBar = table === 'bars'
+          ? this.data.bars.find((candidate) => candidate.id === rowId)
+          : null;
+        if (!targetBar) throw new Error(`Unexpected cell ${table}.${rowId}.${column}`);
+        targetBar[column] = value;
       },
     };
     const state = createAppState();
@@ -171,6 +182,7 @@ try {
           startTime: bar.startTime,
         },
       }),
+      selectBar: (id) => state.setResourceSelection({ kind: 'bar', id }),
       dispose: () => {
         section.dispose();
         glsl.dispose();
@@ -443,6 +455,46 @@ try {
     throw new Error(`Direct script template route failed: ${JSON.stringify(directTemplateBehavior)}`);
   }
 
+  await nameInput.fill('Undo saved name');
+  await sectionPanel.locator('.section-editor__button--primary').click();
+  await startInput.fill('0.5');
+  await sectionPanel.locator('.section-editor__button--primary').click();
+  await sectionPanel.locator('.monaco-editor .view-lines').click();
+  await page.keyboard.press('Control+End');
+  await page.keyboard.insertText(' undo suffix');
+  await sectionPanel.locator('.section-editor__button--primary').click();
+
+  await sectionPanel.locator('.monaco-editor .view-lines').click();
+  await page.keyboard.press('Control+z');
+  await page.waitForTimeout(100);
+  const undoScript = await readEditorState('section');
+  await page.keyboard.press('Control+z');
+  const undoStart = await startInput.inputValue();
+  await page.keyboard.press('Control+z');
+  const undoName = await nameInput.inputValue();
+  const persistedAfterDraftUndo = await page.evaluate(() => window.__monacoFindFixture.state().bar);
+  if (
+    !undoScript.text.includes('direct template loaded')
+    || undoStart !== '0.25'
+    || undoName !== 'Applied with Enter'
+    || persistedAfterDraftUndo.name !== 'Undo saved name'
+    || persistedAfterDraftUndo.startTime !== 0.5
+    || persistedAfterDraftUndo.script !== 'direct template loaded undo suffix'
+  ) {
+    throw new Error(`Bar Editor session undo failed: ${JSON.stringify({ undoScript, undoStart, undoName, persistedAfterDraftUndo })}`);
+  }
+
+  await page.evaluate(() => window.__monacoFindFixture.selectBar(4));
+  await page.waitForFunction(() => document.querySelector('[data-test-editor="section"] input')?.value === 'Second section');
+  await page.evaluate(() => window.__monacoFindFixture.selectBar(3));
+  await page.waitForFunction(() => document.querySelector('[data-test-editor="section"] input')?.value === 'Undo saved name');
+  const restoredNameInput = sectionPanel.locator('.section-editor__field').filter({ hasText: 'Name' }).locator('input');
+  await restoredNameInput.press('Control+z');
+  const historyAfterBarSwitch = await restoredNameInput.inputValue();
+  if (historyAfterBarSwitch !== 'Undo saved name') {
+    throw new Error(`Bar Editor undo history survived a bar switch: ${historyAfterBarSwitch}`);
+  }
+
   console.log(JSON.stringify({
     results,
     modes: { caseSensitiveCount, wholeWordCount, regexCount },
@@ -453,6 +505,13 @@ try {
     savePreservation,
     enterApplyBehavior,
     directTemplateBehavior,
+    barEditorUndoBehavior: {
+      undoScript,
+      undoStart,
+      undoName,
+      persistedAfterDraftUndo,
+      historyAfterBarSwitch,
+    },
   }, null, 2));
 } finally {
   await browser.close();

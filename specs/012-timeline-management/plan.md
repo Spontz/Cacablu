@@ -89,6 +89,8 @@ tests/
 5. Keep the Bar Editor renderer keyed by project session and selection signature; republishing the same selected id after Apply does not dispose/recreate Monaco.
 6. Route Enter from single-line inputs to the same Apply callback, while excluding Monaco targets so multiline script editing remains native.
 7. Fetch `<barType>/<barType>.template` from the canonical raw Dungeon path in parallel with optional GitHub directory discovery and merge successful remote results with user-saved browser templates.
+8. Capture complete Bar Editor draft snapshots after each user-visible control or Monaco mutation. A root capture-phase `Ctrl/Cmd+Z` handler restores snapshots in chronological order, Apply preserves the stack, and selection-driven rerender naturally disposes the session history.
+9. Keep draft Undo separate from persistence Undo: restoring a draft after Apply makes it editable again but never performs an implicit database write or Phoenix sync; the user explicitly applies the restored draft to persist it.
 
 ## Phase 0: Research
 
@@ -122,3 +124,5 @@ Post-design constitution check remains PASS.
 ### Focused Browser Validation
 
 `scripts/playwright-timeline-bar-drag-editor-check.mjs` exercises ordinary drag selection, live editor-time previews, Shift time locking, empty-space deselection, both resize edges, non-selectable labels, and Shift-click add/remove/clear transitions against real DOM pointer behavior.
+
+`scripts/playwright-monaco-find-check.mjs` additionally verifies unified Bar Editor Undo across applied name, time, and script changes and proves that switching to another bar creates a fresh history session.

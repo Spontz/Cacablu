@@ -143,6 +143,9 @@
 - [x] T071 Load canonical raw script templates directly and keep them usable when GitHub directory discovery fails, without adding a repository fallback.
 - [x] T072 Add a real-browser regression for drag selection, live editor timing, Shift time lock, deselection, both resize edges, text selection, and Shift-click add/remove/clear.
 - [x] T073 Run typecheck, changed-file lint, the focused browser regression, and the complete 240-test unit suite.
+- [x] T074 Add unified draft snapshots for every single-bar script, input, select, template, and time-wheel mutation.
+- [x] T075 Route Bar Editor `Ctrl/Cmd+Z` through chronological local history, preserve it across Apply, and reset it on bar/session change.
+- [x] T076 Extend real-browser coverage with applied name, time, and script Undo plus history reset after selecting another bar.
 
 ## Dependencies & Execution Order
 

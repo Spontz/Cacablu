@@ -56,6 +56,8 @@ As a user, I want to select a bar on the Timeline and edit its section script an
 12. **Given** a selected section remains selected, **When** its script or other properties are applied, **Then** Cacablu keeps the existing Monaco editor instance instead of reloading the text editors, preserving editor focus, view state, and Undo context.
 13. **Given** a bar type has a script template at the canonical Dungeon raw route, **When** Bar Editor loads templates for that type, **Then** Cacablu downloads and offers that remote template directly.
 14. **Given** the GitHub directory-list API is unavailable but the canonical raw template route succeeds, **When** templates are requested, **Then** the directly downloaded template remains usable without a repository-bundled fallback.
+15. **Given** the user changes any combination of script, text, numeric, template, or blend fields and optionally applies those edits, **When** `Ctrl/Cmd+Z` is pressed without selecting another bar, **Then** Bar Editor restores each prior draft state in reverse order across field boundaries and Apply does not erase that history.
+16. **Given** Bar Editor has session Undo history for one bar, **When** the user selects a different bar, **Then** the previous editor session and its local draft history are discarded and Undo cannot leak values into the newly selected bar.
 
 ---
 
@@ -218,6 +220,10 @@ As a user, I want unused timeline rows to behave as available layers so that I c
 - **FR-050**: Applying a section while its selection and project session remain unchanged MUST NOT recreate or reload the Monaco editor or unrelated text editors.
 - **FR-051**: Bar Editor MUST attempt the canonical remote raw template path for `<barType>/<barType>.template` and MAY merge additional templates discovered through the GitHub contents API.
 - **FR-052**: Remote template loading MUST NOT depend on a checked-in fallback template; a successful canonical raw response MUST remain usable if directory discovery fails.
+- **FR-053**: A single-bar Bar Editor session MUST maintain one chronological draft Undo history covering the Monaco script, text and numeric inputs, type/template inputs, blend selectors, and wheel-based time edits.
+- **FR-054**: Applying or saving the current bar MUST NOT clear its local draft Undo history; undoing after Apply restores the prior draft and requires a subsequent Apply to persist that restored draft, matching normal editor save semantics.
+- **FR-055**: Local Bar Editor Undo MUST be scoped to the current selection session and MUST be discarded when the selected bar or project session changes.
+- **FR-056**: While local Bar Editor history is available, `Ctrl/Cmd+Z` anywhere inside that editor MUST use the unified history instead of allowing separate controls to produce inconsistent per-field ordering.
 
 ### Key Entities *(include if feature involves data)*
 
@@ -251,6 +257,7 @@ As a user, I want unused timeline rows to behave as available layers so that I c
 - **SC-015**: Browser automation proves Shift-click add/remove/clear selection, Shift-drag time locking, empty-space deselection, live Bar Editor timing, start/end resize, and non-selectable labels in one real pointer workflow.
 - **SC-016**: Browser automation proves Enter applies from single-line inputs while plain Monaco Enter inserts a newline, and applying without changing selection leaves the same editor surface active.
 - **SC-017**: Template-loading validation proves the canonical raw route can populate the editor even when directory discovery fails and no repository fallback exists.
+- **SC-018**: Browser automation edits and applies name, time, and script in sequence, undoes them across control boundaries, proves the persisted bar remains unchanged until Apply, and confirms selecting another bar resets the local history.
 
 ## Assumptions
 
