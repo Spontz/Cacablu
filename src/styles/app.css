@@ -1046,6 +1046,20 @@ body > .context-view {
   color: #8d98a8;
 }
 
+.events-listbox__item {
+  cursor: default;
+}
+
+.events-listbox__item.is-selected {
+  border-color: rgba(113, 199, 255, 0.82);
+  background: rgba(36, 91, 128, 0.52);
+}
+
+.events-listbox__item:focus-visible {
+  outline: 1px solid #71c7ff;
+  outline-offset: -1px;
+}
+
 .events-listbox__severity {
   justify-self: start;
   min-width: 64px;

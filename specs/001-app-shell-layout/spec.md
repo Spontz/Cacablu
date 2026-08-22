@@ -126,6 +126,37 @@ As a user, I want the Preview panel to show Phoenix video and audio without extr
 
 ---
 
+### User Story 6 - Copy An Event Description (Priority: P2)
+
+As a user investigating diagnostics, I want to select an event and copy its
+description from the Edit menu so that I can paste the exact message into an
+issue, chat, or external diagnostic tool.
+
+**Why this priority**: Events are actionable diagnostics, and transferring an
+exact message avoids transcription mistakes during debugging.
+
+**Independent Test**: Open Events, select one event, invoke `Edit > Copy`, and
+paste into a plain-text destination; verify that the pasted value exactly
+matches the selected event description.
+
+**Acceptance Scenarios**:
+
+1. **Given** Events is active and no event is selected, **When** the Edit menu
+   opens, **Then** Copy is disabled.
+2. **Given** an event is selected, **When** the Edit menu opens, **Then** Copy
+   is enabled and the selected row remains visibly identifiable.
+3. **Given** an event is selected, **When** the user invokes `Edit > Copy`,
+   **Then** the clipboard receives exactly that event's description as plain
+   text rather than content from a previously focused editor.
+4. **Given** an event is selected and no text range is highlighted, **When**
+   the user invokes the platform copy shortcut, **Then** the clipboard receives
+   the same event description.
+5. **Given** the user manually highlights part of an event description,
+   **When** the platform copy shortcut is invoked, **Then** the browser copies
+   only the highlighted text range.
+
+---
+
 ### Edge Cases
 
 - What happens when the app loads before any connection to the local visuals
@@ -141,6 +172,10 @@ As a user, I want the Preview panel to show Phoenix video and audio without extr
   initialized?
 - What happens when the browser lacks a future optional performance API while
   still being within the supported modern browser set?
+- What happens to Events Copy when filtering, clearing, or runtime updates
+  remove the selected event?
+- How does event selection avoid replacing a manually highlighted text range
+  with the whole diagnostic message during native copy?
 
 ## Requirements *(mandatory)*
 
@@ -200,6 +235,10 @@ As a user, I want the Preview panel to show Phoenix video and audio without extr
 - **FR-025**: The Events panel MUST remain closable despite its custom unread
   badge tab: its tab MUST expose a close control, and `Panels > Events` MUST
   toggle the panel closed when it is already open and reopen it when closed.
+- **FR-026**: A user MUST be able to select an item in the Events panel. While
+  Events is active, `Edit > Copy` and the platform copy shortcut MUST copy the
+  selected event description as plain text. A manually highlighted text range
+  MUST continue to use the browser's native partial-text copy behavior.
 
 ### Key Entities *(include if feature involves data)*
 
@@ -220,6 +259,9 @@ As a user, I want the Preview panel to show Phoenix video and audio without extr
   messages.
 - **Preview Media Stream**: The browser media stream assembled from Phoenix
   WebRTC video and audio tracks for the Preview panel.
+- **Event Selection**: The single diagnostic event currently selected in the
+  Events panel, whose description is eligible for plain-text copy while that
+  panel remains active.
 
 ## Success Criteria *(mandatory)*
 
@@ -252,6 +294,9 @@ As a user, I want the Preview panel to show Phoenix video and audio without extr
 - **SC-013**: In manual validation, dragging each floating panel repeatedly
   toward and beyond the top of the workspace never allows it to overlap the
   menu bar, and its title bar and close control remain usable after release.
+- **SC-014**: Selecting an event visibly enables `Edit > Copy`; invoking it
+  places exactly that event's description on the system clipboard, and removing
+  the event clears the selection and disables the command.
 
 ## Assumptions
 

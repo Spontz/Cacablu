@@ -12,7 +12,9 @@ future engine integration.
 Create a static browser application shell that provides a top menu bar, a
 dockable multi-panel workspace, placeholder panels for the core tool surfaces,
 and a minimal browser-side connection layer ready for future WebSocket traffic
-with the local visuals engine.
+with the local visuals engine. The Events surface also owns a visible single
+selection and publishes its selected description to the shell so `Edit > Copy`
+and the native copy shortcut can use the correct plain-text payload.
 
 ## Technical Context
 
@@ -107,6 +109,17 @@ tests/
 organized around runtime concerns rather than feature folders so that layout,
 menus, panels, and connection logic remain easy to reason about during the first
 iterations.
+
+### Events Clipboard Refinement
+
+1. Keep the selected event id local to the mounted Events panel because it is
+   transient UI state and must be discarded when that panel closes.
+2. Notify the shell whenever the selected event or its plain-text description
+   changes so Edit menu availability follows the visible selection.
+3. Route `Edit > Copy` to the selected event before considering a previously
+   focused text editor, then write only the event description as `text/plain`.
+4. Preserve native partial-text copy when the browser has a non-collapsed text
+   selection, and clear the clipboard selection when its event disappears.
 
 ## Complexity Tracking
 

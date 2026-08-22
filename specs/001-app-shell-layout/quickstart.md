@@ -33,6 +33,15 @@ Open the local development URL in a modern desktop browser.
    the layout; confirm the panel is repositioned below the menu bar if needed.
 7. Use the menu bar to reset the layout.
 8. Confirm the connection state is visible even without a running local engine.
+9. Open Events and confirm Copy is disabled before selecting an event.
+10. Select an event, confirm its row is visibly selected, invoke `Edit > Copy`,
+    and paste into a plain-text field; verify the exact description is pasted.
+11. With the same event selected and no highlighted text, verify the platform
+    copy shortcut produces the same plain-text value.
+12. Highlight only part of an event description and verify the copy shortcut
+    preserves the browser's partial-text copy behavior.
+13. Clear the event list and confirm the selection disappears and Copy becomes
+    disabled.
 
 ## Quality Checks
 

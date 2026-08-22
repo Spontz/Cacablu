@@ -1,6 +1,10 @@
 import { createDefaultMenuActions } from '../menu/menu-actions';
 import { createMenuBar } from '../menu/menubar';
 import { createPanelRegistry } from '../panels/panel-registry';
+import {
+  EVENT_SELECTION_CHANGED_EVENT,
+  type EventSelectionChangedDetail,
+} from '../panels/events-panel';
 import { createAppState } from '../state/app-state';
 import { createDbState } from '../state/db-state';
 import type { DbSnapshot } from '../state/db-state';
@@ -45,7 +49,7 @@ import { createProjectSyncCoordinator } from '../services/project-sync-coordinat
 import { graphicsConfigFromProject } from '../services/graphics-config';
 import { hasNewSectionErrors, shouldDeferEventsOpen, shouldOpenEventsForNewError } from './event-notifications';
 import { createAssetClipboard } from '../resources/asset-clipboard';
-import { isNativeTextWriteInProgress } from '../resources/system-clipboard';
+import { isNativeTextWriteInProgress, writeSystemClipboardText } from '../resources/system-clipboard';
 import {
   createBarClipboardEnvelope,
   createPoolClipboardEnvelope,
@@ -121,6 +125,7 @@ export function createAppShell(root: HTMLElement): AppShell {
   let lastTimelinePasteLayer = state.getSnapshot().timelinePasteLayer;
   let lastTextEditingTarget: HTMLElement | null = null;
   let timelineBarClipboard: BarClipboardEnvelope | null = null;
+  let selectedEventText: string | null = null;
   const projectSyncCoordinator = createProjectSyncCoordinator<DbSession>(
     async (openedSession, signal) => {
       await syncOpenedProjectPool(openedSession, { signal, forceSections: true });
@@ -255,6 +260,17 @@ export function createAppShell(root: HTMLElement): AppShell {
   }
 
   function runClipboardCommand(command: 'cut' | 'copy' | 'paste', fromMenu = false): void {
+    if (fromMenu && command === 'copy' && state.getSnapshot().activePanelId === 'events') {
+      if (selectedEventText === null) return;
+      void writeSystemClipboardText(selectedEventText).catch((error) => {
+        state.addEvent({
+          severity: 'error',
+          source: 'Events clipboard',
+          description: error instanceof Error ? error.message : 'Could not copy the selected event.',
+        });
+      });
+      return;
+    }
     if (fromMenu && state.getSnapshot().activePanelId !== 'resources' && lastTextEditingTarget?.isConnected) {
       lastTextEditingTarget.focus();
       runEditCommand(command);
@@ -702,6 +718,14 @@ export function createAppShell(root: HTMLElement): AppShell {
         }
       });
 
+      window.addEventListener(EVENT_SELECTION_CHANGED_EVENT, (event) => {
+        const detail = event instanceof CustomEvent
+          ? event.detail as EventSelectionChangedDetail | undefined
+          : undefined;
+        selectedEventText = typeof detail?.text === 'string' ? detail.text : null;
+        syncMenuDisabled(dbState.getSnapshot());
+      });
+
       const handleNativeCopyOrCut = (event: ClipboardEvent) => {
         // Publishing a Pool path uses an internal copy event. It must not turn
         // an already captured Cut operation back into Copy.
@@ -709,6 +733,18 @@ export function createAppShell(root: HTMLElement): AppShell {
         if (isTextEditingTarget(event.target)) {
           assetClipboard.clear();
           timelineBarClipboard = null;
+          return;
+        }
+        if (
+          event.type === 'copy'
+          && state.getSnapshot().activePanelId === 'events'
+          && selectedEventText !== null
+        ) {
+          const selection = window.getSelection();
+          if (selection && !selection.isCollapsed && selection.toString() !== '') return;
+          if (!event.clipboardData) return;
+          event.clipboardData.setData('text/plain', selectedEventText);
+          event.preventDefault();
           return;
         }
         if (event.type === 'copy') {
@@ -1099,6 +1135,9 @@ export function createAppShell(root: HTMLElement): AppShell {
       }
       if (state.getSnapshot().activePanelId === 'timeline' && action.id === 'edit-copy') {
         return { ...action, disabled: getSelectedBarIds().length === 0 };
+      }
+      if (state.getSnapshot().activePanelId === 'events' && action.id === 'edit-copy') {
+        return { ...action, disabled: selectedEventText === null };
       }
       if (state.getSnapshot().activePanelId === 'timeline' && action.id === 'edit-paste') {
         return { ...action, disabled: !hasFile || state.getSnapshot().timelinePasteLayer === null };

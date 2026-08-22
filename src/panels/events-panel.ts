@@ -4,12 +4,20 @@ import type { AppEvent } from '../app/types';
 import type { AppState } from '../state/app-state';
 import { createContentRenderer } from './base-panel';
 
+export const EVENT_SELECTION_CHANGED_EVENT = 'cacablu:event-selection-changed';
+
+export interface EventSelectionChangedDetail {
+  eventId: string | null;
+  text: string | null;
+}
+
 export function createEventsPanel(state: AppState): IContentRenderer {
   return createContentRenderer((element) => {
     element.className = 'events-panel';
 
     let events: AppEvent[] = [];
     let query = '';
+    let selectedEventId: string | null = null;
 
     const toolbar = document.createElement('div');
     toolbar.className = 'events-panel__toolbar';
@@ -45,6 +53,10 @@ export function createEventsPanel(state: AppState): IContentRenderer {
     function render(): void {
       const snapshot = state.getSnapshot();
       events = snapshot.events;
+      if (selectedEventId !== null && !events.some((event) => event.id === selectedEventId)) {
+        selectedEventId = null;
+        publishSelection(null);
+      }
       clearAll.disabled = events.length === 0;
       renderList();
     }
@@ -64,15 +76,58 @@ export function createEventsPanel(state: AppState): IContentRenderer {
       }
 
       for (let index = 0; index < filteredEvents.length; index += 1) {
-        const item = createEventItem(filteredEvents[index], index, filteredEvents.length, state);
+        const event = filteredEvents[index];
+        const item = createEventItem(
+          event,
+          index,
+          filteredEvents.length,
+          state,
+          event.id === selectedEventId,
+          event.id === selectedEventId || (selectedEventId === null && index === 0),
+          () => selectEvent(event),
+        );
         list.append(item);
       }
+    }
+
+    function selectEvent(event: AppEvent): void {
+      selectedEventId = event.id;
+      if (state.getSnapshot().activePanelId !== 'events') {
+        state.setActivePanel('events');
+      } else {
+        for (const item of list.querySelectorAll<HTMLElement>('.events-listbox__item')) {
+          const selected = item.dataset.eventId === event.id;
+          item.classList.toggle('is-selected', selected);
+          item.setAttribute('aria-selected', String(selected));
+          item.tabIndex = selected ? 0 : -1;
+        }
+      }
+      publishSelection(event);
+      const selectedItem = Array.from(list.querySelectorAll<HTMLElement>('.events-listbox__item'))
+        .find((item) => item.dataset.eventId === event.id);
+      const textSelection = window.getSelection();
+      if (!textSelection || textSelection.isCollapsed) {
+        selectedItem?.focus({ preventScroll: true });
+      }
+    }
+
+    function publishSelection(event: AppEvent | null): void {
+      window.dispatchEvent(new CustomEvent<EventSelectionChangedDetail>(EVENT_SELECTION_CHANGED_EVENT, {
+        detail: {
+          eventId: event?.id ?? null,
+          text: event?.description ?? null,
+        },
+      }));
     }
 
     render();
     element.replaceChildren(toolbar, list);
 
-    state.subscribe(render);
+    const unsubscribe = state.subscribe(render);
+    return () => {
+      unsubscribe();
+      publishSelection(null);
+    };
   });
 }
 
@@ -86,14 +141,31 @@ function filterEvents(events: AppEvent[], query: string): AppEvent[] {
   ].join(' ').toLowerCase().includes(query));
 }
 
-function createEventItem(event: AppEvent, index: number, total: number, state: AppState): HTMLElement {
+function createEventItem(
+  event: AppEvent,
+  index: number,
+  total: number,
+  state: AppState,
+  selected: boolean,
+  tabbable: boolean,
+  onSelect: () => void,
+): HTMLElement {
   const item = document.createElement('div');
   item.className = 'events-listbox__item';
+  item.classList.toggle('is-selected', selected);
+  item.dataset.eventId = event.id;
   item.dataset.severity = event.severity;
   item.setAttribute('role', 'option');
-  item.setAttribute('aria-selected', 'false');
+  item.setAttribute('aria-selected', String(selected));
   item.setAttribute('aria-posinset', String(index + 1));
   item.setAttribute('aria-setsize', String(total));
+  item.tabIndex = tabbable ? 0 : -1;
+  item.addEventListener('click', onSelect);
+  item.addEventListener('keydown', (keyboardEvent) => {
+    if (keyboardEvent.key !== 'Enter' && keyboardEvent.key !== ' ') return;
+    keyboardEvent.preventDefault();
+    onSelect();
+  });
 
   const problemBarId = inferProblemBarId(event);
   const severity = problemBarId === null ? document.createElement('span') : document.createElement('button');
@@ -106,6 +178,7 @@ function createEventItem(event: AppEvent, index: number, total: number, state: A
     severity.addEventListener('click', (clickEvent) => {
       clickEvent.preventDefault();
       clickEvent.stopPropagation();
+      onSelect();
       window.dispatchEvent(new CustomEvent('cacablu:open-timeline'));
       state.setResourceSelection({ kind: 'bar', id: problemBarId });
       requestAnimationFrame(() => {
