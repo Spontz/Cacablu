@@ -21,8 +21,8 @@ import './monaco-find';
 
 const TEMPLATE_STORAGE_KEY = 'cacablu.sectionEditor.templates';
 const BAR_TYPE_STORAGE_KEY = 'cacablu.sectionEditor.barTypes';
-const CODE_TEMPLATE_BASE_API_URL = 'https://api.github.com/repos/Spontz/Dungeon/contents/Engines/Phoenix/CodeTemplates';
-const CODE_TEMPLATE_RAW_BASE_URL = 'https://raw.githubusercontent.com/Spontz/Dungeon/master/Engines/Phoenix/CodeTemplates';
+const CODE_TEMPLATE_BASE_API_URL = 'https://api.github.com/repos/Spontz/Phoenix/contents/Launcher/CodeTemplates';
+const CODE_TEMPLATE_RAW_BASE_URL = 'https://raw.githubusercontent.com/Spontz/Phoenix/master/Launcher/CodeTemplates';
 const BAR_TYPE_SOURCE_URL = `${CODE_TEMPLATE_BASE_API_URL}?ref=master`;
 
 const BLEND_OPTIONS = [

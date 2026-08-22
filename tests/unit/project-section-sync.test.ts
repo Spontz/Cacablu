@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   collectPhoenixSections,
-  isSupportedPhoenixSectionType,
   normalizeSectionSyncProgress,
   syncProjectBarsToPhoenix,
 } from '../../src/services/project-section-sync';
@@ -64,42 +63,28 @@ describe('project section sync', () => {
     expect(new TextDecoder().decode(Uint8Array.from(atob(section.scriptBase64), (char) => char.charCodeAt(0)))).toBe('param value');
   });
 
-  it('collects unsupported section types without fallback mappings', () => {
-    expect(isSupportedPhoenixSectionType('drawImage')).toBe(true);
-    expect(isSupportedPhoenixSectionType('setExpression')).toBe(true);
-    expect(isSupportedPhoenixSectionType('')).toBe(false);
-    expect(isSupportedPhoenixSectionType('section')).toBe(false);
-    expect(isSupportedPhoenixSectionType('setVariable')).toBe(false);
+  it('passes every non-empty section type through to Phoenix without a local allowlist', () => {
     const result = collectPhoenixSections({
       bars: [
         { ...makeDb().bars[0], id: 16, type: 'drawImage' },
-        { ...makeDb().bars[0], id: 17, type: 'section' },
-        { ...makeDb().bars[0], id: 18, type: 'setVariable' },
+        { ...makeDb().bars[0], id: 17, type: 'compute3D' },
+        { ...makeDb().bars[0], id: 18, type: ' customSection ' },
       ],
     });
 
-    expect(result.sections.map((section) => section.id)).toEqual(['16']);
-    expect(result.issues).toEqual([
-      {
-        barId: 17,
-        sectionType: 'section',
-        description: 'Bar 17 was not sent to Phoenix because "section" is not a supported Phoenix section type.',
-        kind: 'unsupported-type',
-      },
-      {
-        barId: 18,
-        sectionType: 'setVariable',
-        description: 'Bar 18 was not sent to Phoenix because "setVariable" is not a supported Phoenix section type.',
-        kind: 'unsupported-type',
-      },
+    expect(result.sections.map((section) => [section.id, section.type])).toEqual([
+      ['16', 'drawImage'],
+      ['17', 'compute3D'],
+      ['18', 'customSection'],
     ]);
+    expect(result.issues).toEqual([]);
   });
 
-  it('omits disabled bars and ignores unsupported disabled types', () => {
+  it('omits disabled bars regardless of their section type', () => {
     const result = collectPhoenixSections({
       bars: [
         { ...makeDb().bars[0], id: 16, type: 'drawImage', enabled: false },
-        { ...makeDb().bars[0], id: 17, type: 'setVariable', enabled: false },
+        { ...makeDb().bars[0], id: 17, type: 'customSection', enabled: false },
         { ...makeDb().bars[0], id: 18, type: 'drawImage', enabled: true },
       ],
     });
@@ -298,7 +283,7 @@ describe('project section sync', () => {
     const result = await syncProjectBarsToPhoenix({
       bars: [
         { ...makeDb().bars[0], id: 17, type: 'drawImage' },
-        { ...makeDb().bars[0], id: 165, type: 'setVariable' },
+        { ...makeDb().bars[0], id: 165, type: '   ' },
       ],
     }, {
       fetchManifest: vi.fn().mockResolvedValue({ root: 'phoenix-engine', entries: [] }),
@@ -308,7 +293,7 @@ describe('project section sync', () => {
     expect(replaceAll).toHaveBeenCalledWith([expect.objectContaining({ id: '17', type: 'drawImage' })], undefined, expect.stringMatching(/^sections-/));
     expect(result.valid).toBe(1);
     expect(result.invalid).toBe(1);
-    expect(result.issues[0]).toMatchObject({ barId: 165, sectionType: 'setVariable' });
+    expect(result.issues[0]).toMatchObject({ barId: 165, sectionType: '', kind: 'invalid-payload' });
   });
 
   it('rounds the attached project timing residue to zero and sends both sections', async () => {

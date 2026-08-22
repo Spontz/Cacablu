@@ -54,10 +54,12 @@ As a user, I want to select a bar on the Timeline and edit its section script an
 10. **Given** focus is in any single-line Bar Editor text or numeric field, **When** the user presses Enter, **Then** Cacablu applies the form exactly as if the primary OK/Apply button had been pressed.
 11. **Given** focus is in the Monaco section-script editor, **When** the user presses Enter without the Apply modifier, **Then** Monaco inserts a newline and Cacablu does not apply the form.
 12. **Given** a selected section remains selected, **When** its script or other properties are applied, **Then** Cacablu keeps the existing Monaco editor instance instead of reloading the text editors, preserving editor focus, view state, and Undo context.
-13. **Given** a bar type has a script template at the canonical Dungeon raw route, **When** Bar Editor loads templates for that type, **Then** Cacablu downloads and offers that remote template directly.
+13. **Given** a bar type has a script template at the canonical `Spontz/Phoenix/Launcher/CodeTemplates` raw route, **When** Bar Editor loads templates for that type, **Then** Cacablu downloads and offers that remote template directly.
 14. **Given** the GitHub directory-list API is unavailable but the canonical raw template route succeeds, **When** templates are requested, **Then** the directly downloaded template remains usable without a repository-bundled fallback.
-15. **Given** the user changes any combination of script, text, numeric, template, or blend fields and optionally applies those edits, **When** `Ctrl/Cmd+Z` is pressed without selecting another bar, **Then** Bar Editor restores each prior draft state in reverse order across field boundaries and Apply does not erase that history.
-16. **Given** Bar Editor has session Undo history for one bar, **When** the user selects a different bar, **Then** the previous editor session and its local draft history are discarded and Undo cannot leak values into the newly selected bar.
+15. **Given** Cacablu successfully downloads remote templates for a bar type, **When** the responses are complete, **Then** Cacablu stores their template metadata and content in browser `sessionStorage` for the current tab session.
+16. **Given** templates were cached earlier in the current tab session, **When** their GitHub requests fail or the browser is offline, **Then** Bar Editor offers the cached templates for that bar type without requiring a repository-bundled fallback.
+17. **Given** the user changes any combination of script, text, numeric, template, or blend fields and optionally applies those edits, **When** `Ctrl/Cmd+Z` is pressed without selecting another bar, **Then** Bar Editor restores each prior draft state in reverse order across field boundaries and Apply does not erase that history.
+18. **Given** Bar Editor has session Undo history for one bar, **When** the user selects a different bar, **Then** the previous editor session and its local draft history are discarded and Undo cannot leak values into the newly selected bar.
 
 ---
 
@@ -156,6 +158,7 @@ As a user, I want unused timeline rows to behave as available layers so that I c
 - What happens when a save fails after timeline edits have been applied in memory?
 - What happens when Bar Editor is opened without a project or without a selected bar?
 - What happens when a stored blend equation uses a legacy OpenGL-style value?
+- What happens when cached remote template data is malformed or `sessionStorage` is unavailable?
 
 ## Requirements *(mandatory)*
 
@@ -224,6 +227,9 @@ As a user, I want unused timeline rows to behave as available layers so that I c
 - **FR-054**: Applying or saving the current bar MUST NOT clear its local draft Undo history; undoing after Apply restores the prior draft and requires a subsequent Apply to persist that restored draft, matching normal editor save semantics.
 - **FR-055**: Local Bar Editor Undo MUST be scoped to the current selection session and MUST be discarded when the selected bar or project session changes.
 - **FR-056**: While local Bar Editor history is available, `Ctrl/Cmd+Z` anywhere inside that editor MUST use the unified history instead of allowing separate controls to produce inconsistent per-field ordering.
+- **FR-057**: After successfully downloading remote template metadata and content from `Spontz/Phoenix/Launcher/CodeTemplates`, Bar Editor MUST cache the successful result in browser `sessionStorage`, keyed so templates can be recovered for the requested bar type without collisions.
+- **FR-058**: If GitHub directory discovery, template discovery, or template-content retrieval fails, Bar Editor MUST use valid remote templates cached for that bar type in the current browser tab session; a successful fresh response MUST replace the corresponding cached value.
+- **FR-059**: Missing, malformed, stale, or inaccessible `sessionStorage` data MUST NOT prevent fresh remote template loading or normal Bar Editor use, and remote template cache entries MUST NOT be treated as user-saved templates or persist beyond the browser session.
 
 ### Key Entities *(include if feature involves data)*
 
@@ -235,6 +241,7 @@ As a user, I want unused timeline rows to behave as available layers so that I c
 - **Section Sync Request**: A debounced request that serializes all current project bars and asks Phoenix to align runtime sections.
 - **Timeline Sync Event**: A non-blocking Event row that reports validation or Phoenix section sync failures when a network sync was actually attempted.
 - **Section Error State**: The tracked set of bar ids whose latest Phoenix section sync or asset impact response failed or deactivated runtime execution.
+- **Remote Template Session Cache**: A per-tab `sessionStorage` copy of successfully downloaded GitHub template metadata and content, partitioned by bar type and used only when a later remote request fails.
 
 ## Success Criteria *(mandatory)*
 
@@ -258,6 +265,7 @@ As a user, I want unused timeline rows to behave as available layers so that I c
 - **SC-016**: Browser automation proves Enter applies from single-line inputs while plain Monaco Enter inserts a newline, and applying without changing selection leaves the same editor surface active.
 - **SC-017**: Template-loading validation proves the canonical raw route can populate the editor even when directory discovery fails and no repository fallback exists.
 - **SC-018**: Browser automation edits and applies name, time, and script in sequence, undoes them across control boundaries, proves the persisted bar remains unchanged until Apply, and confirms selecting another bar resets the local history.
+- **SC-019**: Browser validation loads a remote template once, makes GitHub unavailable in the same tab session, and confirms the identical cached template remains selectable with its complete content.
 
 ## Assumptions
 

@@ -22,6 +22,12 @@ import {
   getTransportBeginningTime,
   wrapTimeWithinLoop,
 } from '../services/timeline-loop-markers';
+import {
+  buildTimelineEdgeResizePlacements,
+  hasTimelineResizeOverlap,
+  isValidTimelineResizePlacementSet,
+  resolveTimelineMarkerSnap,
+} from '../services/timeline-marker-snap';
 import type { BarClipboardPayload } from '../services/cross-project-clipboard';
 import {
   assertPastedBarsUnchanged,
@@ -66,11 +72,13 @@ interface BarResizeState {
   barId: number;
   edge: 'start' | 'end';
   startClientX: number;
+  lastClientX: number;
   originStart: number;
   originEnd: number;
-  layer: number;
-  currentStart: number;
-  currentEnd: number;
+  originals: Array<{ id: number; startTime: number; endTime: number; layer: number }>;
+  currentPlacements: Array<{ id: number; startTime: number; endTime: number; layer: number }>;
+  snapEnabled: boolean;
+  snapMarkerId: number | null;
   toggleSelection: boolean;
   hasMoved: boolean;
   blocked: boolean;
@@ -518,6 +526,10 @@ export function createTimelinePanel(
     ));
   }
 
+  function wouldResizeSetOverlap(nextBars: Array<{ id: number; layer: number; startTime: number; endTime: number }>): boolean {
+    return hasTimelineResizeOverlap(nextBars, sessionRef.current?.data.bars ?? []);
+  }
+
   function hasValidGroupLayers(nextBars: Array<{ layer: number }>): boolean {
     const layers = new Set(state.tracks.map((track) => getLayerFromTrackId(track.id)));
     return nextBars.every((bar) => layers.has(bar.layer));
@@ -537,10 +549,12 @@ export function createTimelinePanel(
   }
 
   function applyResizePreview(next: BarResizeState): void {
-    const clip = findClipForBar(next.barId);
-    if (!clip) return;
-    clip.start = next.currentStart;
-    clip.end = next.currentEnd;
+    for (const placement of next.currentPlacements) {
+      const clip = findClipForBar(placement.id);
+      if (!clip) continue;
+      clip.start = placement.startTime;
+      clip.end = placement.endTime;
+    }
   }
 
   function notifyBarPlacementPreview(bars: BarPlacementPreview[]): void {
@@ -764,13 +778,63 @@ export function createTimelinePanel(
   }
 
   function commitBarResize(next: BarResizeState): boolean {
-    return commitBarPlacementChange(
-      next.barId,
-      next.currentStart,
-      next.currentEnd,
-      next.layer,
-      'Resize',
-    );
+    if (next.blocked || next.currentPlacements.length !== next.originals.length) return false;
+    const bars = next.currentPlacements
+      .map((placement) => findBar(placement.id))
+      .filter((bar): bar is DbBar => Boolean(bar));
+    if (bars.length !== next.currentPlacements.length || bars.length === 0) return false;
+    if (wouldResizeSetOverlap(next.currentPlacements)) return false;
+
+    const changed = next.currentPlacements.some((placement) => {
+      const original = next.originals.find((candidate) => candidate.id === placement.id);
+      return Boolean(original && (
+        original.startTime !== placement.startTime || original.endTime !== placement.endTime
+      ));
+    });
+    if (!changed) return false;
+
+    const previous = next.originals.map((original) => ({ ...original }));
+    const resizedIds = previous.map((bar) => bar.id);
+    for (const placement of next.currentPlacements) {
+      const bar = findBar(placement.id);
+      if (bar) applyBarPlacement(bar, placement.startTime, placement.endTime, placement.layer);
+    }
+    const selection = resizedIds.length === 1
+      ? { kind: 'bar' as const, id: resizedIds[0] }
+      : { kind: 'bars' as const, ids: resizedIds };
+    appState.setResourceSelection(selection);
+    if (!suppressUndoRegistration) {
+      undoManager.push({
+        label: resizedIds.length === 1 ? `Resize bar ${resizedIds[0]}` : `Resize ${resizedIds.length} bars`,
+        undo: async () => {
+          if (wouldResizeSetOverlap(previous)) {
+            appState.addEvent({
+              severity: 'warning',
+              source: 'Timeline undo',
+              description: `Could not undo resize for ${resizedIds.length} bar(s) because the original range is occupied.`,
+            });
+            return;
+          }
+
+          suppressUndoRegistration = true;
+          try {
+            for (const original of previous) {
+              const bar = findBar(original.id);
+              if (bar) applyBarPlacement(bar, original.startTime, original.endTime, original.layer);
+            }
+          } finally {
+            suppressUndoRegistration = false;
+          }
+          appState.setResourceSelection(selection);
+          loadFromDb({ preserveTransport: true });
+          renderTimeline?.(true);
+          notifyBarPlacementPreview(previous);
+          scheduleMovedBarsSync(resizedIds, MOVE_SYNC_DELAY_MS);
+        },
+      });
+    }
+    scheduleMovedBarsSync(resizedIds, MOVE_SYNC_DELAY_MS);
+    return true;
   }
 
   function commitBarPlacementChange(
@@ -1163,7 +1227,8 @@ export function createTimelinePanel(
                   const isEnabled = marker.enabled !== false;
                   const isSelected = selectedMarkerId === marker.id;
                   const isDragging = markerDragState?.markerId === marker.id;
-                  return `<button type="button" class="timeline-panel__loop-marker ${isEnabled ? '' : 'is-disabled'} ${isSelected ? 'is-selected' : ''} ${isDragging ? 'is-dragging' : ''}" data-marker-id="${marker.id}" style="left:${left}px" title="${escapeHtml(title)}" aria-label="${escapeHtml(title)}">${label ? `<span>${escapeHtml(label)}</span>` : ''}</button>`;
+                  const isSnapTarget = resizeState?.snapMarkerId === marker.id;
+                  return `<button type="button" class="timeline-panel__loop-marker ${isEnabled ? '' : 'is-disabled'} ${isSelected ? 'is-selected' : ''} ${isDragging ? 'is-dragging' : ''} ${isSnapTarget ? 'is-snap-target' : ''}" data-marker-id="${marker.id}" style="left:${left}px" title="${escapeHtml(title)}" aria-label="${escapeHtml(title)}">${label ? `<span>${escapeHtml(label)}</span>` : ''}</button>`;
                 }).join('')}
               </div>
 
@@ -1176,7 +1241,8 @@ export function createTimelinePanel(
                   const left = marker.time * effectivePixelsPerSecond;
                   const isEnabled = marker.enabled !== false;
                   const isSelected = selectedMarkerId === marker.id;
-                  return `<span class="timeline-panel__loop-guide ${isEnabled ? '' : 'is-disabled'} ${isSelected ? 'is-selected' : ''}" data-marker-guide-id="${marker.id}" style="left:${left}px"></span>`;
+                  const isSnapTarget = resizeState?.snapMarkerId === marker.id;
+                  return `<span class="timeline-panel__loop-guide ${isEnabled ? '' : 'is-disabled'} ${isSelected ? 'is-selected' : ''} ${isSnapTarget ? 'is-snap-target' : ''}" data-marker-guide-id="${marker.id}" style="left:${left}px"></span>`;
                 }).join('')}
               </div>
 
@@ -1220,12 +1286,14 @@ export function createTimelinePanel(
                               !hasError &&
                               state.transport.currentTime >= clip.start &&
                               state.transport.currentTime < clip.end;
-                            const isDragging = dbId !== null && (dragState?.barId === dbId || resizeState?.barId === dbId || groupDragState?.barIds.includes(dbId));
+                            const isResizing = dbId !== null && Boolean(resizeState?.originals.some((bar) => bar.id === dbId));
+                            const isDragging = dbId !== null && (dragState?.barId === dbId || isResizing || groupDragState?.barIds.includes(dbId));
                             const isBlocked = isDragging && (dragState?.blocked || resizeState?.blocked || groupDragState?.blocked);
+                            const isSnapped = isResizing && resizeState?.snapMarkerId !== null;
                             const label = displayTimelineIds && dbId !== null && clip.label ? `${dbId} ${clip.label}` : clip.label;
 
                             return `
-                              <article class="timeline-panel__clip ${isActive ? 'is-active' : ''} ${isEnabled ? '' : 'is-disabled'} ${isCompact ? 'is-compact' : ''} ${isSelected ? 'is-selected' : ''} ${isBoxSelected ? 'is-box-selected' : ''} ${isMovable ? 'is-movable' : ''} ${hasError ? 'has-error' : ''} ${isDragging ? 'is-dragging' : ''} ${isBlocked ? 'is-blocked' : ''}" data-bar-id="${dbId ?? ''}" tabindex="0" style="left:${left}px;width:${width}px;border-color:${clip.color ?? CLIP_COLOR}">
+                              <article class="timeline-panel__clip ${isActive ? 'is-active' : ''} ${isEnabled ? '' : 'is-disabled'} ${isCompact ? 'is-compact' : ''} ${isSelected ? 'is-selected' : ''} ${isBoxSelected ? 'is-box-selected' : ''} ${isMovable ? 'is-movable' : ''} ${hasError ? 'has-error' : ''} ${isDragging ? 'is-dragging' : ''} ${isBlocked ? 'is-blocked' : ''} ${isSnapped ? `is-snapped is-snapped-${resizeState?.edge}` : ''}" data-bar-id="${dbId ?? ''}" tabindex="0" style="left:${left}px;width:${width}px;border-color:${clip.color ?? CLIP_COLOR}">
                                 <span class="timeline-panel__clip-resize-handle timeline-panel__clip-resize-handle--start" data-resize-edge="start" aria-hidden="true"></span>
                                 <span class="timeline-panel__clip-label">${label}</span>
                                 <span class="timeline-panel__clip-resize-handle timeline-panel__clip-resize-handle--end" data-resize-edge="end" aria-hidden="true"></span>
@@ -1545,24 +1613,39 @@ export function createTimelinePanel(
 
       const resizeEdge = interactionTarget?.closest<HTMLElement>('[data-resize-edge]')?.dataset.resizeEdge;
       if (resizeEdge === 'start' || resizeEdge === 'end') {
+        const resizingCurrentSelection = selection.kind === 'bars' && selection.ids.includes(barId);
+        const selectedBars = resizingCurrentSelection
+          ? selection.ids
+            .map((id) => findBar(id))
+            .filter((selectedBar): selectedBar is DbBar => Boolean(selectedBar))
+          : [bar];
+        const originals = selectedBars.map((selectedBar) => ({
+          id: selectedBar.id,
+          startTime: selectedBar.startTime,
+          endTime: selectedBar.endTime,
+          layer: selectedBar.layer,
+        }));
         resizeState = {
           pointerId: event.pointerId,
           barId,
           edge: resizeEdge,
           startClientX: event.clientX,
+          lastClientX: event.clientX,
           originStart: bar.startTime,
           originEnd: bar.endTime,
-          layer: bar.layer,
-          currentStart: bar.startTime,
-          currentEnd: bar.endTime,
+          originals,
+          currentPlacements: originals.map((original) => ({ ...original })),
+          snapEnabled: event.shiftKey,
+          snapMarkerId: null,
           toggleSelection: event.shiftKey,
           hasMoved: false,
           blocked: false,
         };
         element.setPointerCapture(event.pointerId);
-        if (!event.shiftKey && (selection.kind !== 'bar' || selection.id !== barId)) {
+        if (!event.shiftKey && !resizingCurrentSelection && (selection.kind !== 'bar' || selection.id !== barId)) {
           appState.setResourceSelection({ kind: 'bar', id: barId });
         }
+        if (event.shiftKey) recomputeBarResize(event.clientX, true, true);
         event.preventDefault();
         return;
       }
@@ -1741,45 +1824,69 @@ export function createTimelinePanel(
 
     function updateBarResize(event: PointerEvent): void {
       if (!resizeState) return;
-      const deltaX = event.clientX - resizeState.startClientX;
-      if (!resizeState.hasMoved && Math.abs(deltaX) < DRAG_THRESHOLD_PX) return;
+      if (recomputeBarResize(event.clientX, event.shiftKey, false)) event.preventDefault();
+    }
 
-      event.preventDefault();
+    function recomputeBarResize(clientX: number, snapEnabled: boolean, force: boolean): boolean {
+      if (!resizeState) return false;
+      const deltaX = clientX - resizeState.startClientX;
+      resizeState.lastClientX = clientX;
+      resizeState.snapEnabled = snapEnabled;
+      if (!force && !resizeState.hasMoved && Math.abs(deltaX) < DRAG_THRESHOLD_PX) return false;
+
       const effectivePixelsPerSecond = state.viewport.pixelsPerSecond * state.viewport.zoom;
-      if (!Number.isFinite(effectivePixelsPerSecond) || effectivePixelsPerSecond <= 0) return;
+      if (!Number.isFinite(effectivePixelsPerSecond) || effectivePixelsPerSecond <= 0) return false;
 
       const minimumDuration = 1 / effectivePixelsPerSecond;
-      let nextStart = resizeState.originStart;
-      let nextEnd = resizeState.originEnd;
+      const pointerEndpoint = (resizeState.edge === 'start' ? resizeState.originStart : resizeState.originEnd)
+        + deltaX / effectivePixelsPerSecond;
+      const maxTimelineTime = state.transport.duration > 0
+        ? state.transport.duration
+        : Number.POSITIVE_INFINITY;
+      const snapTarget = snapEnabled
+        ? resolveTimelineMarkerSnap(
+          sessionRef.current?.data.markers ?? [],
+          pointerEndpoint,
+          effectivePixelsPerSecond,
+          0,
+          maxTimelineTime,
+        )
+        : null;
+      resizeState.snapMarkerId = snapTarget?.id ?? null;
+
+      let endpoint: number;
       if (resizeState.edge === 'start') {
-        nextStart = Math.min(
-          Math.max(resizeState.originStart + deltaX / effectivePixelsPerSecond, 0),
-          resizeState.originEnd - minimumDuration,
-        );
+        const latestStart = Math.min(...resizeState.originals.map((bar) => bar.endTime - minimumDuration));
+        endpoint = snapTarget?.time ?? Math.min(Math.max(pointerEndpoint, 0), latestStart);
       } else {
-        nextEnd = Math.max(
-          resizeState.originEnd + deltaX / effectivePixelsPerSecond,
-          resizeState.originStart + minimumDuration,
-        );
-        if (state.transport.duration > 0) nextEnd = Math.min(nextEnd, state.transport.duration);
+        const earliestEnd = Math.max(...resizeState.originals.map((bar) => bar.startTime + minimumDuration));
+        endpoint = snapTarget?.time ?? Math.max(pointerEndpoint, earliestEnd);
+        if (state.transport.duration > 0) endpoint = Math.min(endpoint, state.transport.duration);
+      }
+
+      const nextPlacements = buildTimelineEdgeResizePlacements(resizeState.originals, resizeState.edge, endpoint);
+      const hasPointerMovement = Math.abs(deltaX) >= DRAG_THRESHOLD_PX;
+      const hasPlacementChange = nextPlacements.some((placement, index) => (
+        placement.startTime !== resizeState?.originals[index].startTime
+        || placement.endTime !== resizeState?.originals[index].endTime
+      ));
+      if (!resizeState.hasMoved && !hasPointerMovement && !hasPlacementChange) {
+        render(true);
+        return false;
       }
 
       resizeState.hasMoved = true;
-      if (wouldOverlap(resizeState.barId, resizeState.layer, nextStart, nextEnd)) {
+      if (!isValidTimelineResizePlacementSet(nextPlacements, maxTimelineTime) || wouldResizeSetOverlap(nextPlacements)) {
         resizeState.blocked = true;
         render(true);
-        return;
+        return true;
       }
-      resizeState.currentStart = nextStart;
-      resizeState.currentEnd = nextEnd;
+      resizeState.currentPlacements = nextPlacements;
       resizeState.blocked = false;
       applyResizePreview(resizeState);
-      notifyBarPlacementPreview([{
-        id: resizeState.barId,
-        startTime: nextStart,
-        endTime: nextEnd,
-      }]);
+      notifyBarPlacementPreview(nextPlacements);
       render(true);
+      return true;
     }
 
     function updateGroupDrag(event: PointerEvent): void {
@@ -1964,11 +2071,11 @@ export function createTimelinePanel(
       const committed = commitBarResize(finishedResize);
       loadFromDb({ preserveTransport: true });
       render(true);
-      notifyBarPlacementPreview([{
-        id: finishedResize.barId,
-        startTime: committed ? finishedResize.currentStart : finishedResize.originStart,
-        endTime: committed ? finishedResize.currentEnd : finishedResize.originEnd,
-      }]);
+      notifyBarPlacementPreview((committed ? finishedResize.currentPlacements : finishedResize.originals).map((bar) => ({
+        id: bar.id,
+        startTime: bar.startTime,
+        endTime: bar.endTime,
+      })));
     }
 
     function endMarkerDrag(): void {
@@ -2098,8 +2205,30 @@ export function createTimelinePanel(
     element.addEventListener('pointerdown', beginDrag);
     element.addEventListener('pointermove', updateDrag);
     element.addEventListener('pointerup', endDrag);
-    element.addEventListener('pointercancel', endDrag);
+    element.addEventListener('pointercancel', (event) => {
+      if (resizeState && event.pointerId === resizeState.pointerId) {
+        const cancelled = resizeState;
+        resizeState = null;
+        loadFromDb({ preserveTransport: true });
+        notifyBarPlacementPreview(cancelled.originals);
+        render(true);
+        return;
+      }
+      endDrag(event);
+    });
+    element.addEventListener('lostpointercapture', (event) => {
+      if (!resizeState || event.pointerId !== resizeState.pointerId) return;
+      const cancelled = resizeState;
+      resizeState = null;
+      loadFromDb({ preserveTransport: true });
+      notifyBarPlacementPreview(cancelled.originals);
+      render(true);
+    });
     element.addEventListener('keydown', (event) => {
+      if (event.key === 'Shift' && resizeState) {
+        recomputeBarResize(resizeState.lastClientX, true, true);
+        return;
+      }
       if (
         (event.key === ' ' || event.key === 'Spacebar') &&
         !event.ctrlKey &&
@@ -2118,6 +2247,11 @@ export function createTimelinePanel(
       if (deleteSelectedMarker()) {
         event.preventDefault();
         event.stopPropagation();
+      }
+    });
+    element.addEventListener('keyup', (event) => {
+      if (event.key === 'Shift' && resizeState) {
+        recomputeBarResize(resizeState.lastClientX, false, true);
       }
     });
 
@@ -2216,7 +2350,17 @@ export function createTimelinePanel(
     window.addEventListener('cacablu:timeline-clipboard-paste', handleTimelineClipboardPaste);
 
     const handleMarkersChanged = (event: Event): void => {
-      render(true);
+      if (resizeState?.snapMarkerId !== null && resizeState?.snapMarkerId !== undefined && !findMarker(resizeState.snapMarkerId)) {
+        const cancelled = resizeState;
+        resizeState = null;
+        loadFromDb({ preserveTransport: true });
+        notifyBarPlacementPreview(cancelled.originals);
+        render(true);
+      } else if (resizeState) {
+        recomputeBarResize(resizeState.lastClientX, resizeState.snapEnabled, true);
+      } else {
+        render(true);
+      }
       const detail = event instanceof CustomEvent
         ? event.detail as { reconcileActiveLoop?: unknown } | undefined
         : undefined;

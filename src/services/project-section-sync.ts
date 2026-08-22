@@ -25,14 +25,14 @@ export interface ProjectSectionSyncIssue {
   barId: number;
   sectionType: string;
   description: string;
-  kind: 'unsupported-type' | 'invalid-payload' | 'load-failed';
+  kind: 'invalid-payload' | 'load-failed';
 }
 
 export class ProjectSectionSyncError extends Error {
   readonly issues: ProjectSectionSyncIssue[];
 
   constructor(issues: ProjectSectionSyncIssue[]) {
-    super(`Unsupported Phoenix section types: ${issues.map((issue) => `bar ${issue.barId} (${issue.sectionType})`).join(', ')}`);
+    super(`Invalid Phoenix sections: ${issues.map((issue) => `bar ${issue.barId} (${issue.sectionType || 'empty type'})`).join(', ')}`);
     this.name = 'ProjectSectionSyncError';
     this.issues = issues;
   }
@@ -276,12 +276,12 @@ export function collectPhoenixSections(db: Pick<ProjectDatabase, 'bars'>): Proje
 
   for (const bar of bars) {
     const sectionType = bar.type.trim();
-    if (!isSupportedPhoenixSectionType(sectionType)) {
+    if (sectionType === '') {
       issues.push({
         barId: bar.id,
         sectionType,
-        description: `Bar ${bar.id} was not sent to Phoenix because "${sectionType}" is not a supported Phoenix section type.`,
-        kind: 'unsupported-type',
+        description: `Bar ${bar.id} was not sent to Phoenix because its section type is empty.`,
+        kind: 'invalid-payload',
       });
       continue;
     }
@@ -359,47 +359,6 @@ function compareBarsForPhoenixLoad(
     left.endTime - right.endTime ||
     left.id - right.id
   );
-}
-
-const SUPPORTED_PHOENIX_SECTION_TYPES = new Set([
-  'loading',
-  'cameraFPS',
-  'cameraTarget',
-  'light',
-  'drawScene',
-  'drawSceneMatrix',
-  'drawSceneMatrixFolder',
-  'drawSceneMatrixInstanced',
-  'drawSceneMatrixInstancedFolder',
-  'drawImage',
-  'drawSkybox',
-  'drawVideo',
-  'drawVolume',
-  'drawVolumeImage',
-  'drawQuad',
-  'drawFbo',
-  'drawFbo2',
-  'drawParticles',
-  'drawParticlesFbo',
-  'drawParticlesImage',
-  'drawParticlesScene',
-  'drawEmitterScene',
-  'drawEmitterSceneEx',
-  'drawEmitterSpline',
-  'sound',
-  'setExpression',
-  'fboBind',
-  'fboUnbind',
-  'efxAccum',
-  'efxBloom',
-  'efxBlur',
-  'efxFader',
-  'efxMotionBlur',
-  'test',
-]);
-
-export function isSupportedPhoenixSectionType(type: string): boolean {
-  return SUPPORTED_PHOENIX_SECTION_TYPES.has(type.trim());
 }
 
 async function sectionManifestMatches(
